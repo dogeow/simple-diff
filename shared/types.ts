@@ -1,0 +1,166 @@
+// ─── File Entry ───────────────────────────────────────────────
+
+export interface FileEntry {
+  readonly name: string
+  readonly path: string // relative to comparison root
+  readonly isDirectory: boolean
+  readonly size: number // bytes
+  readonly mtime: number // Unix timestamp ms
+}
+
+// ─── Source Config ────────────────────────────────────────────
+
+export type SourceType = 'local' | 'sftp'
+
+export type SourceConfig =
+  | { readonly type: 'local'; readonly path: string }
+  | { readonly type: 'sftp'; readonly configId: string; readonly path: string }
+
+// ─── SSH Config ──────────────────────────────────────────────
+
+export type SSHAuthType = 'password' | 'privateKey'
+
+/** Exposed to renderer — no secrets */
+export interface SSHConfig {
+  readonly id: string
+  readonly label: string
+  readonly host: string
+  readonly port: number
+  readonly username: string
+  readonly authType: SSHAuthType
+  readonly defaultPath?: string
+}
+
+/** Sent from renderer when saving — may include secrets */
+export interface SSHConfigInput {
+  readonly id?: string
+  readonly label: string
+  readonly host: string
+  readonly port: number
+  readonly username: string
+  readonly authType: SSHAuthType
+  readonly defaultPath?: string
+  readonly password?: string
+  readonly privateKeyPath?: string
+  readonly passphrase?: string
+}
+
+/** Main-process only — contains encrypted secrets */
+export interface SSHConfigInternal extends SSHConfig {
+  readonly password?: string
+  readonly privateKeyPath?: string
+  readonly passphrase?: string
+}
+
+// ─── Compare ─────────────────────────────────────────────────
+
+export type CompareState = 'pending' | 'comparing' | 'equal' | 'left_only' | 'right_only' | 'different'
+
+export type DiffReason =
+  | { readonly type: 'size'; readonly leftSize: number; readonly rightSize: number }
+  | { readonly type: 'mtime'; readonly leftMtime: number; readonly rightMtime: number }
+
+export type StrategyName = 'size' | 'mtime'
+
+export interface CompareEntry {
+  readonly relativePath: string
+  readonly name: string
+  readonly isDirectory: boolean
+  readonly state: CompareState
+  readonly left?: FileEntry
+  readonly right?: FileEntry
+  readonly reasons: readonly DiffReason[]
+}
+
+export interface CompareRequest {
+  readonly left: SourceConfig
+  readonly right: SourceConfig
+  readonly strategies: readonly StrategyName[]
+  readonly extensionFilter?: readonly string[]
+}
+
+export interface CompareStats {
+  readonly total: number
+  readonly equal: number
+  readonly different: number
+  readonly leftOnly: number
+  readonly rightOnly: number
+}
+
+export interface CompareResult {
+  readonly entries: readonly CompareEntry[]
+  readonly stats: CompareStats
+  readonly duration: number // ms
+  readonly leftSource?: SourceConfig
+  readonly rightSource?: SourceConfig
+}
+
+// ─── Text Diff ───────────────────────────────────────────────
+
+export interface DiffLine {
+  readonly type: 'equal' | 'add' | 'remove'
+  readonly lineNumber: number
+  readonly content: string
+}
+
+export interface TextDiffResult {
+  readonly leftLines: readonly DiffLine[]
+  readonly rightLines: readonly DiffLine[]
+}
+
+// ─── Compare History ─────────────────────────────────────────
+
+export interface CompareHistoryEntry {
+  readonly id: string
+  readonly timestamp: number
+  readonly leftLabel: string
+  readonly rightLabel: string
+  readonly leftSource: SourceConfig
+  readonly rightSource: SourceConfig
+  readonly stats: CompareStats
+}
+
+// ─── Log ─────────────────────────────────────────────────────
+
+export type LogLevel = 'info' | 'warn' | 'error'
+
+export interface LogEntry {
+  readonly timestamp: number
+  readonly level: LogLevel
+  readonly message: string
+}
+
+// ─── IPC Channels ────────────────────────────────────────────
+
+export const IPC_CHANNELS = {
+  FILE_SOURCE_LIST: 'file-source:list',
+  FILE_READ_TEXT: 'file:read-text',
+  FILE_WRITE_TEXT: 'file:write-text',
+  COMPARE_RUN: 'compare:run',
+  COMPARE_PROGRESS: 'compare:progress',
+  COMPARE_SCAN_COMPLETE: 'compare:scan-complete',
+  COMPARE_ENTRY_UPDATE: 'compare:entry-update',
+  LOG: 'app:log',
+  TEXT_DIFF: 'text:diff',
+  SSH_LIST_CONFIGS: 'ssh:list-configs',
+  SSH_SAVE_CONFIG: 'ssh:save-config',
+  SSH_DELETE_CONFIG: 'ssh:delete-config',
+  SSH_TEST: 'ssh:test',
+  SSH_BROWSE: 'ssh:browse',
+  HISTORY_LIST: 'history:list',
+  HISTORY_CLEAR: 'history:clear',
+  HISTORY_DELETE: 'history:delete',
+  DIALOG_SELECT_FOLDER: 'dialog:select-folder',
+  DIALOG_SELECT_FILE: 'dialog:select-file',
+  FILE_SHOW_IN_FOLDER: 'file:show-in-folder',
+  FILE_RENAME: 'file:rename',
+  FILE_DELETE: 'file:delete',
+} as const
+
+// ─── IPC Result Envelope ─────────────────────────────────────
+
+export interface IpcResult<T> {
+  readonly success: boolean
+  readonly data?: T
+  readonly error?: string
+}
