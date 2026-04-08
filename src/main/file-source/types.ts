@@ -18,6 +18,9 @@ export interface FileSource {
   /** Read file content as UTF-8 text */
   readText(filePath: string): Promise<string>
 
+  /** Compute a stable content hash for a file */
+  hashFile(filePath: string): Promise<string>
+
   /** Write UTF-8 text to a file */
   writeText(filePath: string, content: string): Promise<void>
 

@@ -1,6 +1,6 @@
 import { useMemo, useCallback } from 'react'
 import type { CompareEntry, CompareState } from '../../../shared/types'
-import { buildTree, getVisibleNodes, computeEffectiveDirStates } from '../utils/tree-utils'
+import { buildTree, getVisibleNodes, computeEffectiveDirStates, filterEntriesByPaths } from '../utils/tree-utils'
 import { useCompareStore, computeStats } from '../stores/compare-store'
 import CompareToolbar from './CompareToolbar'
 import TreeRow from './TreeRow'
@@ -42,7 +42,10 @@ export default function CompareTree({ entries, filter, onFilterChange, onDoubleC
   const filteredEntries = useMemo(() => {
     let result: readonly CompareEntry[] = entries
 
-    // 1. Apply hidden dot-file filter
+    // 1. Apply path filter.
+    result = filterEntriesByPaths(result, extensionFilter)
+
+    // 2. Apply hidden dot-file filter
     if (hideDot) {
       result = result.filter((e) => {
         // Check if any ancestor directory starts with '.'
@@ -58,7 +61,7 @@ export default function CompareTree({ entries, filter, onFilterChange, onDoubleC
       })
     }
 
-    // 2. Propagate effective directory states from descendants
+    // 3. Propagate effective directory states from descendants
     const effDirStates = computeEffectiveDirStates(result)
     result = result.map((e) => {
       if (!e.isDirectory) return e
@@ -67,7 +70,7 @@ export default function CompareTree({ entries, filter, onFilterChange, onDoubleC
       return e
     })
 
-    // 3. Apply state filter — keep matching entries + ancestor dirs
+    // 4. Apply state filter — keep matching entries + ancestor dirs
     if (filter !== 'all') {
       const matchesFilter = (state: CompareState) => {
         if (filter === 'different') return state === 'different' || state === 'left_only' || state === 'right_only'
@@ -89,7 +92,7 @@ export default function CompareTree({ entries, filter, onFilterChange, onDoubleC
     }
 
     return result
-  }, [entries, filter, hideDot, hideDotFilter])
+  }, [entries, extensionFilter, filter, hideDot, hideDotFilter])
 
   const tree = useMemo(() => buildTree(filteredEntries), [filteredEntries])
   const visibleNodes = useMemo(

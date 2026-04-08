@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { IPC_CHANNELS } from '../../shared/types'
 import type {
   CompareEntry,
@@ -29,14 +29,19 @@ const api = {
   runCompare: (request: CompareRequest): Promise<IpcResult<CompareResult>> =>
     ipcRenderer.invoke(IPC_CHANNELS.COMPARE_RUN, request),
 
-  onScanComplete: (callback: (entries: readonly CompareEntry[]) => void) => {
-    const listener = (_event: Electron.IpcRendererEvent, entries: readonly CompareEntry[]) => callback(entries)
+  cancelCompare: (): Promise<IpcResult<void>> =>
+    ipcRenderer.invoke(IPC_CHANNELS.COMPARE_CANCEL),
+
+  onScanComplete: (callback: (compareId: string, entries: readonly CompareEntry[]) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, compareId: string, entries: readonly CompareEntry[]) =>
+      callback(compareId, entries)
     ipcRenderer.on(IPC_CHANNELS.COMPARE_SCAN_COMPLETE, listener)
     return () => ipcRenderer.removeListener(IPC_CHANNELS.COMPARE_SCAN_COMPLETE, listener)
   },
 
-  onEntryUpdate: (callback: (entry: CompareEntry) => void) => {
-    const listener = (_event: Electron.IpcRendererEvent, entry: CompareEntry) => callback(entry)
+  onEntryUpdate: (callback: (compareId: string, entry: CompareEntry) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, compareId: string, entry: CompareEntry) =>
+      callback(compareId, entry)
     ipcRenderer.on(IPC_CHANNELS.COMPARE_ENTRY_UPDATE, listener)
     return () => ipcRenderer.removeListener(IPC_CHANNELS.COMPARE_ENTRY_UPDATE, listener)
   },
@@ -94,6 +99,9 @@ const api = {
 
   selectFile: (): Promise<IpcResult<string | null>> =>
     ipcRenderer.invoke(IPC_CHANNELS.DIALOG_SELECT_FILE),
+
+  // Utilities
+  getPathForFile: (file: File): string => webUtils.getPathForFile(file),
 } as const
 
 contextBridge.exposeInMainWorld('api', api)

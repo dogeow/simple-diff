@@ -1,5 +1,7 @@
+import { createReadStream } from 'fs'
 import { readdir, stat as fsStat, access, readFile, writeFile } from 'fs/promises'
 import { join, relative, basename } from 'path'
+import { createHash } from 'crypto'
 import type { FileEntry } from '@shared/types'
 import type { FileSource } from './types'
 import { logger } from '../utils/logger'
@@ -58,6 +60,19 @@ export class LocalSource implements FileSource {
 
   async readText(filePath: string): Promise<string> {
     return readFile(filePath, 'utf-8')
+  }
+
+  async hashFile(filePath: string): Promise<string> {
+    const hash = createHash('sha1')
+
+    await new Promise<void>((resolve, reject) => {
+      const stream = createReadStream(filePath)
+      stream.on('data', (chunk) => hash.update(chunk))
+      stream.on('end', () => resolve())
+      stream.on('error', reject)
+    })
+
+    return hash.digest('hex')
   }
 
   async writeText(filePath: string, content: string): Promise<void> {

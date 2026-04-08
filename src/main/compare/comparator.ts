@@ -1,7 +1,7 @@
 import type { FileEntry, CompareEntry, CompareResult, CompareStats, DiffReason, StrategyName } from '@shared/types'
 import type { FileSource } from '../file-source/types'
-import { extname } from 'path'
-import type { CompareStrategy } from './types'
+import type { CompareContext, CompareStrategy } from './types'
+import { HashStrategy } from './strategies/hash'
 import { SizeStrategy } from './strategies/size'
 import { MtimeStrategy } from './strategies/mtime'
 import { logger } from '../utils/logger'
@@ -9,6 +9,7 @@ import { logger } from '../utils/logger'
 const STRATEGY_MAP: Record<StrategyName, () => CompareStrategy> = {
   size: () => new SizeStrategy(),
   mtime: () => new MtimeStrategy(),
+  hash: () => new HashStrategy(),
 }
 
 export interface ComparatorOptions {
@@ -18,9 +19,38 @@ export interface ComparatorOptions {
   readonly rightRoot: string
   readonly strategies: readonly StrategyName[]
   readonly extensionFilter?: readonly string[]
+  readonly signal?: AbortSignal
   /** Called each time a new batch of entries is discovered (level by level). */
   readonly onEntriesFound?: (entries: readonly CompareEntry[]) => void
   readonly onEntryUpdate?: (entry: CompareEntry) => void
+}
+
+function throwIfAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) {
+    throw new Error('对比已取消')
+  }
+}
+
+function normalizeFilterValue(value: string): string {
+  return value.trim().replace(/^\/+|\/+$/g, '').toLowerCase()
+}
+
+function matchesPathFilter(relativePath: string, filters: readonly string[]): boolean {
+  const normalizedPath = normalizeFilterValue(relativePath)
+  if (!normalizedPath) return false
+
+  const segments = normalizedPath.split('/')
+
+  return filters.some((filter) => {
+    const normalizedFilter = normalizeFilterValue(filter)
+    if (!normalizedFilter) return false
+
+    if (normalizedFilter.includes('/')) {
+      return normalizedPath === normalizedFilter || normalizedPath.startsWith(`${normalizedFilter}/`)
+    }
+
+    return segments.includes(normalizedFilter)
+  })
 }
 
 /**
@@ -30,7 +60,7 @@ function matchLevel(
   leftList: readonly FileEntry[],
   rightList: readonly FileEntry[],
   parentRelative: string,
-  extSet: Set<string> | null,
+  pathFilters: readonly string[],
 ): CompareEntry[] {
   const leftMap = new Map<string, FileEntry>()
   for (const entry of leftList) {
@@ -51,9 +81,11 @@ function matchLevel(
     const isDir = left?.isDirectory ?? right?.isDirectory ?? false
     const relativePath = parentRelative ? `${parentRelative}/${name}` : name
 
-    if (extSet && !isDir) {
-      const ext = extname(name).toLowerCase()
-      if (!extSet.has(ext)) continue
+    if (matchesPathFilter(relativePath, pathFilters)) {
+      if (isDir) {
+        logger.info(`跳过已过滤目录: ${relativePath}`)
+      }
+      continue
     }
 
     if (left && !right) {
@@ -80,14 +112,22 @@ function matchLevel(
 }
 
 export async function compareDirectories(options: ComparatorOptions): Promise<CompareResult> {
-  const { leftSource, rightSource, leftRoot, rightRoot, strategies, extensionFilter, onEntriesFound, onEntryUpdate } = options
+  const {
+    leftSource,
+    rightSource,
+    leftRoot,
+    rightRoot,
+    strategies,
+    extensionFilter,
+    onEntriesFound,
+    onEntryUpdate,
+    signal,
+  } = options
   const startTime = Date.now()
 
   const activeStrategies = strategies.map((name) => STRATEGY_MAP[name]())
 
-  const extSet = extensionFilter && extensionFilter.length > 0
-    ? new Set(extensionFilter.map((e) => (e.startsWith('.') ? e.toLowerCase() : `.${e.toLowerCase()}`)))
-    : null
+  const pathFilters = extensionFilter ?? []
 
   const allEntries: CompareEntry[] = []
   const stats: CompareStats = { total: 0, equal: 0, different: 0, leftOnly: 0, rightOnly: 0 }
@@ -98,6 +138,8 @@ export async function compareDirectories(options: ComparatorOptions): Promise<Co
   ]
 
   while (queue.length > 0) {
+    throwIfAborted(signal)
+
     const { rel, leftAbs, rightAbs } = queue.shift()!
     const dirLabel = rel || '.'
     logger.info(`扫描层级: ${dirLabel}`)
@@ -108,14 +150,17 @@ export async function compareDirectories(options: ComparatorOptions): Promise<Co
       listSafe(rightSource, rightAbs, 'right', dirLabel),
     ])
 
-    const levelEntries = matchLevel(leftList, rightList, rel, extSet)
+    const levelEntries = matchLevel(leftList, rightList, rel, pathFilters)
     if (levelEntries.length === 0) continue
 
     // Emit this batch so renderer can display immediately
+    throwIfAborted(signal)
     onEntriesFound?.(levelEntries)
 
     // Compare files and queue shared directories
     for (const entry of levelEntries) {
+      throwIfAborted(signal)
+
       if (entry.isDirectory) {
         if (entry.state === 'pending') {
           // Both sides have this dir — queue for deeper scan
@@ -141,12 +186,20 @@ export async function compareDirectories(options: ComparatorOptions): Promise<Co
       } else {
         // File — compare immediately
         if (entry.state === 'pending') {
+          throwIfAborted(signal)
           onEntryUpdate?.({ ...entry, state: 'comparing' })
 
           const reasons: DiffReason[] = []
           if (entry.left && entry.right) {
+            const compareContext: CompareContext = {
+              leftSource,
+              rightSource,
+              leftPath: joinPath(leftSource, leftAbs, entry.name),
+              rightPath: joinPath(rightSource, rightAbs, entry.name),
+            }
+
             for (const strategy of activeStrategies) {
-              const reason = strategy.compare(entry.left, entry.right)
+              const reason = await strategy.compare(entry.left, entry.right, compareContext)
               if (reason) reasons.push(reason)
             }
           }

@@ -23,12 +23,11 @@ export default function FilterModal({ extensionFilter, onChange }: FilterModalPr
   }, [open])
 
   const handleApply = () => {
-    const extensions = input
+    const patterns = input
       .split('\n')
       .map((s) => s.trim())
       .filter(Boolean)
-      .map((s) => (s.startsWith('.') ? s : `.${s}`))
-    onChange(extensions)
+    onChange(patterns)
     setOpen(false)
   }
 
@@ -59,12 +58,12 @@ export default function FilterModal({ extensionFilter, onChange }: FilterModalPr
       {open && (
         <div className="absolute top-full left-0 z-50 mt-1 w-48 rounded border border-neutral-600 bg-neutral-800 p-3 shadow-xl">
           <label className="mb-1.5 block text-xs text-neutral-400">
-            文件后缀名（一行一个）
+            排除目录或路径（一行一个）
           </label>
           <textarea
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder={".ts\n.js\n.css"}
+            placeholder={"node_modules\n.git\ndist"}
             rows={6}
             className="mb-2 w-full resize-none rounded border border-neutral-600 bg-neutral-900 px-2 py-1.5 text-sm text-neutral-100 outline-none focus:border-blue-500"
           />

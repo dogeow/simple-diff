@@ -21,11 +21,11 @@ export function useCompare() {
 
   // Listen for progressive IPC events
   useEffect(() => {
-    const unsubScan = window.api.onScanComplete((scanEntries) => {
-      useCompareStore.getState().setScanEntries(scanEntries)
+    const unsubScan = window.api.onScanComplete((compareId, scanEntries) => {
+      useCompareStore.getState().setScanEntries(compareId, scanEntries)
     })
-    const unsubEntry = window.api.onEntryUpdate((entry) => {
-      useCompareStore.getState().updateEntry(entry)
+    const unsubEntry = window.api.onEntryUpdate((compareId, entry) => {
+      useCompareStore.getState().updateEntry(compareId, entry)
     })
     return () => {
       unsubScan()
@@ -39,25 +39,34 @@ export function useCompare() {
       return
     }
 
+    const compareId = `${Date.now()}-${Math.random().toString(36).slice(2)}`
+
     const left = buildSourceConfig(leftSourceType, leftPath, leftSSHConfigId)
     const right = buildSourceConfig(rightSourceType, rightPath, rightSSHConfigId)
 
     // Start scanning — navigate immediately
-    store.startScanning()
+    store.startScanning(compareId)
     store.setSources(left, right)
     setPage('compare')
 
     const response = await window.api.runCompare({
+      compareId,
       left,
       right,
       strategies: [...strategies],
       extensionFilter: extensionFilter.length > 0 ? [...extensionFilter] : undefined,
     })
 
+    if (useCompareStore.getState().activeCompareId !== compareId) {
+      return
+    }
+
     if (response.success && response.data) {
-      store.finishCompare(response.data)
+      store.finishCompare(compareId, response.data)
+    } else if (response.error === '对比已取消') {
+      store.setError(null, compareId)
     } else {
-      store.setError(response.error ?? '对比失败')
+      store.setError(response.error ?? '对比失败', compareId)
     }
   }, [leftPath, rightPath, strategies, extensionFilter, leftSourceType, rightSourceType, leftSSHConfigId, rightSSHConfigId, store, setPage])
 

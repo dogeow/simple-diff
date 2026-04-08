@@ -2,6 +2,7 @@ import type { NodeSSH, SFTPWrapper } from 'node-ssh'
 import type { FileEntry } from '@shared/types'
 import type { FileSource } from './types'
 import { posix } from 'path'
+import { createHash } from 'crypto'
 import { logger } from '../utils/logger'
 
 export class SFTPSource implements FileSource {
@@ -74,6 +75,20 @@ export class SFTPSource implements FileSource {
       stream.on('end', () => resolve(Buffer.concat(chunks).toString('utf-8')))
       stream.on('error', reject)
     })
+  }
+
+  async hashFile(filePath: string): Promise<string> {
+    const sftp = await this.getSftp()
+    const hash = createHash('sha1')
+
+    await new Promise<void>((resolve, reject) => {
+      const stream = sftp.createReadStream(filePath)
+      stream.on('data', (chunk: Buffer | string) => hash.update(chunk))
+      stream.on('end', () => resolve())
+      stream.on('error', reject)
+    })
+
+    return hash.digest('hex')
   }
 
   async writeText(filePath: string, content: string): Promise<void> {

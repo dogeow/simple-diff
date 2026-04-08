@@ -30,6 +30,7 @@ interface CompareStore {
   readonly filter: CompareState | 'all'
   readonly expandedDirs: ReadonlySet<string>
   readonly viewMode: ViewMode
+  readonly activeCompareId: string | null
 
   setLeftPath: (path: string) => void
   setRightPath: (path: string) => void
@@ -42,12 +43,12 @@ interface CompareStore {
   setHideDot: (hide: boolean) => void
   setHideDotFilter: (filter: HideDotFilter) => void
 
-  startScanning: () => void
-  setScanEntries: (entries: readonly CompareEntry[]) => void
-  updateEntry: (entry: CompareEntry) => void
-  finishCompare: (result: CompareResult) => void
+  startScanning: (compareId: string) => void
+  setScanEntries: (compareId: string, entries: readonly CompareEntry[]) => void
+  updateEntry: (compareId: string, entry: CompareEntry) => void
+  finishCompare: (compareId: string, result: CompareResult) => void
   removeEntry: (relativePath: string) => void
-  setError: (error: string | null) => void
+  setError: (error: string | null, compareId?: string) => void
   setFilter: (filter: CompareState | 'all') => void
   setSources: (left: SourceConfig, right: SourceConfig) => void
   setViewMode: (mode: ViewMode) => void
@@ -82,6 +83,7 @@ const compareInitial = {
   filter: 'all' as const,
   expandedDirs: new Set<string>() as ReadonlySet<string>,
   viewMode: 'split' as ViewMode,
+  activeCompareId: null as string | null,
 }
 
 const initialState = {
@@ -92,7 +94,7 @@ const initialState = {
   leftSSHConfigId: '',
   rightSSHConfigId: '',
   strategies: ['size', 'mtime'] as readonly StrategyName[],
-  extensionFilter: [] as readonly string[],
+  extensionFilter: ['node_modules', '.git', 'dist'] as readonly string[],
   hideDot: true,
   hideDotFilter: 'all' as HideDotFilter,
   ...compareInitial,
@@ -136,7 +138,7 @@ function matchChildren(
     } else if (left && right) {
       // Simple size/mtime comparison for files
       if (!isDir) {
-        const reasons: string[] = []
+        const reasons: ('size' | 'mtime')[] = []
         if (left.size !== right.size) reasons.push('size')
         if (Math.abs(left.mtime - right.mtime) > 1000) reasons.push('mtime')
         const state = reasons.length > 0 ? 'different' : 'equal'
@@ -144,7 +146,11 @@ function matchChildren(
           relativePath, name, isDirectory: isDir, state,
           left: { ...left, path: relativePath },
           right: { ...right, path: relativePath },
-          reasons: reasons.map((r) => ({ strategy: r as 'size' | 'mtime', leftValue: String(left.size), rightValue: String(right.size) })),
+          reasons: reasons.map((reason) =>
+            reason === 'size'
+              ? { type: 'size', leftSize: left.size, rightSize: right.size }
+              : { type: 'mtime', leftMtime: left.mtime, rightMtime: right.mtime },
+          ),
         })
       } else {
         entries.push({
@@ -179,28 +185,33 @@ export const useCompareStore = create<CompareStore>((set, get) => ({
   setHideDot: (hideDot) => set({ hideDot }),
   setHideDotFilter: (hideDotFilter) => set({ hideDotFilter }),
 
-  startScanning: () => set({ ...compareInitial, scanning: true }),
+  startScanning: (activeCompareId) => set({ ...compareInitial, activeCompareId, scanning: true }),
 
-  setScanEntries: (newEntries) => {
+  setScanEntries: (compareId, newEntries) => {
+    if (get().activeCompareId !== compareId) return
     // Append new batch (level-by-level progressive scan)
     const existing = get().entries
     set({ entries: [...existing, ...newEntries], scanning: true, comparing: true })
   },
 
-  updateEntry: (entry) => {
+  updateEntry: (compareId, entry) => {
+    if (get().activeCompareId !== compareId) return
     const entries = get().entries.map((e) =>
       e.relativePath === entry.relativePath ? entry : e,
     )
     set({ entries })
   },
 
-  finishCompare: (result) => set({
-    entries: result.entries,
-    scanning: false,
-    comparing: false,
-    done: true,
-    duration: result.duration,
-  }),
+  finishCompare: (compareId, result) => {
+    if (get().activeCompareId !== compareId) return
+    set({
+      entries: result.entries,
+      scanning: false,
+      comparing: false,
+      done: true,
+      duration: result.duration,
+    })
+  },
 
   removeEntry: (relativePath) => {
     const entries = get().entries.filter((e) =>
@@ -209,7 +220,10 @@ export const useCompareStore = create<CompareStore>((set, get) => ({
     set({ entries })
   },
 
-  setError: (error) => set({ error, scanning: false, comparing: false }),
+  setError: (error, compareId) => {
+    if (compareId && get().activeCompareId !== compareId) return
+    set({ error, scanning: false, comparing: false })
+  },
   setFilter: (filter) => set({ filter }),
 
   setSources: (left, right) => set({ leftSource: left, rightSource: right }),

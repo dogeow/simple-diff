@@ -13,6 +13,13 @@ import { connectionManager } from '../ssh/connection-manager'
 import { getConfigInternal } from '../ssh/config-store'
 import * as historyStore from '../history/history-store'
 
+let activeCompare:
+  | {
+      compareId: string
+      controller: AbortController
+    }
+  | null = null
+
 function registerFileHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.FILE_SOURCE_LIST, (_event, sourceConfig: SourceConfig, dirPath: string) =>
     wrapHandler(async () => {
@@ -51,6 +58,11 @@ function registerFileHandlers(): void {
 function registerCompareHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.COMPARE_RUN, (event, request: CompareRequest) =>
     wrapHandler(async () => {
+      activeCompare?.controller.abort()
+
+      const controller = new AbortController()
+      activeCompare = { compareId: request.compareId, controller }
+
       logger.info(`开始对比: 左=${request.left.type === 'sftp' ? 'SFTP' : '本地'}(${request.left.path}) 右=${request.right.type === 'sftp' ? 'SFTP' : '本地'}(${request.right.path})`)
 
       logger.info('正在创建左侧数据源...')
@@ -70,12 +82,15 @@ function registerCompareHandlers(): void {
           rightRoot: request.right.path,
           strategies: request.strategies,
           extensionFilter: request.extensionFilter,
+          signal: controller.signal,
           onEntriesFound: (entries) => {
+            if (controller.signal.aborted) return
             logger.info(`发现新条目: ${entries.length} 项`)
-            event.sender.send(IPC_CHANNELS.COMPARE_SCAN_COMPLETE, entries)
+            event.sender.send(IPC_CHANNELS.COMPARE_SCAN_COMPLETE, request.compareId, entries)
           },
           onEntryUpdate: (entry) => {
-            event.sender.send(IPC_CHANNELS.COMPARE_ENTRY_UPDATE, entry)
+            if (controller.signal.aborted) return
+            event.sender.send(IPC_CHANNELS.COMPARE_ENTRY_UPDATE, request.compareId, entry)
           },
         })
 
@@ -85,9 +100,25 @@ function registerCompareHandlers(): void {
         const enriched = { ...result, leftSource: request.left, rightSource: request.right }
         historyStore.addHistory(enriched)
         return enriched
+      } catch (error) {
+        if (controller.signal.aborted) {
+          logger.info('对比已取消')
+        }
+        throw error
       } finally {
         await leftSource.dispose()
         await rightSource.dispose()
+        if (activeCompare?.compareId === request.compareId) {
+          activeCompare = null
+        }
+      }
+    }),
+  )
+
+  ipcMain.handle(IPC_CHANNELS.COMPARE_CANCEL, () =>
+    wrapHandler(async () => {
+      if (activeCompare) {
+        activeCompare.controller.abort()
       }
     }),
   )

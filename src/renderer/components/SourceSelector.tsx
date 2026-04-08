@@ -12,13 +12,12 @@ interface SourceSelectorProps {
   readonly onSSHConfigIdChange: (id: string) => void
 }
 
-type DragLikeFile = File & { path?: string }
-
 function getDroppedFolderPath(event: React.DragEvent<HTMLDivElement>): string | null {
-  for (const file of Array.from(event.dataTransfer.files) as DragLikeFile[]) {
-    if (file.path) {
-      return file.path
-    }
+  // Use Electron's webUtils.getPathForFile (works with contextIsolation)
+  const files = event.dataTransfer.files
+  if (files.length > 0) {
+    const filePath = window.api.getPathForFile(files[0])
+    if (filePath) return filePath
   }
 
   const uriList = event.dataTransfer.getData('text/uri-list')

@@ -59,8 +59,9 @@ export type CompareState = 'pending' | 'comparing' | 'equal' | 'left_only' | 'ri
 export type DiffReason =
   | { readonly type: 'size'; readonly leftSize: number; readonly rightSize: number }
   | { readonly type: 'mtime'; readonly leftMtime: number; readonly rightMtime: number }
+  | { readonly type: 'hash'; readonly leftHash: string; readonly rightHash: string }
 
-export type StrategyName = 'size' | 'mtime'
+export type StrategyName = 'size' | 'mtime' | 'hash'
 
 export interface CompareEntry {
   readonly relativePath: string
@@ -73,6 +74,7 @@ export interface CompareEntry {
 }
 
 export interface CompareRequest {
+  readonly compareId: string
   readonly left: SourceConfig
   readonly right: SourceConfig
   readonly strategies: readonly StrategyName[]
@@ -137,6 +139,7 @@ export const IPC_CHANNELS = {
   FILE_READ_TEXT: 'file:read-text',
   FILE_WRITE_TEXT: 'file:write-text',
   COMPARE_RUN: 'compare:run',
+  COMPARE_CANCEL: 'compare:cancel',
   COMPARE_PROGRESS: 'compare:progress',
   COMPARE_SCAN_COMPLETE: 'compare:scan-complete',
   COMPARE_ENTRY_UPDATE: 'compare:entry-update',

@@ -1,6 +1,6 @@
 import { useMemo, useState, useCallback, useRef } from 'react'
 import type { CompareEntry, CompareState } from '../../../shared/types'
-import { buildTree, getVisibleNodes, computeEffectiveDirStates, truncatePath, type TreeNode } from '../utils/tree-utils'
+import { buildTree, getVisibleNodes, computeEffectiveDirStates, filterEntriesByPaths, truncatePath, type TreeNode } from '../utils/tree-utils'
 import { useCompareStore } from '../stores/compare-store'
 import StatusBadge from './StatusBadge'
 import ScrollGutter from './ScrollGutter'
@@ -36,11 +36,14 @@ function useSideData(entries: readonly CompareEntry[], filter: CompareState | 'a
   const hideDot = useCompareStore((s) => s.hideDot)
   const hideDotFilter = useCompareStore((s) => s.hideDotFilter)
   const expandedDirs = useCompareStore((s) => s.expandedDirs)
+  const extensionFilter = useCompareStore((s) => s.extensionFilter)
 
   const sideEntries = useMemo(() => buildSideEntries(entries, side), [entries, side])
 
   const filteredEntries = useMemo(() => {
     let result: readonly CompareEntry[] = sideEntries
+
+    result = filterEntriesByPaths(result, extensionFilter)
 
     if (hideDot) {
       result = result.filter((e) => {
@@ -86,7 +89,7 @@ function useSideData(entries: readonly CompareEntry[], filter: CompareState | 'a
     }
 
     return result
-  }, [sideEntries, filter, hideDot, hideDotFilter])
+  }, [sideEntries, extensionFilter, filter, hideDot, hideDotFilter])
 
   const tree = useMemo(() => buildTree(filteredEntries), [filteredEntries])
   const visibleNodes = useMemo(

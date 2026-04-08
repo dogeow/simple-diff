@@ -31,7 +31,8 @@ export default function ComparePage() {
 
   const activeTab = diffTabs.find((t) => t.id === activeDiffTabId) ?? null
 
-  const handleBack = () => {
+  const handleBack = async () => {
+    await window.api.cancelCompare()
     clearDiffTabs()
     resetCompare()
     setPage('home')

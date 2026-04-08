@@ -7,7 +7,7 @@ export class MtimeStrategy implements CompareStrategy {
 
   private static readonly TOLERANCE_MS = 2000
 
-  compare(left: FileEntry, right: FileEntry): DiffReason | null {
+  async compare(left: FileEntry, right: FileEntry): Promise<DiffReason | null> {
     const diff = Math.abs(left.mtime - right.mtime)
     if (diff > MtimeStrategy.TOLERANCE_MS) {
       return { type: 'mtime', leftMtime: left.mtime, rightMtime: right.mtime }

@@ -1,5 +1,27 @@
 import type { CompareEntry, CompareState } from '../../../shared/types'
 
+function normalizeFilterValue(value: string): string {
+  return value.trim().replace(/^\/+|\/+$/g, '').toLowerCase()
+}
+
+function matchesPathFilter(relativePath: string, filters: readonly string[]): boolean {
+  const normalizedPath = normalizeFilterValue(relativePath)
+  if (!normalizedPath) return false
+
+  const segments = normalizedPath.split('/')
+
+  return filters.some((filter) => {
+    const normalizedFilter = normalizeFilterValue(filter)
+    if (!normalizedFilter) return false
+
+    if (normalizedFilter.includes('/')) {
+      return normalizedPath === normalizedFilter || normalizedPath.startsWith(`${normalizedFilter}/`)
+    }
+
+    return segments.includes(normalizedFilter)
+  })
+}
+
 /**
  * Truncate path by hiding the middle parts with .../.../
  * - If fits: keep first + all middle dirs + last
@@ -122,6 +144,14 @@ export function getAllDirPaths(entries: readonly CompareEntry[]): ReadonlySet<st
     }
   }
   return dirs
+}
+
+export function filterEntriesByPaths(
+  entries: readonly CompareEntry[],
+  pathFilter: readonly string[],
+): readonly CompareEntry[] {
+  if (pathFilter.length === 0) return entries
+  return entries.filter((entry) => !matchesPathFilter(entry.relativePath, pathFilter))
 }
 
 const DIR_STATE_PRIORITY: CompareState[] = ['different', 'left_only', 'right_only', 'comparing', 'pending', 'equal']

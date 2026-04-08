@@ -1,9 +1,9 @@
-import { useMemo, useCallback, useRef } from 'react'
+import { useMemo, useCallback, useEffect, useRef } from 'react'
 import type { DiffTab } from '../stores/app-store'
 import { useAppStore } from '../stores/app-store'
 import type { DiffLine } from '../../../shared/types'
 import { truncatePath } from '../utils/tree-utils'
-import ScrollGutter from './ScrollGutter'
+import ScrollGutter, { type GutterMarker } from './ScrollGutter'
 
 interface Hunk {
   readonly startIndex: number
@@ -46,6 +46,7 @@ export default function FileDiffView({ tab }: FileDiffViewProps) {
   const leftRef = useRef<HTMLDivElement>(null)
   const rightRef = useRef<HTMLDivElement>(null)
   const syncing = useRef(false)
+  const diffHunkRefs = useRef<Record<number, HTMLDivElement | null>>({})
 
   const handleScroll = useCallback((source: 'left' | 'right') => {
     if (syncing.current) return
@@ -64,6 +65,77 @@ export default function FileDiffView({ tab }: FileDiffViewProps) {
   }, [tab.diffResult])
 
   const isModified = tab.leftContent !== tab.originalLeftContent || tab.rightContent !== tab.originalRightContent
+
+  const diffMarkers = useMemo((): readonly GutterMarker[] => {
+    if (!tab.diffResult) return []
+    const totalLines = Math.max(tab.diffResult.leftLines.length, tab.diffResult.rightLines.length)
+    if (totalLines === 0) return []
+    return hunks
+      .filter((h) => h.type === 'diff')
+      .map((h) => ({
+        start: h.startIndex / totalLines,
+        height: (h.endIndex - h.startIndex) / totalLines,
+      }))
+  }, [hunks, tab.diffResult])
+
+  const diffHunks = useMemo(
+    () => hunks.filter((hunk) => hunk.type === 'diff'),
+    [hunks],
+  )
+
+  const scrollToDiff = useCallback((direction: 'next' | 'prev') => {
+    const container = leftRef.current
+    if (!container || diffHunks.length === 0) return
+
+    const containerRect = container.getBoundingClientRect()
+    const tops = diffHunks
+      .map((hunk) => {
+        const el = diffHunkRefs.current[hunk.startIndex]
+        if (!el) return null
+        // Calculate position relative to container's scroll origin
+        const elRect = el.getBoundingClientRect()
+        const top = elRect.top - containerRect.top + container.scrollTop
+        return { startIndex: hunk.startIndex, top }
+      })
+      .filter((item): item is { startIndex: number; top: number } => item != null)
+
+    if (tops.length === 0) return
+
+    const currentTop = container.scrollTop
+    let target = tops[0]
+
+    if (direction === 'next') {
+      target = tops.find((item) => item.top > currentTop + 4) ?? tops[tops.length - 1]
+    } else {
+      target = [...tops].reverse().find((item) => item.top < currentTop - 4) ?? tops[0]
+    }
+
+    container.scrollTo({ top: target.top, behavior: 'smooth' })
+    if (rightRef.current) {
+      rightRef.current.scrollTo({ top: target.top, behavior: 'smooth' })
+    }
+  }, [diffHunks])
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null
+      if (target && (
+        target.tagName === 'INPUT'
+        || target.tagName === 'TEXTAREA'
+        || target.isContentEditable
+      )) {
+        return
+      }
+
+      if (event.key === 'F7') {
+        event.preventDefault()
+        scrollToDiff(event.shiftKey ? 'prev' : 'next')
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [scrollToDiff])
 
   const handleCopyHunk = useCallback(
     async (hunk: Hunk, direction: 'left-to-right' | 'right-to-left') => {
@@ -195,6 +267,22 @@ export default function FileDiffView({ tab }: FileDiffViewProps) {
         </div>
       </div>
 
+      <div className="flex shrink-0 items-center gap-2 border-b border-neutral-700 bg-neutral-900/70 px-3 py-1 text-[11px] text-neutral-500">
+        <button
+          onClick={() => scrollToDiff('prev')}
+          className="rounded bg-neutral-700 px-2 py-0.5 text-neutral-300 hover:bg-neutral-600"
+        >
+          上一个差异
+        </button>
+        <button
+          onClick={() => scrollToDiff('next')}
+          className="rounded bg-neutral-700 px-2 py-0.5 text-neutral-300 hover:bg-neutral-600"
+        >
+          下一个差异
+        </button>
+        <span className="ml-auto">快捷键: Shift+F7 上一个, F7 下一个</span>
+      </div>
+
       {/* Diff content — two panels with synchronized scroll */}
       <div className="flex flex-1 overflow-hidden">
         {/* Left panel */}
@@ -206,12 +294,15 @@ export default function FileDiffView({ tab }: FileDiffViewProps) {
               lines={leftLines}
               side="left"
               onCopy={() => handleCopyHunk(hunk, 'left-to-right')}
+              containerRef={(element) => {
+                diffHunkRefs.current[hunk.startIndex] = element
+              }}
             />
           ))}
         </div>
 
-        {/* Center gutter with scroll indicator */}
-        <ScrollGutter scrollRef={leftRef} />
+        {/* Center gutter with scroll indicator and diff markers */}
+        <ScrollGutter scrollRef={leftRef} markers={diffMarkers} />
 
         {/* Right panel */}
         <div ref={rightRef} className="flex-1 overflow-auto font-mono text-xs" onScroll={() => handleScroll('right')}>
@@ -241,13 +332,14 @@ interface HunkBlockProps {
   readonly lines: readonly DiffLine[]
   readonly side: 'left' | 'right'
   readonly onCopy: () => void
+  readonly containerRef?: (element: HTMLDivElement | null) => void
 }
 
-function HunkBlock({ hunk, lines, side, onCopy }: HunkBlockProps) {
+function HunkBlock({ hunk, lines, side, onCopy, containerRef }: HunkBlockProps) {
   const hunkLines = lines.slice(hunk.startIndex, hunk.endIndex)
 
   return (
-    <div className="group relative">
+    <div ref={containerRef} className="group relative">
       {hunk.type === 'diff' && (
         <button
           onClick={onCopy}

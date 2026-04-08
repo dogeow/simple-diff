@@ -1,10 +1,18 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 
-interface ScrollGutterProps {
-  readonly scrollRef: React.RefObject<HTMLElement | null>
+export interface GutterMarker {
+  /** 0–1, position ratio from top */
+  readonly start: number
+  /** 0–1, height ratio */
+  readonly height: number
 }
 
-export default function ScrollGutter({ scrollRef }: ScrollGutterProps) {
+interface ScrollGutterProps {
+  readonly scrollRef: React.RefObject<HTMLElement | null>
+  readonly markers?: readonly GutterMarker[]
+}
+
+export default function ScrollGutter({ scrollRef, markers }: ScrollGutterProps) {
   const gutterRef = useRef<HTMLDivElement>(null)
   const [thumbTop, setThumbTop] = useState(0)
   const [thumbHeight, setThumbHeight] = useState(0)
@@ -103,9 +111,22 @@ export default function ScrollGutter({ scrollRef }: ScrollGutterProps) {
       className="relative w-4 shrink-0 cursor-pointer border-x border-neutral-600 bg-neutral-700"
       onClick={handleGutterClick}
     >
+      {/* Diff markers */}
+      {markers?.map((m, i) => (
+        <div
+          key={i}
+          className="absolute left-0 right-0 bg-red-500/70"
+          style={{
+            top: `${m.start * 100}%`,
+            height: `max(${m.height * 100}%, 2px)`,
+          }}
+        />
+      ))}
+
+      {/* Scroll thumb */}
       {visible && (
         <div
-          className="absolute left-0.5 right-0.5 rounded-full bg-neutral-400/60 transition-colors hover:bg-neutral-400/80"
+          className="absolute left-0.5 right-0.5 z-10 rounded-full bg-neutral-400/60 transition-colors hover:bg-neutral-400/80"
           style={{
             top: `${thumbTop}px`,
             height: `${thumbHeight}px`,
