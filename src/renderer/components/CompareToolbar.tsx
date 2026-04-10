@@ -7,6 +7,7 @@ import FilterModal from './FilterModal'
 const STRATEGY_LABELS: Record<StrategyName, string> = {
   size: '文件大小',
   mtime: '修改时间',
+  quick_hash: '快速内容签名',
   hash: '内容哈希',
 }
 

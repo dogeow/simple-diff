@@ -7,6 +7,7 @@ import type { StrategyName } from '../../../shared/types'
 const STRATEGY_OPTIONS: { value: StrategyName; label: string }[] = [
   { value: 'size', label: '文件大小' },
   { value: 'mtime', label: '修改时间' },
+  { value: 'quick_hash', label: '快速内容签名' },
   { value: 'hash', label: '内容哈希' },
 ]
 

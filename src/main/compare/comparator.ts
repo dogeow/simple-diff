@@ -2,6 +2,7 @@ import type { FileEntry, CompareEntry, CompareResult, CompareStats, DiffReason, 
 import type { FileSource } from '../file-source/types'
 import type { CompareContext, CompareStrategy } from './types'
 import { HashStrategy } from './strategies/hash'
+import { QuickHashStrategy } from './strategies/quick-hash'
 import { SizeStrategy } from './strategies/size'
 import { MtimeStrategy } from './strategies/mtime'
 import { logger } from '../utils/logger'
@@ -10,6 +11,7 @@ const STRATEGY_MAP: Record<StrategyName, () => CompareStrategy> = {
   size: () => new SizeStrategy(),
   mtime: () => new MtimeStrategy(),
   hash: () => new HashStrategy(),
+  quick_hash: () => new QuickHashStrategy(),
 }
 
 export interface ComparatorOptions {

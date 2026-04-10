@@ -60,8 +60,9 @@ export type DiffReason =
   | { readonly type: 'size'; readonly leftSize: number; readonly rightSize: number }
   | { readonly type: 'mtime'; readonly leftMtime: number; readonly rightMtime: number }
   | { readonly type: 'hash'; readonly leftHash: string; readonly rightHash: string }
+  | { readonly type: 'quick_hash'; readonly leftHash: string; readonly rightHash: string }
 
-export type StrategyName = 'size' | 'mtime' | 'hash'
+export type StrategyName = 'size' | 'mtime' | 'hash' | 'quick_hash'
 
 export interface CompareEntry {
   readonly relativePath: string

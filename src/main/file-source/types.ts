@@ -21,6 +21,9 @@ export interface FileSource {
   /** Compute a stable content hash for a file */
   hashFile(filePath: string): Promise<string>
 
+  /** Compute a stable hash for a byte range of a file */
+  hashFileRange(filePath: string, start: number, endInclusive: number): Promise<string>
+
   /** Write UTF-8 text to a file */
   writeText(filePath: string, content: string): Promise<void>
 

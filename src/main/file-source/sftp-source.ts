@@ -91,6 +91,20 @@ export class SFTPSource implements FileSource {
     return hash.digest('hex')
   }
 
+  async hashFileRange(filePath: string, start: number, endInclusive: number): Promise<string> {
+    const sftp = await this.getSftp()
+    const hash = createHash('sha1')
+
+    await new Promise<void>((resolve, reject) => {
+      const stream = sftp.createReadStream(filePath, { start, end: endInclusive })
+      stream.on('data', (chunk: Buffer | string) => hash.update(chunk))
+      stream.on('end', () => resolve())
+      stream.on('error', reject)
+    })
+
+    return hash.digest('hex')
+  }
+
   async writeText(filePath: string, content: string): Promise<void> {
     const sftp = await this.getSftp()
     return new Promise((resolve, reject) => {
