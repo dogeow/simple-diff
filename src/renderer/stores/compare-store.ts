@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { joinSourcePath } from '@shared/source-path'
 import type { CompareEntry, CompareResult, CompareState, CompareStats, FileEntry, SourceConfig, StrategyName } from '../../../shared/types'
 
 export type ViewMode = 'split' | 'merged'
@@ -102,12 +103,29 @@ const initialState = {
 
 /** Resolve absolute path for a subdir relative path given a SourceConfig. */
 function resolveAbsPath(source: SourceConfig, relativePath: string): string {
-  const root = source.path
-  if (source.type === 'sftp') {
-    return root.endsWith('/') ? `${root}${relativePath}` : `${root}/${relativePath}`
+  return joinSourcePath(source, source.path, relativePath)
+}
+
+function upsertEntries(
+  existing: readonly CompareEntry[],
+  incoming: readonly CompareEntry[],
+): CompareEntry[] {
+  if (incoming.length === 0) return [...existing]
+
+  const next = [...existing]
+  const indexByPath = new Map(existing.map((entry, index) => [entry.relativePath, index]))
+
+  for (const entry of incoming) {
+    const existingIndex = indexByPath.get(entry.relativePath)
+    if (existingIndex == null) {
+      indexByPath.set(entry.relativePath, next.length)
+      next.push(entry)
+      continue
+    }
+    next[existingIndex] = entry
   }
-  // Local — use / join (works on macOS/Linux; Windows would need \ but Electron normalises)
-  return root.endsWith('/') ? `${root}${relativePath}` : `${root}/${relativePath}`
+
+  return next
 }
 
 /** Match two file lists into CompareEntry[] for a given parent relative path. */
@@ -189,23 +207,22 @@ export const useCompareStore = create<CompareStore>((set, get) => ({
 
   setScanEntries: (compareId, newEntries) => {
     if (get().activeCompareId !== compareId) return
-    // Append new batch (level-by-level progressive scan)
-    const existing = get().entries
-    set({ entries: [...existing, ...newEntries], scanning: true, comparing: true })
+    set((state) => ({
+      entries: upsertEntries(state.entries, newEntries),
+      scanning: true,
+      comparing: true,
+    }))
   },
 
   updateEntry: (compareId, entry) => {
     if (get().activeCompareId !== compareId) return
-    const entries = get().entries.map((e) =>
-      e.relativePath === entry.relativePath ? entry : e,
-    )
-    set({ entries })
+    set((state) => ({ entries: upsertEntries(state.entries, [entry]) }))
   },
 
   finishCompare: (compareId, result) => {
     if (get().activeCompareId !== compareId) return
     set({
-      entries: result.entries,
+      entries: upsertEntries([], result.entries),
       scanning: false,
       comparing: false,
       done: true,
@@ -295,16 +312,20 @@ export const useCompareStore = create<CompareStore>((set, get) => ({
       ? window.api.listFiles(rightSource, rightAbs).then((r) => r.success && r.data ? r.data : [])
       : Promise.resolve([] as readonly FileEntry[])
 
-    Promise.all([leftP, rightP]).then(([leftList, rightList]) => {
-      const newEntries = matchChildren(leftList, rightList, path)
-      const cur = get()
-      const doneLoading = new Set(cur.loadingDirs)
-      doneLoading.delete(path)
-      set({
-        entries: [...cur.entries, ...newEntries],
-        loadingDirs: doneLoading,
-      })
-    })
+    void (async () => {
+      try {
+        const [leftList, rightList] = await Promise.all([leftP, rightP])
+        const newEntries = matchChildren(leftList, rightList, path)
+        set((current) => ({
+          entries: upsertEntries(current.entries, newEntries),
+        }))
+      } finally {
+        const cur = get()
+        const doneLoading = new Set(cur.loadingDirs)
+        doneLoading.delete(path)
+        set({ loadingDirs: doneLoading })
+      }
+    })()
   },
 
   expandAll: () => {

@@ -1,4 +1,5 @@
 import type { FileEntry, CompareEntry, CompareResult, CompareStats, DiffReason, StrategyName } from '@shared/types'
+import { joinSourcePath } from '@shared/source-path'
 import type { FileSource } from '../file-source/types'
 import type { CompareContext, CompareStrategy } from './types'
 import { HashStrategy } from './strategies/hash'
@@ -132,7 +133,7 @@ export async function compareDirectories(options: ComparatorOptions): Promise<Co
   const pathFilters = extensionFilter ?? []
 
   const allEntries: CompareEntry[] = []
-  const stats: CompareStats = { total: 0, equal: 0, different: 0, leftOnly: 0, rightOnly: 0 }
+  const stats = { total: 0, equal: 0, different: 0, leftOnly: 0, rightOnly: 0 }
 
   // BFS queue: each item is { relative path prefix, left absolute, right absolute }
   const queue: { rel: string; leftAbs: string; rightAbs: string }[] = [
@@ -240,10 +241,5 @@ async function listSafe(source: FileSource, dirPath: string, side: string, label
 
 /** Join path using posix for SFTP or native for local. */
 function joinPath(source: FileSource, base: string, child: string): string {
-  if (source.type === 'sftp') {
-    return base.endsWith('/') ? `${base}${child}` : `${base}/${child}`
-  }
-  // Local — use platform-aware join
-  const { join } = require('path')
-  return join(base, child)
+  return joinSourcePath(source.type, base, child)
 }

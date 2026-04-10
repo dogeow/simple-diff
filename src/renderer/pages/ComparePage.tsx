@@ -1,15 +1,11 @@
 import { useCallback } from 'react'
+import { resolveSourcePath } from '@shared/source-path'
 import { useCompareStore } from '../stores/compare-store'
 import { useAppStore, type DiffTab } from '../stores/app-store'
 import CompareTree from '../components/CompareTree'
 import SplitTree from '../components/SplitTree'
 import FileDiffView from '../components/FileDiffView'
 import type { CompareEntry } from '../../../shared/types'
-
-function joinPath(root: string, relative: string): string {
-  if (root.endsWith('/')) return root + relative
-  return root + '/' + relative
-}
 
 export default function ComparePage() {
   const entries = useCompareStore((s) => s.entries)
@@ -45,8 +41,8 @@ export default function ComparePage() {
       const leftRoot = leftSource?.path ?? ''
       const rightRoot = rightSource?.path ?? ''
 
-      const leftFullPath = entry.left ? joinPath(leftRoot, entry.relativePath) : ''
-      const rightFullPath = entry.right ? joinPath(rightRoot, entry.relativePath) : ''
+      const leftFullPath = entry.left && leftSource ? resolveSourcePath(leftSource, entry.relativePath) : leftRoot
+      const rightFullPath = entry.right && rightSource ? resolveSourcePath(rightSource, entry.relativePath) : rightRoot
 
       const tabId = entry.relativePath
 

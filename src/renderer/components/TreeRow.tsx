@@ -1,27 +1,7 @@
-import type { CompareState } from '../../../shared/types'
 import type { TreeNode } from '../utils/tree-utils'
+import TreeEntryCell from './TreeEntryCell'
 import StatusBadge from './StatusBadge'
-
-function formatSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
-}
-
-function formatTime(ms: number): string {
-  const d = new Date(ms)
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
-}
-
-export function rowBg(state: CompareState): string {
-  switch (state) {
-    case 'different': return 'bg-yellow-900/10'
-    case 'left_only': return 'bg-blue-900/10'
-    case 'right_only': return 'bg-purple-900/10'
-    case 'comparing': return 'bg-blue-900/5'
-    default: return ''
-  }
-}
+import { formatSize, formatTime, rowBg } from './tree-row-utils'
 
 interface TreeRowProps {
   readonly node: TreeNode
@@ -34,8 +14,6 @@ interface TreeRowProps {
 export default function TreeRow({ node, expanded, loading, onToggle, onDoubleClick }: TreeRowProps) {
   const entry = node.entry
   if (!entry) return null
-
-  const indent = node.depth * 20
 
   return (
     <tr
@@ -52,31 +30,12 @@ export default function TreeRow({ node, expanded, loading, onToggle, onDoubleCli
       </td>
       {/* Name */}
       <td className="px-3 py-1.5">
-        <div className="flex items-center" style={{ paddingLeft: `${indent}px` }}>
-          {node.isDirectory ? (
-            loading ? (
-              <span className="mr-1 flex h-4 w-4 items-center justify-center">
-                <span className="inline-block h-3 w-3 animate-spin rounded-full border border-current border-t-transparent text-blue-400" />
-              </span>
-            ) : (
-              <button
-                onClick={(e) => {
-                  e.stopPropagation()
-                  onToggle()
-                }}
-                className="mr-1 flex h-4 w-4 items-center justify-center text-xs text-neutral-400 hover:text-neutral-200"
-              >
-                {expanded ? '▼' : '▶'}
-              </button>
-            )
-          ) : (
-            <span className="mr-1 w-4" />
-          )}
-          <span className="mr-1.5 text-xs">
-            {node.isDirectory ? '📁' : '📄'}
-          </span>
-          <span className="font-mono text-xs">{node.name}</span>
-        </div>
+        <TreeEntryCell
+          node={node}
+          expanded={expanded}
+          loading={loading}
+          onToggle={onToggle}
+        />
       </td>
       {/* Status */}
       <td className="px-2 py-1.5 text-center">

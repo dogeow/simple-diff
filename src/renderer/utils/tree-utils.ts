@@ -1,5 +1,8 @@
 import type { CompareEntry, CompareState } from '../../../shared/types'
 
+export type TreeSide = 'left' | 'right'
+export type DotEntryFilter = 'all' | 'files' | 'dirs'
+
 function normalizeFilterValue(value: string): string {
   return value.trim().replace(/^\/+|\/+$/g, '').toLowerCase()
 }
@@ -152,6 +155,106 @@ export function filterEntriesByPaths(
 ): readonly CompareEntry[] {
   if (pathFilter.length === 0) return entries
   return entries.filter((entry) => !matchesPathFilter(entry.relativePath, pathFilter))
+}
+
+export function filterEntriesBySide(
+  entries: readonly CompareEntry[],
+  side?: TreeSide,
+): readonly CompareEntry[] {
+  if (!side) return entries
+
+  return entries.filter((entry) => {
+    if (side === 'left') return entry.state !== 'right_only'
+    return entry.state !== 'left_only'
+  })
+}
+
+function hasDotAncestor(relativePath: string): boolean {
+  const parts = relativePath.split('/')
+  return parts.slice(0, -1).some((part) => part.startsWith('.'))
+}
+
+function filterHiddenDotEntries(
+  entries: readonly CompareEntry[],
+  hideDotFilter: DotEntryFilter,
+): readonly CompareEntry[] {
+  return entries.filter((entry) => {
+    if (hasDotAncestor(entry.relativePath)) return false
+
+    if (!entry.name.startsWith('.')) return true
+    if (hideDotFilter === 'all') return false
+    if (hideDotFilter === 'files' && !entry.isDirectory) return false
+    if (hideDotFilter === 'dirs' && entry.isDirectory) return false
+    return true
+  })
+}
+
+function applyEffectiveDirectoryStates(entries: readonly CompareEntry[]): readonly CompareEntry[] {
+  const effectiveDirStates = computeEffectiveDirStates(entries)
+  return entries.map((entry) => {
+    if (!entry.isDirectory) return entry
+    const effective = effectiveDirStates.get(entry.relativePath)
+    if (effective && effective !== entry.state) {
+      return { ...entry, state: effective }
+    }
+    return entry
+  })
+}
+
+function matchesStateFilter(targetFilter: CompareState | 'all', state: CompareState): boolean {
+  if (targetFilter === 'all') return true
+  if (targetFilter === 'different') {
+    return state === 'different' || state === 'left_only' || state === 'right_only'
+  }
+  return state === targetFilter
+}
+
+function filterEntriesByState(
+  entries: readonly CompareEntry[],
+  targetFilter: CompareState | 'all',
+): readonly CompareEntry[] {
+  if (targetFilter === 'all') return entries
+
+  const neededDirs = new Set<string>()
+  for (const entry of entries) {
+    if (!matchesStateFilter(targetFilter, entry.state)) continue
+
+    const parts = entry.relativePath.split('/')
+    for (let i = 1; i < parts.length; i++) {
+      neededDirs.add(parts.slice(0, i).join('/'))
+    }
+    if (entry.isDirectory) neededDirs.add(entry.relativePath)
+  }
+
+  return entries.filter((entry) => {
+    if (entry.isDirectory) return neededDirs.has(entry.relativePath)
+    return matchesStateFilter(targetFilter, entry.state)
+  })
+}
+
+export interface PrepareCompareEntriesOptions {
+  readonly filter: CompareState | 'all'
+  readonly pathFilter: readonly string[]
+  readonly hideDot: boolean
+  readonly hideDotFilter: DotEntryFilter
+  readonly side?: TreeSide
+}
+
+export function prepareCompareEntries(
+  entries: readonly CompareEntry[],
+  options: PrepareCompareEntriesOptions,
+): readonly CompareEntry[] {
+  const { filter, pathFilter, hideDot, hideDotFilter, side } = options
+
+  let result = filterEntriesBySide(entries, side)
+  result = filterEntriesByPaths(result, pathFilter)
+
+  if (hideDot) {
+    result = filterHiddenDotEntries(result, hideDotFilter)
+  }
+
+  result = applyEffectiveDirectoryStates(result)
+  return filterEntriesByState(result, filter)
 }
 
 const DIR_STATE_PRIORITY: CompareState[] = ['different', 'left_only', 'right_only', 'comparing', 'pending', 'equal']

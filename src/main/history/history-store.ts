@@ -16,7 +16,12 @@ function sourceLabel(config: SourceConfig): string {
   return `sftp://${config.configId}:${config.path}`
 }
 
-export function addHistory(result: CompareResult): CompareHistoryEntry {
+type CompareResultWithSources = CompareResult & {
+  readonly leftSource: SourceConfig
+  readonly rightSource: SourceConfig
+}
+
+export function addHistory(result: CompareResultWithSources): CompareHistoryEntry {
   const entry: CompareHistoryEntry = {
     id: randomUUID(),
     timestamp: Date.now(),

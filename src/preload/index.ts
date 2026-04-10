@@ -36,21 +36,27 @@ const api = {
     const listener = (_event: Electron.IpcRendererEvent, compareId: string, entries: readonly CompareEntry[]) =>
       callback(compareId, entries)
     ipcRenderer.on(IPC_CHANNELS.COMPARE_SCAN_COMPLETE, listener)
-    return () => ipcRenderer.removeListener(IPC_CHANNELS.COMPARE_SCAN_COMPLETE, listener)
+    return () => {
+      ipcRenderer.removeListener(IPC_CHANNELS.COMPARE_SCAN_COMPLETE, listener)
+    }
   },
 
   onEntryUpdate: (callback: (compareId: string, entry: CompareEntry) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, compareId: string, entry: CompareEntry) =>
       callback(compareId, entry)
     ipcRenderer.on(IPC_CHANNELS.COMPARE_ENTRY_UPDATE, listener)
-    return () => ipcRenderer.removeListener(IPC_CHANNELS.COMPARE_ENTRY_UPDATE, listener)
+    return () => {
+      ipcRenderer.removeListener(IPC_CHANNELS.COMPARE_ENTRY_UPDATE, listener)
+    }
   },
 
   // Log
   onLog: (callback: (entry: LogEntry) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, entry: LogEntry) => callback(entry)
     ipcRenderer.on(IPC_CHANNELS.LOG, listener)
-    return () => ipcRenderer.removeListener(IPC_CHANNELS.LOG, listener)
+    return () => {
+      ipcRenderer.removeListener(IPC_CHANNELS.LOG, listener)
+    }
   },
 
   // Text diff

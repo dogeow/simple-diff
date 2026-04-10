@@ -1,4 +1,4 @@
-import { createReadStream } from 'fs'
+import { createReadStream, type Dirent } from 'fs'
 import { readdir, stat as fsStat, access, readFile, writeFile } from 'fs/promises'
 import { join, relative, basename } from 'path'
 import { createHash } from 'crypto'
@@ -99,9 +99,9 @@ export class LocalSource implements FileSource {
   private async walkDir(rootPath: string, currentPath: string, results: FileEntry[]): Promise<void> {
     const rel = relative(rootPath, currentPath) || '.'
     logger.info(`[本地] 扫描目录: ${rel}  (已发现 ${results.length} 项)`)
-    let entries: Awaited<ReturnType<typeof readdir>>
+    let entries: Dirent<string>[]
     try {
-      entries = await readdir(currentPath, { withFileTypes: true })
+      entries = await readdir(currentPath, { withFileTypes: true, encoding: 'utf8' })
     } catch (err) {
       logger.warn(`[本地] 无法读取目录: ${rel} - ${err instanceof Error ? err.message : err}`)
       return // skip unreadable directories

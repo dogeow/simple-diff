@@ -1,6 +1,7 @@
 import { useMemo, useCallback } from 'react'
 import type { CompareEntry, CompareState } from '../../../shared/types'
-import { buildTree, getVisibleNodes, computeEffectiveDirStates, filterEntriesByPaths } from '../utils/tree-utils'
+import { useCompareNodeInteractions } from '../hooks/useCompareNodeInteractions'
+import { useVisibleCompareNodes } from '../hooks/useVisibleCompareNodes'
 import { useCompareStore, computeStats } from '../stores/compare-store'
 import CompareToolbar from './CompareToolbar'
 import TreeRow from './TreeRow'
@@ -15,10 +16,9 @@ interface CompareTreeProps {
 
 export default function CompareTree({ entries, filter, onFilterChange, onDoubleClickFile, toolbarOnly = false }: CompareTreeProps) {
   const expandedDirs = useCompareStore((s) => s.expandedDirs)
-  const expandDir = useCompareStore((s) => s.expandDir)
-  const loadingDirs = useCompareStore((s) => s.loadingDirs)
   const expandAll = useCompareStore((s) => s.expandAll)
   const collapseAll = useCompareStore((s) => s.collapseAll)
+  const nodeInteractions = useCompareNodeInteractions(onDoubleClickFile)
 
   const allDirCount = useMemo(() => entries.filter((e) => e.isDirectory).length, [entries])
   const allExpanded = allDirCount > 0 && expandedDirs.size >= allDirCount
@@ -38,67 +38,7 @@ export default function CompareTree({ entries, filter, onFilterChange, onDoubleC
 
   const stats = useMemo(() => computeStats(entries), [entries])
   const pendingCount = useMemo(() => entries.filter((e) => e.state === 'pending' || e.state === 'comparing').length, [entries])
-
-  const filteredEntries = useMemo(() => {
-    let result: readonly CompareEntry[] = entries
-
-    // 1. Apply path filter.
-    result = filterEntriesByPaths(result, extensionFilter)
-
-    // 2. Apply hidden dot-file filter
-    if (hideDot) {
-      result = result.filter((e) => {
-        // Check if any ancestor directory starts with '.'
-        const parts = e.relativePath.split('/')
-        const hasDotAncestor = parts.slice(0, -1).some((p) => p.startsWith('.'))
-        if (hasDotAncestor) return false
-
-        if (!e.name.startsWith('.')) return true
-        if (hideDotFilter === 'all') return false
-        if (hideDotFilter === 'files' && !e.isDirectory) return false
-        if (hideDotFilter === 'dirs' && e.isDirectory) return false
-        return true
-      })
-    }
-
-    // 3. Propagate effective directory states from descendants
-    const effDirStates = computeEffectiveDirStates(result)
-    result = result.map((e) => {
-      if (!e.isDirectory) return e
-      const effective = effDirStates.get(e.relativePath)
-      if (effective && effective !== e.state) return { ...e, state: effective }
-      return e
-    })
-
-    // 4. Apply state filter — keep matching entries + ancestor dirs
-    if (filter !== 'all') {
-      const matchesFilter = (state: CompareState) => {
-        if (filter === 'different') return state === 'different' || state === 'left_only' || state === 'right_only'
-        return state === filter
-      }
-      const neededDirs = new Set<string>()
-      for (const e of result) {
-        if (!matchesFilter(e.state)) continue
-        const parts = e.relativePath.split('/')
-        for (let i = 1; i < parts.length; i++) {
-          neededDirs.add(parts.slice(0, i).join('/'))
-        }
-        if (e.isDirectory) neededDirs.add(e.relativePath)
-      }
-      result = result.filter((e) => {
-        if (e.isDirectory) return neededDirs.has(e.relativePath)
-        return matchesFilter(e.state)
-      })
-    }
-
-    return result
-  }, [entries, extensionFilter, filter, hideDot, hideDotFilter])
-
-  const tree = useMemo(() => buildTree(filteredEntries), [filteredEntries])
-  const visibleNodes = useMemo(
-    () => getVisibleNodes(tree, expandedDirs),
-    [tree, expandedDirs],
-  )
+  const visibleNodes = useVisibleCompareNodes({ entries, filter })
 
   return (
     <div className={toolbarOnly ? '' : 'flex h-full flex-col gap-2'}>
@@ -148,14 +88,10 @@ export default function CompareTree({ entries, filter, onFilterChange, onDoubleC
               <TreeRow
                 key={node.relativePath}
                 node={node}
-                expanded={expandedDirs.has(node.relativePath)}
-                loading={loadingDirs.has(node.relativePath)}
-                onToggle={() => expandDir(node.relativePath)}
-                onDoubleClick={() => {
-                  if (!node.isDirectory && node.entry) {
-                    onDoubleClickFile(node.entry)
-                  }
-                }}
+                expanded={nodeInteractions.isExpanded(node)}
+                loading={nodeInteractions.isLoading(node)}
+                onToggle={() => nodeInteractions.toggleNode(node)}
+                onDoubleClick={() => nodeInteractions.openNode(node)}
               />
             ))}
           </tbody>

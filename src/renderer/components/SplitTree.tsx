@@ -1,21 +1,15 @@
-import { useMemo, useState, useCallback, useRef } from 'react'
+import { useState, useCallback, useRef } from 'react'
+import { joinSourcePath } from '@shared/source-path'
 import type { CompareEntry, CompareState } from '../../../shared/types'
-import { buildTree, getVisibleNodes, computeEffectiveDirStates, filterEntriesByPaths, truncatePath, type TreeNode } from '../utils/tree-utils'
+import { truncatePath, type TreeNode } from '../utils/tree-utils'
+import TreeEntryCell from './TreeEntryCell'
+import { formatSize, formatTime, rowBg } from './tree-row-utils'
+import { useVisibleCompareNodes } from '../hooks/useVisibleCompareNodes'
+import { useCompareNodeInteractions, type CompareNodeInteractions } from '../hooks/useCompareNodeInteractions'
 import { useCompareStore } from '../stores/compare-store'
 import StatusBadge from './StatusBadge'
 import ScrollGutter from './ScrollGutter'
 import FileContextMenu, { type ContextMenuAction } from './FileContextMenu'
-
-function formatSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
-}
-
-function formatTime(ms: number): string {
-  const d = new Date(ms)
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
-}
 
 interface SplitTreeProps {
   readonly entries: readonly CompareEntry[]
@@ -24,81 +18,6 @@ interface SplitTreeProps {
 }
 
 type Side = 'left' | 'right'
-
-function buildSideEntries(entries: readonly CompareEntry[], side: Side): readonly CompareEntry[] {
-  return entries.filter((e) => {
-    if (side === 'left') return e.state !== 'right_only'
-    return e.state !== 'left_only'
-  })
-}
-
-function useSideData(entries: readonly CompareEntry[], filter: CompareState | 'all', side: Side) {
-  const hideDot = useCompareStore((s) => s.hideDot)
-  const hideDotFilter = useCompareStore((s) => s.hideDotFilter)
-  const expandedDirs = useCompareStore((s) => s.expandedDirs)
-  const extensionFilter = useCompareStore((s) => s.extensionFilter)
-
-  const sideEntries = useMemo(() => buildSideEntries(entries, side), [entries, side])
-
-  const filteredEntries = useMemo(() => {
-    let result: readonly CompareEntry[] = sideEntries
-
-    result = filterEntriesByPaths(result, extensionFilter)
-
-    if (hideDot) {
-      result = result.filter((e) => {
-        // Check if any ancestor directory starts with '.'
-        const parts = e.relativePath.split('/')
-        const hasDotAncestor = parts.slice(0, -1).some((p) => p.startsWith('.'))
-        if (hasDotAncestor) return false
-
-        if (!e.name.startsWith('.')) return true
-        if (hideDotFilter === 'all') return false
-        if (hideDotFilter === 'files' && !e.isDirectory) return false
-        if (hideDotFilter === 'dirs' && e.isDirectory) return false
-        return true
-      })
-    }
-
-    const effDirStates = computeEffectiveDirStates(result)
-    result = result.map((e) => {
-      if (!e.isDirectory) return e
-      const effective = effDirStates.get(e.relativePath)
-      if (effective && effective !== e.state) return { ...e, state: effective }
-      return e
-    })
-
-    if (filter !== 'all') {
-      const matchesFilter = (state: CompareState) => {
-        if (filter === 'different') return state === 'different' || state === 'left_only' || state === 'right_only'
-        return state === filter
-      }
-      const neededDirs = new Set<string>()
-      for (const e of result) {
-        if (!matchesFilter(e.state)) continue
-        const parts = e.relativePath.split('/')
-        for (let i = 1; i < parts.length; i++) {
-          neededDirs.add(parts.slice(0, i).join('/'))
-        }
-        if (e.isDirectory) neededDirs.add(e.relativePath)
-      }
-      result = result.filter((e) => {
-        if (e.isDirectory) return neededDirs.has(e.relativePath)
-        return matchesFilter(e.state)
-      })
-    }
-
-    return result
-  }, [sideEntries, extensionFilter, filter, hideDot, hideDotFilter])
-
-  const tree = useMemo(() => buildTree(filteredEntries), [filteredEntries])
-  const visibleNodes = useMemo(
-    () => getVisibleNodes(tree, expandedDirs),
-    [tree, expandedDirs],
-  )
-
-  return { sideEntries, visibleNodes }
-}
 
 // ─── Path Header ─────────────────────────────────────────────
 
@@ -168,21 +87,17 @@ interface SideTableProps {
   readonly side: Side
   readonly sourcePath: string
   readonly isLocal: boolean
-  readonly onDoubleClickFile: (entry: CompareEntry) => void
+  readonly nodeInteractions: CompareNodeInteractions
 }
 
-function SideTable({ visibleNodes, side, sourcePath, isLocal, onDoubleClickFile }: SideTableProps) {
-  const expandedDirs = useCompareStore((s) => s.expandedDirs)
-  const expandDir = useCompareStore((s) => s.expandDir)
-  const loadingDirs = useCompareStore((s) => s.loadingDirs)
+function SideTable({ visibleNodes, side, sourcePath, isLocal, nodeInteractions }: SideTableProps) {
   const removeEntry = useCompareStore((s) => s.removeEntry)
   const [ctxMenu, setCtxMenu] = useState<ContextMenuState | null>(null)
   const [renaming, setRenaming] = useState<string | null>(null)
   const [renameValue, setRenameValue] = useState('')
 
   const buildFullPath = (relativePath: string) => {
-    if (sourcePath.endsWith('/')) return sourcePath + relativePath
-    return sourcePath + '/' + relativePath
+    return joinSourcePath(isLocal ? 'local' : 'sftp', sourcePath, relativePath)
   }
 
   const handleContextMenu = useCallback((e: React.MouseEvent, node: TreeNode) => {
@@ -233,7 +148,7 @@ function SideTable({ visibleNodes, side, sourcePath, isLocal, onDoubleClickFile 
       }
     }
     setRenaming(null)
-  }, [renameValue, sourcePath, removeEntry])
+  }, [renameValue, isLocal, sourcePath, removeEntry])
 
   return (
     <div>
@@ -259,14 +174,10 @@ function SideTable({ visibleNodes, side, sourcePath, isLocal, onDoubleClickFile 
               key={node.relativePath}
               node={node}
               side={side}
-              expanded={expandedDirs.has(node.relativePath)}
-              loading={loadingDirs.has(node.relativePath)}
-              onToggle={() => expandDir(node.relativePath)}
-              onDoubleClick={() => {
-                if (!node.isDirectory && node.entry) {
-                  onDoubleClickFile(node.entry)
-                }
-              }}
+              expanded={nodeInteractions.isExpanded(node)}
+              loading={nodeInteractions.isLoading(node)}
+              onToggle={() => nodeInteractions.toggleNode(node)}
+              onDoubleClick={() => nodeInteractions.openNode(node)}
               onContextMenu={(e) => handleContextMenu(e, node)}
               renaming={renaming === node.relativePath}
               renameValue={renameValue}
@@ -292,16 +203,6 @@ function SideTable({ visibleNodes, side, sourcePath, isLocal, onDoubleClickFile 
 
 // ─── Side Row ────────────────────────────────────────────────
 
-function rowBg(state: CompareState): string {
-  switch (state) {
-    case 'different': return 'bg-yellow-900/10'
-    case 'left_only': return 'bg-blue-900/10'
-    case 'right_only': return 'bg-purple-900/10'
-    case 'comparing': return 'bg-blue-900/5'
-    default: return ''
-  }
-}
-
 interface SideRowProps {
   readonly node: TreeNode
   readonly side: Side
@@ -321,7 +222,6 @@ function SideRow({ node, side, expanded, loading, onToggle, onDoubleClick, onCon
   const entry = node.entry
   if (!entry) return null
 
-  const indent = node.depth * 16
   const fileInfo = side === 'left' ? entry.left : entry.right
 
   return (
@@ -331,27 +231,13 @@ function SideRow({ node, side, expanded, loading, onToggle, onDoubleClick, onCon
       onContextMenu={onContextMenu}
     >
       <td className="px-3 py-1">
-        <div className="flex items-center" style={{ paddingLeft: `${indent}px` }}>
-          {node.isDirectory ? (
-            loading ? (
-              <span className="mr-1 flex h-4 w-4 items-center justify-center">
-                <span className="inline-block h-3 w-3 animate-spin rounded-full border border-current border-t-transparent text-blue-400" />
-              </span>
-            ) : (
-              <button
-                onClick={(e) => {
-                  e.stopPropagation()
-                  onToggle()
-                }}
-                className="mr-1 flex h-4 w-4 items-center justify-center text-xs text-neutral-400 hover:text-neutral-200"
-              >
-                {expanded ? '▼' : '▶'}
-              </button>
-            )
-          ) : (
-            <span className="mr-1 w-4" />
-          )}
-          <span className="mr-1 text-xs">{node.isDirectory ? '📁' : '📄'}</span>
+        <TreeEntryCell
+          node={node}
+          expanded={expanded}
+          loading={loading}
+          onToggle={onToggle}
+          indentSize={16}
+        >
           {renaming ? (
             <input
               type="text"
@@ -370,7 +256,7 @@ function SideRow({ node, side, expanded, loading, onToggle, onDoubleClick, onCon
           ) : (
             <span className="font-mono text-xs truncate">{node.name}</span>
           )}
-        </div>
+        </TreeEntryCell>
       </td>
       <td className="px-2 py-1 text-center">
         <StatusBadge state={entry.state} />
@@ -391,8 +277,9 @@ export default function SplitTree({ entries, filter, onDoubleClickFile }: SplitT
   const leftRef = useRef<HTMLDivElement>(null)
   const rightRef = useRef<HTMLDivElement>(null)
   const syncing = useRef(false)
-  const leftData = useSideData(entries, filter, 'left')
-  const rightData = useSideData(entries, filter, 'right')
+  const leftVisibleNodes = useVisibleCompareNodes({ entries, filter, side: 'left' })
+  const rightVisibleNodes = useVisibleCompareNodes({ entries, filter, side: 'right' })
+  const nodeInteractions = useCompareNodeInteractions(onDoubleClickFile)
   const leftSource = useCompareStore((s) => s.leftSource)
   const rightSource = useCompareStore((s) => s.rightSource)
 
@@ -420,21 +307,21 @@ export default function SplitTree({ entries, filter, onDoubleClickFile }: SplitT
       <div className="flex flex-1 overflow-hidden">
         <div ref={leftRef} className="flex-1 overflow-auto" onScroll={() => handleScroll('left')}>
           <SideTable
-            visibleNodes={leftData.visibleNodes}
+            visibleNodes={leftVisibleNodes}
             side="left"
             sourcePath={leftSource?.path ?? ''}
             isLocal={leftSource?.type === 'local'}
-            onDoubleClickFile={onDoubleClickFile}
+            nodeInteractions={nodeInteractions}
           />
         </div>
         <ScrollGutter scrollRef={leftRef} />
         <div ref={rightRef} className="flex-1 overflow-auto" onScroll={() => handleScroll('right')}>
           <SideTable
-            visibleNodes={rightData.visibleNodes}
+            visibleNodes={rightVisibleNodes}
             side="right"
             sourcePath={rightSource?.path ?? ''}
             isLocal={rightSource?.type === 'local'}
-            onDoubleClickFile={onDoubleClickFile}
+            nodeInteractions={nodeInteractions}
           />
         </div>
       </div>

@@ -1,4 +1,5 @@
-import type { NodeSSH, SFTPWrapper } from 'node-ssh'
+import type { NodeSSH } from 'node-ssh'
+import type { FileEntryWithStats, SFTPWrapper, Stats } from 'ssh2'
 import type { FileEntry } from '@shared/types'
 import type { FileSource } from './types'
 import { posix } from 'path'
@@ -23,14 +24,7 @@ export class SFTPSource implements FileSource {
     return new Promise((resolve, reject) => {
       sftp.readdir(dirPath, (err, list) => {
         if (err) return reject(err)
-        const entries: FileEntry[] = list.map((item) => ({
-          name: item.filename,
-          path: item.filename,
-          isDirectory: (item.attrs.mode & 0o40000) !== 0,
-          size: item.attrs.size,
-          mtime: item.attrs.mtime * 1000,
-        }))
-        resolve(entries)
+        resolve(list.map(mapSftpEntry))
       })
     })
   }
@@ -40,13 +34,7 @@ export class SFTPSource implements FileSource {
     return new Promise((resolve, reject) => {
       sftp.stat(filePath, (err, stats) => {
         if (err) return reject(err)
-        resolve({
-          name: posix.basename(filePath),
-          path: filePath,
-          isDirectory: (stats.mode & 0o40000) !== 0,
-          size: stats.size,
-          mtime: stats.mtime * 1000,
-        })
+        resolve(mapSftpStats(filePath, stats))
       })
     })
   }
@@ -71,7 +59,7 @@ export class SFTPSource implements FileSource {
     return new Promise((resolve, reject) => {
       const chunks: Buffer[] = []
       const stream = sftp.createReadStream(filePath, { encoding: 'utf8' })
-      stream.on('data', (chunk: Buffer) => chunks.push(Buffer.from(chunk)))
+      stream.on('data', (chunk: Buffer | string) => chunks.push(Buffer.from(chunk)))
       stream.on('end', () => resolve(Buffer.concat(chunks).toString('utf-8')))
       stream.on('error', reject)
     })
@@ -144,5 +132,25 @@ export class SFTPSource implements FileSource {
         await this.walkDir(rootPath, fullPath, results)
       }
     }
+  }
+}
+
+function mapSftpEntry(item: FileEntryWithStats): FileEntry {
+  return {
+    name: item.filename,
+    path: item.filename,
+    isDirectory: ((item.attrs.mode ?? 0) & 0o40000) !== 0,
+    size: item.attrs.size,
+    mtime: item.attrs.mtime * 1000,
+  }
+}
+
+function mapSftpStats(filePath: string, stats: Stats): FileEntry {
+  return {
+    name: posix.basename(filePath),
+    path: filePath,
+    isDirectory: ((stats.mode ?? 0) & 0o40000) !== 0,
+    size: stats.size,
+    mtime: stats.mtime * 1000,
   }
 }

@@ -10,6 +10,13 @@ function buildSourceConfig(type: 'local' | 'sftp', path: string, sshConfigId: st
   return { type: 'local', path }
 }
 
+function createCompareId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return `${Date.now()}-${crypto.randomUUID()}`
+  }
+  return `${Date.now()}-${Math.random().toString(36).slice(2)}`
+}
+
 export function useCompare() {
   const store = useCompareStore()
   const setPage = useAppStore((s) => s.setPage)
@@ -39,7 +46,7 @@ export function useCompare() {
       return
     }
 
-    const compareId = `${Date.now()}-${Math.random().toString(36).slice(2)}`
+    const compareId = createCompareId()
 
     const left = buildSourceConfig(leftSourceType, leftPath, leftSSHConfigId)
     const right = buildSourceConfig(rightSourceType, rightPath, rightSSHConfigId)
@@ -49,24 +56,31 @@ export function useCompare() {
     store.setSources(left, right)
     setPage('compare')
 
-    const response = await window.api.runCompare({
-      compareId,
-      left,
-      right,
-      strategies: [...strategies],
-      extensionFilter: extensionFilter.length > 0 ? [...extensionFilter] : undefined,
-    })
+    try {
+      const response = await window.api.runCompare({
+        compareId,
+        left,
+        right,
+        strategies: [...strategies],
+        extensionFilter: extensionFilter.length > 0 ? [...extensionFilter] : undefined,
+      })
 
-    if (useCompareStore.getState().activeCompareId !== compareId) {
-      return
-    }
+      if (useCompareStore.getState().activeCompareId !== compareId) {
+        return
+      }
 
-    if (response.success && response.data) {
-      store.finishCompare(compareId, response.data)
-    } else if (response.error === '对比已取消') {
-      store.setError(null, compareId)
-    } else {
-      store.setError(response.error ?? '对比失败', compareId)
+      if (response.success && response.data) {
+        store.finishCompare(compareId, response.data)
+      } else if (response.error === '对比已取消') {
+        store.setError(null, compareId)
+      } else {
+        store.setError(response.error ?? '对比失败', compareId)
+      }
+    } catch (error) {
+      if (useCompareStore.getState().activeCompareId !== compareId) {
+        return
+      }
+      store.setError(error instanceof Error ? error.message : '对比失败', compareId)
     }
   }, [leftPath, rightPath, strategies, extensionFilter, leftSourceType, rightSourceType, leftSSHConfigId, rightSSHConfigId, store, setPage])
 
