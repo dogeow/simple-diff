@@ -149,6 +149,7 @@ export default function TextComparePage() {
           label="左侧"
           value={leftText}
           fileLabel={leftLabel}
+          diffLines={result?.leftLines}
           highlightedLines={leftChangedLines}
           highlightType="remove"
           textAreaRef={leftTextAreaRef}
@@ -160,6 +161,7 @@ export default function TextComparePage() {
           label="右侧"
           value={rightText}
           fileLabel={rightLabel}
+          diffLines={result?.rightLines}
           highlightedLines={rightChangedLines}
           highlightType="add"
           textAreaRef={rightTextAreaRef}

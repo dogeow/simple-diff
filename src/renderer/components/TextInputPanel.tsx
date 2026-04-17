@@ -1,9 +1,11 @@
 import { useMemo, useRef, useState } from 'react'
+import type { DiffLine } from '../../../shared/types'
 
 interface TextInputPanelProps {
   readonly label: string
   readonly value: string
   readonly fileLabel: string
+  readonly diffLines?: readonly DiffLine[]
   readonly highlightedLines?: ReadonlySet<number>
   readonly highlightType?: 'add' | 'remove'
   readonly textAreaRef?: React.RefObject<HTMLTextAreaElement | null>
@@ -25,6 +27,7 @@ export default function TextInputPanel({
   label,
   value,
   fileLabel,
+  diffLines,
   highlightedLines,
   highlightType = 'remove',
   textAreaRef,
@@ -39,7 +42,28 @@ export default function TextInputPanel({
   const internalTextAreaRef = useRef<HTMLTextAreaElement>(null)
 
   const resolvedTextAreaRef = textAreaRef ?? internalTextAreaRef
-  const lines = useMemo(() => (value.length > 0 ? value.split('\n') : ['']), [value])
+  const displayRows = useMemo(() => {
+    if (diffLines && diffLines.length > 0) {
+      return diffLines.map((line, index) => ({
+        key: `${line.lineNumber}-${index}`,
+        number: line.lineNumber > 0 ? String(line.lineNumber) : '',
+        content: line.content,
+        highlighted: line.type === highlightType,
+      }))
+    }
+
+    const rawLines = value.length > 0 ? value.split('\n') : ['']
+    return rawLines.map((content, index) => ({
+      key: String(index),
+      number: String(index + 1),
+      content,
+      highlighted: highlightedLines?.has(index + 1) ?? false,
+    }))
+  }, [diffLines, highlightType, highlightedLines, value])
+  const displayValue = useMemo(
+    () => displayRows.map((row) => row.content).join('\n'),
+    [displayRows],
+  )
   const highlightClass = highlightType === 'add' ? 'bg-green-500/18' : 'bg-red-500/18'
 
   const syncHighlightScroll = (element: HTMLTextAreaElement) => {
@@ -93,6 +117,27 @@ export default function TextInputPanel({
     }
   }
 
+  const handleTextChange = (text: string) => {
+    if (!diffLines || diffLines.length === 0) {
+      onChange(text)
+      return
+    }
+
+    const editedRows = text.split('\n')
+    const actualLines: string[] = []
+
+    for (let index = 0; index < editedRows.length; index++) {
+      const editedContent = editedRows[index] ?? ''
+      const originalRow = diffLines[index]
+
+      if (!originalRow || originalRow.lineNumber > 0 || editedContent.length > 0) {
+        actualLines.push(editedContent)
+      }
+    }
+
+    onChange(actualLines.join('\n'))
+  }
+
   return (
     <div
       className={`flex min-h-0 flex-1 flex-col overflow-hidden rounded border transition-colors ${
@@ -128,9 +173,9 @@ export default function TextInputPanel({
           className="pointer-events-none absolute inset-y-0 left-0 z-10 w-12 overflow-hidden border-r border-neutral-800 bg-neutral-950/95 font-mono text-xs leading-5 text-neutral-500"
         >
           <div className="py-2">
-            {lines.map((_, index) => (
-              <div key={index} className="h-5 px-2 text-right">
-                {index + 1}
+            {displayRows.map((row) => (
+              <div key={row.key} className="h-5 px-2 text-right">
+                {row.number}
               </div>
             ))}
           </div>
@@ -141,12 +186,10 @@ export default function TextInputPanel({
           aria-hidden="true"
           className="pointer-events-none absolute inset-y-0 left-12 right-0 overflow-hidden px-2 py-2 font-mono text-xs leading-5"
         >
-          {lines.map((_, index) => (
+          {displayRows.map((row) => (
             <div
-              key={index}
-              className={`h-5 w-full rounded-sm ${
-                highlightedLines?.has(index + 1) ? highlightClass : ''
-              }`}
+              key={row.key}
+              className={`h-5 w-full rounded-sm ${row.highlighted ? highlightClass : ''}`}
             >
               &nbsp;
             </div>
@@ -155,8 +198,8 @@ export default function TextInputPanel({
 
         <textarea
           ref={resolvedTextAreaRef}
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
+          value={displayValue}
+          onChange={(e) => handleTextChange(e.target.value)}
           onScroll={(e) => syncHighlightScroll(e.currentTarget)}
           placeholder="拖入文件，或粘贴/输入文本..."
           spellCheck={false}
