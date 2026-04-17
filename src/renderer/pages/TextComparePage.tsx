@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef } from 'react'
 import { useTextDiffStore } from '../stores/text-diff-store'
 import TextInputPanel from '../components/TextInputPanel'
+import { buildInlineSegments } from '../utils/inline-diff'
 
 export default function TextComparePage() {
   const {
@@ -10,6 +11,7 @@ export default function TextComparePage() {
     rightLabel,
     result,
     error,
+    charLevel,
     setLeftText,
     setRightText,
     swap,
@@ -17,6 +19,7 @@ export default function TextComparePage() {
     setResult,
     setComputing,
     setError,
+    toggleCharLevel,
   } = useTextDiffStore()
 
   const compareRequestIdRef = useRef(0)
@@ -100,6 +103,11 @@ export default function TextComparePage() {
     }
   }, [result])
 
+  const inlineSegments = useMemo(
+    () => (result && charLevel ? buildInlineSegments(result.leftLines, result.rightLines) : null),
+    [charLevel, result],
+  )
+
   const syncPanelScroll = (source: 'left' | 'right', scrollTop: number, scrollLeft: number) => {
     if (syncingScrollRef.current) return
 
@@ -131,6 +139,17 @@ export default function TextComparePage() {
         >
           清空
         </button>
+        <button
+          onClick={toggleCharLevel}
+          disabled={!result}
+          className={`rounded px-3 py-1.5 text-sm transition-colors ${
+            charLevel
+              ? 'bg-blue-600 text-white hover:bg-blue-500'
+              : 'bg-neutral-700 text-neutral-200 hover:bg-neutral-600'
+          } disabled:cursor-not-allowed disabled:opacity-40`}
+        >
+          字符对比{charLevel ? '：开' : '：关'}
+        </button>
         {error ? (
           <span className="text-sm text-red-400">{error}</span>
         ) : (
@@ -152,6 +171,8 @@ export default function TextComparePage() {
           diffLines={result?.leftLines}
           highlightedLines={leftChangedLines}
           highlightType="remove"
+          charLevel={charLevel}
+          inlineSegments={inlineSegments?.left}
           textAreaRef={leftTextAreaRef}
           onScrollPositionChange={(top, left) => syncPanelScroll('left', top, left)}
           onChange={(text, file) => setLeftText(text, file ?? '')}
@@ -164,6 +185,8 @@ export default function TextComparePage() {
           diffLines={result?.rightLines}
           highlightedLines={rightChangedLines}
           highlightType="add"
+          charLevel={charLevel}
+          inlineSegments={inlineSegments?.right}
           textAreaRef={rightTextAreaRef}
           onScrollPositionChange={(top, left) => syncPanelScroll('right', top, left)}
           onChange={(text, file) => setRightText(text, file ?? '')}

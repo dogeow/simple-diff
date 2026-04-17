@@ -1,13 +1,16 @@
 import { useMemo, useRef, useState } from 'react'
 import type { DiffLine } from '../../../shared/types'
+import type { InlineSegment } from '../utils/inline-diff'
 
 interface TextInputPanelProps {
   readonly label: string
   readonly value: string
   readonly fileLabel: string
   readonly diffLines?: readonly DiffLine[]
+  readonly inlineSegments?: ReadonlyMap<number, readonly InlineSegment[]>
   readonly highlightedLines?: ReadonlySet<number>
   readonly highlightType?: 'add' | 'remove'
+  readonly charLevel?: boolean
   readonly textAreaRef?: React.RefObject<HTMLTextAreaElement | null>
   readonly onScrollPositionChange?: (scrollTop: number, scrollLeft: number) => void
   readonly onChange: (text: string, fileLabel?: string) => void
@@ -28,8 +31,10 @@ export default function TextInputPanel({
   value,
   fileLabel,
   diffLines,
+  inlineSegments,
   highlightedLines,
   highlightType = 'remove',
+  charLevel = false,
   textAreaRef,
   onScrollPositionChange,
   onChange,
@@ -49,6 +54,8 @@ export default function TextInputPanel({
         number: line.lineNumber > 0 ? String(line.lineNumber) : '',
         content: line.content,
         highlighted: line.type === highlightType,
+        type: line.type,
+        segments: inlineSegments?.get(index),
       }))
     }
 
@@ -58,13 +65,16 @@ export default function TextInputPanel({
       number: String(index + 1),
       content,
       highlighted: highlightedLines?.has(index + 1) ?? false,
+      type: highlightedLines?.has(index + 1) ? highlightType : 'equal',
+      segments: undefined,
     }))
-  }, [diffLines, highlightType, highlightedLines, value])
+  }, [diffLines, highlightType, highlightedLines, inlineSegments, value])
   const displayValue = useMemo(
     () => displayRows.map((row) => row.content).join('\n'),
     [displayRows],
   )
-  const highlightClass = highlightType === 'add' ? 'bg-green-500/18' : 'bg-red-500/18'
+  const lineHighlightClass = highlightType === 'add' ? 'bg-green-900/30' : 'bg-red-900/30'
+  const emphasisClass = highlightType === 'add' ? 'bg-green-600/50' : 'bg-red-600/50'
 
   const syncHighlightScroll = (element: HTMLTextAreaElement) => {
     if (highlightRef.current) {
@@ -138,6 +148,22 @@ export default function TextInputPanel({
     onChange(actualLines.join('\n'))
   }
 
+  const renderOverlayLine = (
+    segments: readonly InlineSegment[] | undefined,
+    content: string,
+    highlighted: boolean,
+  ) => {
+    if (!highlighted || !charLevel || !segments || segments.length === 0) {
+      return content.length > 0 ? content : ' '
+    }
+
+    return segments.map((segment, index) => (
+      <span key={index} className={segment.emphasis ? emphasisClass : ''}>
+        {segment.text}
+      </span>
+    ))
+  }
+
   return (
     <div
       className={`flex min-h-0 flex-1 flex-col overflow-hidden rounded border transition-colors ${
@@ -184,14 +210,14 @@ export default function TextInputPanel({
         <div
           ref={highlightRef}
           aria-hidden="true"
-          className="pointer-events-none absolute inset-y-0 left-12 right-0 overflow-hidden px-2 py-2 font-mono text-xs leading-5"
+          className="pointer-events-none absolute inset-0 overflow-hidden py-2 pl-14 pr-2 font-mono text-xs leading-5 text-neutral-100"
         >
           {displayRows.map((row) => (
             <div
               key={row.key}
-              className={`h-5 w-full rounded-sm ${row.highlighted ? highlightClass : ''}`}
+              className={`h-5 overflow-hidden whitespace-pre rounded-sm ${row.highlighted ? lineHighlightClass : ''}`}
             >
-              &nbsp;
+              {renderOverlayLine(row.segments, row.content, row.highlighted)}
             </div>
           ))}
         </div>
@@ -204,7 +230,7 @@ export default function TextInputPanel({
           placeholder="拖入文件，或粘贴/输入文本..."
           spellCheck={false}
           wrap="off"
-          className="relative z-20 h-full w-full resize-none bg-transparent py-2 pl-14 pr-2 font-mono text-xs leading-5 text-neutral-100 placeholder-neutral-600 outline-none"
+          className="relative z-20 h-full w-full resize-none bg-transparent py-2 pl-14 pr-2 font-mono text-xs leading-5 text-transparent caret-neutral-100 placeholder-neutral-600 outline-none"
         />
       </div>
     </div>

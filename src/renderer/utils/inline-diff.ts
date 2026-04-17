@@ -100,18 +100,17 @@ export function buildInlineSegments(
     const removes: number[] = []
     const adds: number[] = []
 
-    while (i < len && leftLines[i].type === 'remove') {
-      removes.push(i)
+    while (
+      i < len
+      && !(leftLines[i].type === 'equal' && rightLines[i].type === 'equal')
+    ) {
+      if (leftLines[i].type === 'remove') {
+        removes.push(i)
+      }
+      if (rightLines[i].type === 'add') {
+        adds.push(i)
+      }
       i++
-    }
-    while (i < len && rightLines[i].type === 'add') {
-      adds.push(i)
-      i++
-    }
-
-    if (removes.length === 0 && adds.length === 0) {
-      i++
-      continue
     }
 
     const pairCount = Math.min(removes.length, adds.length)
@@ -121,6 +120,10 @@ export function buildInlineSegments(
       const inline = computeInlineDiff(leftLines[lIdx].content, rightLines[rIdx].content)
       leftMap.set(lIdx, inline.left)
       rightMap.set(rIdx, inline.right)
+    }
+
+    if (removes.length === 0 && adds.length === 0) {
+      i++
     }
   }
 
