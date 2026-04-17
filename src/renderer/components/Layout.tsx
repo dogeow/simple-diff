@@ -8,7 +8,8 @@ interface LayoutProps {
 }
 
 const NAV_ITEMS: { page: Page; label: string }[] = [
-  { page: 'home', label: '对比' },
+  { page: 'home', label: '目录对比' },
+  { page: 'text', label: '文本对比' },
   { page: 'ssh', label: 'SSH管理' },
   { page: 'history', label: '历史' },
 ]

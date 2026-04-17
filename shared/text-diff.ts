@@ -1,4 +1,4 @@
-import type { DiffLine, TextDiffResult } from '@shared/types'
+import type { DiffLine, TextDiffResult } from './types'
 
 /**
  * Simple LCS-based line differ.
@@ -26,22 +26,31 @@ export function computeTextDiff(leftText: string, rightText: string): TextDiffRe
       ri++
       ci++
     } else {
-      // Consume removed lines from left until we hit the next LCS line
-      let addedLeft = false
-      let addedRight = false
-
+      // Collect removes and adds, then pair them row-by-row for alignment
+      const removeStart = li
       while (li < leftSrc.length && (ci >= lcs.length || leftSrc[li] !== lcs[ci])) {
-        leftLines.push({ type: 'remove', lineNumber: li + 1, content: leftSrc[li] })
-        rightLines.push({ type: 'equal', lineNumber: -1, content: '' }) // placeholder
         li++
-        addedLeft = true
+      }
+      const addStart = ri
+      while (ri < rightSrc.length && (ci >= lcs.length || rightSrc[ri] !== lcs[ci])) {
+        ri++
       }
 
-      while (ri < rightSrc.length && (ci >= lcs.length || rightSrc[ri] !== lcs[ci])) {
-        leftLines.push({ type: 'equal', lineNumber: -1, content: '' }) // placeholder
-        rightLines.push({ type: 'add', lineNumber: ri + 1, content: rightSrc[ri] })
-        ri++
-        addedRight = true
+      const removeCount = li - removeStart
+      const addCount = ri - addStart
+      const maxCount = Math.max(removeCount, addCount)
+
+      for (let k = 0; k < maxCount; k++) {
+        if (k < removeCount) {
+          leftLines.push({ type: 'remove', lineNumber: removeStart + k + 1, content: leftSrc[removeStart + k] })
+        } else {
+          leftLines.push({ type: 'equal', lineNumber: -1, content: '' })
+        }
+        if (k < addCount) {
+          rightLines.push({ type: 'add', lineNumber: addStart + k + 1, content: rightSrc[addStart + k] })
+        } else {
+          rightLines.push({ type: 'equal', lineNumber: -1, content: '' })
+        }
       }
     }
   }

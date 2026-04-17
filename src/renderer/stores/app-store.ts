@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import type { SourceConfig, TextDiffResult } from '../../../shared/types'
 
-export type Page = 'home' | 'compare' | 'ssh' | 'history'
+export type Page = 'home' | 'compare' | 'text' | 'ssh' | 'history'
 
 export interface DiffTab {
   readonly id: string

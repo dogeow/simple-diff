@@ -1,6 +1,7 @@
 import Layout from './components/Layout'
 import HomePage from './pages/HomePage'
 import ComparePage from './pages/ComparePage'
+import TextComparePage from './pages/TextComparePage'
 import SSHManagerPage from './pages/SSHManagerPage'
 import HistoryPage from './pages/HistoryPage'
 import { useAppStore } from './stores/app-store'
@@ -12,6 +13,7 @@ export default function App() {
     <Layout>
       {page === 'home' && <HomePage />}
       {page === 'compare' && <ComparePage />}
+      {page === 'text' && <TextComparePage />}
       {page === 'ssh' && <SSHManagerPage />}
       {page === 'history' && <HistoryPage />}
     </Layout>
