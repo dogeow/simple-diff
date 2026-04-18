@@ -1,8 +1,14 @@
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { DiffLine } from '../../../shared/types'
 import type { InlineSegment } from '../utils/inline-diff'
+import {
+  getDisplayRowIndexFromTextOffset,
+  type ManualAlignRequest,
+  type TextDiffSide,
+} from '../utils/manual-align'
 
 interface TextInputPanelProps {
+  readonly side: TextDiffSide
   readonly label: string
   readonly value: string
   readonly fileLabel: string
@@ -13,6 +19,10 @@ interface TextInputPanelProps {
   readonly charLevel?: boolean
   readonly textAreaRef?: React.RefObject<HTMLTextAreaElement | null>
   readonly onScrollPositionChange?: (scrollTop: number, scrollLeft: number) => void
+  readonly manualAlignRequest?: ManualAlignRequest | null
+  readonly alignedLineNumbers?: ReadonlySet<number>
+  readonly onManualAlignShortcut?: (lineNumber: number | null) => void
+  readonly onManualAlignLineClick?: (side: TextDiffSide, lineNumber: number | null) => void
   readonly onChange: (text: string, fileLabel?: string) => void
   readonly onClear: () => void
 }
@@ -27,6 +37,7 @@ async function readFileAsText(file: File): Promise<string> {
 }
 
 export default function TextInputPanel({
+  side,
   label,
   value,
   fileLabel,
@@ -37,6 +48,10 @@ export default function TextInputPanel({
   charLevel = false,
   textAreaRef,
   onScrollPositionChange,
+  manualAlignRequest,
+  alignedLineNumbers,
+  onManualAlignShortcut,
+  onManualAlignLineClick,
   onChange,
   onClear,
 }: TextInputPanelProps) {
@@ -44,6 +59,7 @@ export default function TextInputPanel({
   const dragDepthRef = useRef(0)
   const highlightRef = useRef<HTMLDivElement>(null)
   const gutterRef = useRef<HTMLDivElement>(null)
+  const manualAlignOverlayRef = useRef<HTMLDivElement>(null)
   const internalTextAreaRef = useRef<HTMLTextAreaElement>(null)
 
   const resolvedTextAreaRef = textAreaRef ?? internalTextAreaRef
@@ -52,6 +68,7 @@ export default function TextInputPanel({
       return diffLines.map((line, index) => ({
         key: `${line.lineNumber}-${index}`,
         number: line.lineNumber > 0 ? String(line.lineNumber) : '',
+        lineNumber: line.lineNumber > 0 ? line.lineNumber : null,
         content: line.content,
         highlighted: line.type === highlightType,
         type: line.type,
@@ -63,6 +80,7 @@ export default function TextInputPanel({
     return rawLines.map((content, index) => ({
       key: String(index),
       number: String(index + 1),
+      lineNumber: index + 1,
       content,
       highlighted: highlightedLines?.has(index + 1) ?? false,
       type: highlightedLines?.has(index + 1) ? highlightType : 'equal',
@@ -75,6 +93,21 @@ export default function TextInputPanel({
   )
   const lineHighlightClass = highlightType === 'add' ? 'bg-green-900/30' : 'bg-red-900/30'
   const emphasisClass = highlightType === 'add' ? 'bg-green-600/50' : 'bg-red-600/50'
+  const manualAlignActive = manualAlignRequest != null
+  const awaitingManualAlignTarget = manualAlignRequest != null && manualAlignRequest.side !== side
+
+  useEffect(() => {
+    if (!manualAlignActive || !manualAlignOverlayRef.current) {
+      return
+    }
+
+    manualAlignOverlayRef.current.scrollTop = resolvedTextAreaRef.current?.scrollTop ?? 0
+  }, [manualAlignActive, resolvedTextAreaRef])
+
+  const resolveLineNumberFromSelection = (element: HTMLTextAreaElement): number | null => {
+    const rowIndex = getDisplayRowIndexFromTextOffset(element.value, element.selectionStart)
+    return displayRows[rowIndex]?.lineNumber ?? null
+  }
 
   const syncHighlightScroll = (element: HTMLTextAreaElement) => {
     if (highlightRef.current) {
@@ -83,6 +116,9 @@ export default function TextInputPanel({
     }
     if (gutterRef.current) {
       gutterRef.current.scrollTop = element.scrollTop
+    }
+    if (manualAlignOverlayRef.current) {
+      manualAlignOverlayRef.current.scrollTop = element.scrollTop
     }
     onScrollPositionChange?.(element.scrollTop, element.scrollLeft)
   }
@@ -164,6 +200,19 @@ export default function TextInputPanel({
     ))
   }
 
+  const handleTextAreaKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (
+      onManualAlignShortcut
+      && (event.metaKey || event.ctrlKey)
+      && event.shiftKey
+      && !event.altKey
+      && event.key.toLowerCase() === 'l'
+    ) {
+      event.preventDefault()
+      onManualAlignShortcut(resolveLineNumberFromSelection(event.currentTarget))
+    }
+  }
+
   return (
     <div
       className={`flex min-h-0 flex-1 flex-col overflow-hidden rounded border transition-colors ${
@@ -179,6 +228,26 @@ export default function TextInputPanel({
         {fileLabel && (
           <span className="truncate text-neutral-500" title={fileLabel}>
             {fileLabel}
+          </span>
+        )}
+        {manualAlignRequest?.side === side && manualAlignRequest.lineNumber != null && (
+          <span className="rounded bg-amber-500/10 px-1.5 py-0.5 text-[11px] text-amber-300">
+            锚点行 {manualAlignRequest.lineNumber}
+          </span>
+        )}
+        {manualAlignRequest?.side === side && manualAlignRequest.lineNumber == null && (
+          <span className="rounded bg-amber-500/10 px-1.5 py-0.5 text-[11px] text-amber-300">
+            点击当前侧锚点行
+          </span>
+        )}
+        {awaitingManualAlignTarget && (
+          <span className="rounded bg-amber-500/10 px-1.5 py-0.5 text-[11px] text-amber-300">
+            点击此侧目标行
+          </span>
+        )}
+        {manualAlignRequest?.side === side && (
+          <span className="rounded bg-amber-500/10 px-1.5 py-0.5 text-[11px] text-amber-300">
+            {manualAlignRequest.lineNumber == null ? '先选锚点' : '可点击改锚点'}
           </span>
         )}
         <span className="ml-auto text-neutral-600">{value.length} 字符</span>
@@ -200,7 +269,16 @@ export default function TextInputPanel({
         >
           <div className="py-2">
             {displayRows.map((row) => (
-              <div key={row.key} className="h-5 px-2 text-right">
+              <div
+                key={row.key}
+                className={`h-5 px-2 text-right ${
+                  row.lineNumber != null && manualAlignRequest?.side === side && manualAlignRequest.lineNumber === row.lineNumber
+                    ? 'bg-amber-500/15 text-amber-300'
+                    : row.lineNumber != null && alignedLineNumbers?.has(row.lineNumber)
+                      ? 'text-amber-200'
+                      : ''
+                }`}
+              >
                 {row.number}
               </div>
             ))}
@@ -215,22 +293,56 @@ export default function TextInputPanel({
           {displayRows.map((row) => (
             <div
               key={row.key}
-              className={`h-5 overflow-hidden whitespace-pre rounded-sm ${row.highlighted ? lineHighlightClass : ''}`}
+              className={`h-5 overflow-hidden whitespace-pre rounded-sm ${
+                row.highlighted ? lineHighlightClass : ''
+              } ${
+                row.lineNumber != null && manualAlignRequest?.side === side && manualAlignRequest.lineNumber === row.lineNumber
+                  ? 'ring-1 ring-inset ring-amber-300/80 bg-amber-500/20'
+                  : row.lineNumber != null && alignedLineNumbers?.has(row.lineNumber)
+                    ? 'ring-1 ring-inset ring-amber-400/30'
+                    : ''
+              }`}
             >
               {renderOverlayLine(row.segments, row.content, row.highlighted)}
             </div>
           ))}
         </div>
 
+        {manualAlignActive && onManualAlignLineClick && (
+          <div
+            ref={manualAlignOverlayRef}
+            className="absolute inset-0 z-30 overflow-hidden py-2 font-mono text-xs leading-5"
+          >
+            {displayRows.map((row) => (
+              <div
+                key={row.key}
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => onManualAlignLineClick(side, row.lineNumber)}
+                className={`flex h-5 ${
+                  row.lineNumber != null
+                    ? 'cursor-crosshair hover:bg-amber-500/10'
+                    : 'cursor-not-allowed'
+                }`}
+              >
+                <div className="w-12 shrink-0" />
+                <div className="flex-1" />
+              </div>
+            ))}
+          </div>
+        )}
+
         <textarea
           ref={resolvedTextAreaRef}
           value={displayValue}
           onChange={(e) => handleTextChange(e.target.value)}
           onScroll={(e) => syncHighlightScroll(e.currentTarget)}
+          onKeyDown={handleTextAreaKeyDown}
           placeholder="拖入文件，或粘贴/输入文本..."
           spellCheck={false}
           wrap="off"
-          className="relative z-20 h-full w-full resize-none bg-transparent py-2 pl-14 pr-2 font-mono text-xs leading-5 text-transparent caret-neutral-100 placeholder-neutral-600 outline-none"
+          className={`relative z-20 h-full w-full resize-none bg-transparent py-2 pl-14 pr-2 font-mono text-xs leading-5 text-transparent caret-neutral-100 placeholder-neutral-600 outline-none ${
+            awaitingManualAlignTarget ? 'cursor-crosshair' : ''
+          }`}
         />
       </div>
     </div>
