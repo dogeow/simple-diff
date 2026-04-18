@@ -45,7 +45,7 @@ npm run dist
 
 ## 项目结构
 
-```
+```plain
 shared/types.ts        跨进程共享类型
 src/main/              Electron 主进程
 src/preload/           contextBridge
@@ -56,6 +56,10 @@ src/renderer/          React 前端
   hooks/               自定义 Hooks
 ```
 
+## TODO
+
+- [ ] 文件内容对比时的对齐不精准
+
 ## 许可证
 
-ISC
+MIT
