@@ -28,4 +28,41 @@ describe('computeTextDiff', () => {
       { type: 'add', lineNumber: 3, content: 'scene.background = new THREE.Color(0x1a1a2e)' },
     ])
   })
+
+  it('anchors on unique lines and is not hijacked by short repeated matches', () => {
+    // `renderer.render(...)` appears twice on the right (once at top, once inside
+    // animate()) so it is NOT unique on the right. `window.addEventListener` is
+    // unique on both sides, so patience anchors on it and keeps the two
+    // addEventListener lines on the same visual row.
+    const left = [
+      'window.addEventListener(\'resize\', () => {',
+      '  renderer.render(scene, camera)',
+      '})',
+    ].join('\n')
+
+    const right = [
+      'renderer.render(scene, camera)',
+      'function animate() {',
+      '  renderer.render(scene, camera)',
+      '}',
+      'animate()',
+      'window.addEventListener(\'resize\', () => {',
+      '  camera.updateProjectionMatrix()',
+      '})',
+    ].join('\n')
+
+    const result = computeTextDiff(left, right)
+
+    const leftRow = result.leftLines.findIndex(
+      (l) => l.content === 'window.addEventListener(\'resize\', () => {',
+    )
+    const rightRow = result.rightLines.findIndex(
+      (l) => l.content === 'window.addEventListener(\'resize\', () => {',
+    )
+
+    expect(leftRow).toBeGreaterThanOrEqual(0)
+    expect(leftRow).toBe(rightRow)
+    expect(result.leftLines[leftRow].type).toBe('equal')
+    expect(result.rightLines[rightRow].type).toBe('equal')
+  })
 })
