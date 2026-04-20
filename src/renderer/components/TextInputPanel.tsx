@@ -290,22 +290,24 @@ export default function TextInputPanel({
           aria-hidden="true"
           className="pointer-events-none absolute inset-0 overflow-hidden py-2 pl-14 pr-2 font-mono text-xs leading-5 text-neutral-100"
         >
-          {displayRows.map((row) => (
-            <div
-              key={row.key}
-              className={`h-5 overflow-hidden whitespace-pre rounded-sm ${
-                row.highlighted ? lineHighlightClass : ''
-              } ${
-                row.lineNumber != null && manualAlignRequest?.side === side && manualAlignRequest.lineNumber === row.lineNumber
-                  ? 'ring-1 ring-inset ring-amber-300/80 bg-amber-500/20'
-                  : row.lineNumber != null && alignedLineNumbers?.has(row.lineNumber)
-                    ? 'ring-1 ring-inset ring-amber-400/30'
-                    : ''
-              }`}
-            >
-              {renderOverlayLine(row.segments, row.content, row.highlighted)}
-            </div>
-          ))}
+          <div className="min-w-full w-max">
+            {displayRows.map((row) => (
+              <div
+                key={row.key}
+                className={`h-5 min-w-full whitespace-pre rounded-sm pr-2 ${
+                  row.highlighted ? lineHighlightClass : ''
+                } ${
+                  row.lineNumber != null && manualAlignRequest?.side === side && manualAlignRequest.lineNumber === row.lineNumber
+                    ? 'ring-1 ring-inset ring-amber-300/80 bg-amber-500/20'
+                    : row.lineNumber != null && alignedLineNumbers?.has(row.lineNumber)
+                      ? 'ring-1 ring-inset ring-amber-400/30'
+                      : ''
+                }`}
+              >
+                {renderOverlayLine(row.segments, row.content, row.highlighted)}
+              </div>
+            ))}
+          </div>
         </div>
 
         {manualAlignActive && onManualAlignLineClick && (

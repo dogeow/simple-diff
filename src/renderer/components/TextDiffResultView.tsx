@@ -93,11 +93,11 @@ function LineRow({ line, segments }: LineRowProps) {
     line.type === 'add' || line.type === 'remove' ? EMPHASIS_BG[line.type] : ''
 
   return (
-    <div className={`flex border-b border-neutral-800/30 ${LINE_BG[line.type]}`}>
+    <div className={`flex min-w-full w-max border-b border-neutral-800/30 ${LINE_BG[line.type]}`}>
       <span className="inline-block w-12 shrink-0 select-none border-r border-neutral-800 px-2 py-0.5 text-right text-neutral-500">
         {line.lineNumber >= 0 ? line.lineNumber : ''}
       </span>
-      <pre className="flex-1 overflow-x-auto whitespace-pre px-2 py-0.5">
+      <pre className="min-w-0 whitespace-pre px-2 py-0.5">
         {segments
           ? segments.map((seg, i) =>
               seg.emphasis ? (

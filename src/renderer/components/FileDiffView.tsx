@@ -353,12 +353,12 @@ function HunkBlock({ hunk, lines, side, onCopy, containerRef }: HunkBlockProps) 
       {hunkLines.map((line, i) => (
         <div
           key={hunk.startIndex + i}
-          className={`flex border-b border-neutral-800/30 ${LINE_BG[line.type]}`}
+          className={`flex min-w-full w-max border-b border-neutral-800/30 ${LINE_BG[line.type]}`}
         >
           <span className="inline-block w-12 shrink-0 select-none border-r border-neutral-800 px-2 py-0.5 text-right text-neutral-500">
             {line.lineNumber >= 0 ? line.lineNumber : ''}
           </span>
-          <pre className="flex-1 whitespace-pre overflow-x-auto px-2 py-0.5">
+          <pre className="min-w-0 whitespace-pre px-2 py-0.5">
             {line.content}
           </pre>
         </div>
