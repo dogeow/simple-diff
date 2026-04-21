@@ -1,5 +1,6 @@
 import { useCallback } from 'react'
 import { resolveSourcePath } from '@shared/source-path'
+import { formatDuration } from '@shared/format-duration'
 import { useCompareStore } from '../stores/compare-store'
 import { useAppStore, type DiffTab } from '../stores/app-store'
 import CompareTree from '../components/CompareTree'
@@ -165,7 +166,7 @@ export default function ComparePage() {
               对比中…
             </span>
           )}
-          {done && <span className="text-green-400">✓ 完成 {duration}ms</span>}
+          {done && <span className="text-green-400">✓ 完成 {formatDuration(duration)}</span>}
         </div>
       </div>
 

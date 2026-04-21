@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react'
+import { useState, useCallback, useEffect, useMemo, useRef } from 'react'
 import { joinSourcePath } from '@shared/source-path'
 import type { CompareEntry, CompareState } from '../../../shared/types'
 import { truncatePath, type TreeNode } from '../utils/tree-utils'
@@ -18,6 +18,8 @@ interface SplitTreeProps {
 }
 
 type Side = 'left' | 'right'
+const ROW_HEIGHT = 40
+const OVERSCAN_ROWS = 12
 
 // ─── Path Header ─────────────────────────────────────────────
 
@@ -66,7 +68,7 @@ function PathHeader({ side }: { readonly side: Side }) {
             className="flex-1 truncate text-left font-mono text-xs text-neutral-400 hover:text-neutral-200"
             title={sourcePath}
           >
-            {truncatePath(sourcePath) || '—'}
+            {truncatePath(sourcePath, 88) || '—'}
           </button>
         )}
       </div>
@@ -88,13 +90,28 @@ interface SideTableProps {
   readonly sourcePath: string
   readonly isLocal: boolean
   readonly nodeInteractions: CompareNodeInteractions
+  readonly startIndex: number
+  readonly endIndex: number
+  readonly topSpacerHeight: number
+  readonly bottomSpacerHeight: number
 }
 
-function SideTable({ visibleNodes, side, sourcePath, isLocal, nodeInteractions }: SideTableProps) {
+function SideTable({
+  visibleNodes,
+  side,
+  sourcePath,
+  isLocal,
+  nodeInteractions,
+  startIndex,
+  endIndex,
+  topSpacerHeight,
+  bottomSpacerHeight,
+}: SideTableProps) {
   const removeEntry = useCompareStore((s) => s.removeEntry)
   const [ctxMenu, setCtxMenu] = useState<ContextMenuState | null>(null)
   const [renaming, setRenaming] = useState<string | null>(null)
   const [renameValue, setRenameValue] = useState('')
+  const renderedNodes = visibleNodes.slice(startIndex, endIndex)
 
   const buildFullPath = (relativePath: string) => {
     return joinSourcePath(isLocal ? 'local' : 'sftp', sourcePath, relativePath)
@@ -169,7 +186,12 @@ function SideTable({ visibleNodes, side, sourcePath, isLocal, nodeInteractions }
               </td>
             </tr>
           )}
-          {visibleNodes.map((node) => (
+          {visibleNodes.length > 0 && topSpacerHeight > 0 && (
+            <tr aria-hidden="true">
+              <td colSpan={4} className="p-0" style={{ height: `${topSpacerHeight}px` }} />
+            </tr>
+          )}
+          {renderedNodes.map((node) => (
             <SideRow
               key={node.relativePath}
               node={node}
@@ -186,6 +208,11 @@ function SideTable({ visibleNodes, side, sourcePath, isLocal, nodeInteractions }
               onRenameCancel={() => setRenaming(null)}
             />
           ))}
+          {visibleNodes.length > 0 && bottomSpacerHeight > 0 && (
+            <tr aria-hidden="true">
+              <td colSpan={4} className="p-0" style={{ height: `${bottomSpacerHeight}px` }} />
+            </tr>
+          )}
         </tbody>
       </table>
 
@@ -226,7 +253,7 @@ function SideRow({ node, side, expanded, loading, onToggle, onDoubleClick, onCon
 
   return (
     <tr
-      className={`border-b border-neutral-800 hover:bg-neutral-800/50 cursor-pointer select-none ${rowBg(entry.state)}`}
+      className={`h-10 border-b border-neutral-800 hover:bg-neutral-800/50 cursor-pointer select-none ${rowBg(entry.state)}`}
       onDoubleClick={onDoubleClick}
       onContextMenu={onContextMenu}
     >
@@ -277,11 +304,27 @@ export default function SplitTree({ entries, filter, onDoubleClickFile }: SplitT
   const leftRef = useRef<HTMLDivElement>(null)
   const rightRef = useRef<HTMLDivElement>(null)
   const syncing = useRef(false)
-  const leftVisibleNodes = useVisibleCompareNodes({ entries, filter, side: 'left' })
-  const rightVisibleNodes = useVisibleCompareNodes({ entries, filter, side: 'right' })
+  const [scrollTop, setScrollTop] = useState(0)
+  const [viewportHeight, setViewportHeight] = useState(0)
+  const visibleNodes = useVisibleCompareNodes({ entries, filter })
   const nodeInteractions = useCompareNodeInteractions(onDoubleClickFile)
   const leftSource = useCompareStore((s) => s.leftSource)
   const rightSource = useCompareStore((s) => s.rightSource)
+
+  useEffect(() => {
+    const element = leftRef.current
+    if (!element) return
+
+    const update = () => {
+      setViewportHeight(element.clientHeight)
+      setScrollTop(element.scrollTop)
+    }
+
+    update()
+    const observer = new ResizeObserver(update)
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [])
 
   const handleScroll = useCallback((source: 'left' | 'right') => {
     if (syncing.current) return
@@ -289,10 +332,29 @@ export default function SplitTree({ entries, filter, onDoubleClickFile }: SplitT
     const from = source === 'left' ? leftRef.current : rightRef.current
     const to = source === 'left' ? rightRef.current : leftRef.current
     if (from && to) {
+      setScrollTop(from.scrollTop)
       to.scrollTop = from.scrollTop
     }
     requestAnimationFrame(() => { syncing.current = false })
   }, [])
+
+  const { startIndex, endIndex, topSpacerHeight, bottomSpacerHeight } = useMemo(() => {
+    if (visibleNodes.length === 0) {
+      return { startIndex: 0, endIndex: 0, topSpacerHeight: 0, bottomSpacerHeight: 0 }
+    }
+
+    const safeViewportHeight = Math.max(viewportHeight, ROW_HEIGHT)
+    const visibleCount = Math.ceil(safeViewportHeight / ROW_HEIGHT)
+    const start = Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - OVERSCAN_ROWS)
+    const end = Math.min(visibleNodes.length, start + visibleCount + OVERSCAN_ROWS * 2)
+
+    return {
+      startIndex: start,
+      endIndex: end,
+      topSpacerHeight: start * ROW_HEIGHT,
+      bottomSpacerHeight: Math.max(0, (visibleNodes.length - end) * ROW_HEIGHT),
+    }
+  }, [scrollTop, viewportHeight, visibleNodes.length])
 
   return (
     <div className="flex h-full flex-col">
@@ -307,21 +369,29 @@ export default function SplitTree({ entries, filter, onDoubleClickFile }: SplitT
       <div className="flex flex-1 overflow-hidden">
         <div ref={leftRef} className="flex-1 overflow-auto" onScroll={() => handleScroll('left')}>
           <SideTable
-            visibleNodes={leftVisibleNodes}
+            visibleNodes={visibleNodes}
             side="left"
             sourcePath={leftSource?.path ?? ''}
             isLocal={leftSource?.type === 'local'}
             nodeInteractions={nodeInteractions}
+            startIndex={startIndex}
+            endIndex={endIndex}
+            topSpacerHeight={topSpacerHeight}
+            bottomSpacerHeight={bottomSpacerHeight}
           />
         </div>
         <ScrollGutter scrollRef={leftRef} />
         <div ref={rightRef} className="flex-1 overflow-auto" onScroll={() => handleScroll('right')}>
           <SideTable
-            visibleNodes={rightVisibleNodes}
+            visibleNodes={visibleNodes}
             side="right"
             sourcePath={rightSource?.path ?? ''}
             isLocal={rightSource?.type === 'local'}
             nodeInteractions={nodeInteractions}
+            startIndex={startIndex}
+            endIndex={endIndex}
+            topSpacerHeight={topSpacerHeight}
+            bottomSpacerHeight={bottomSpacerHeight}
           />
         </div>
       </div>

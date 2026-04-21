@@ -22,6 +22,12 @@ const mocks = vi.hoisted(() => {
     loggerInfo: vi.fn(),
     loggerWarn: vi.fn(),
     loggerError: vi.fn(),
+    syncStart: vi.fn(),
+    syncPause: vi.fn(),
+    syncResume: vi.fn(),
+    syncGetSnapshot: vi.fn(),
+    syncClear: vi.fn(),
+    syncSubscribe: vi.fn(() => vi.fn()),
   }
 })
 
@@ -78,6 +84,17 @@ vi.mock('../utils/logger', () => ({
   },
 }))
 
+vi.mock('../sync/sync-manager', () => ({
+  syncManager: {
+    start: mocks.syncStart,
+    pause: mocks.syncPause,
+    resume: mocks.syncResume,
+    getSnapshot: mocks.syncGetSnapshot,
+    clear: mocks.syncClear,
+    subscribe: mocks.syncSubscribe,
+  },
+}))
+
 function createMockSource(type: FileSource['type'] = 'local'): FileSource & { dispose: ReturnType<typeof vi.fn> } {
   return {
     type,
@@ -86,9 +103,12 @@ function createMockSource(type: FileSource['type'] = 'local'): FileSource & { di
     readDir: vi.fn(async () => []),
     exists: vi.fn(async () => true),
     readText: vi.fn(async () => ''),
+    readFileBuffer: vi.fn(async () => Buffer.alloc(0)),
     hashFile: vi.fn(async () => ''),
     hashFileRange: vi.fn(async () => ''),
     writeText: vi.fn(async () => {}),
+    writeFileBuffer: vi.fn(async () => {}),
+    ensureDir: vi.fn(async () => {}),
     dispose: vi.fn(async () => {}),
   }
 }

@@ -18,6 +18,9 @@ export interface FileSource {
   /** Read file content as UTF-8 text */
   readText(filePath: string): Promise<string>
 
+  /** Read file content as raw bytes */
+  readFileBuffer(filePath: string): Promise<Buffer>
+
   /** Compute a stable content hash for a file */
   hashFile(filePath: string): Promise<string>
 
@@ -26,6 +29,12 @@ export interface FileSource {
 
   /** Write UTF-8 text to a file */
   writeText(filePath: string, content: string): Promise<void>
+
+  /** Write raw bytes to a file */
+  writeFileBuffer(filePath: string, content: Buffer): Promise<void>
+
+  /** Ensure a directory exists */
+  ensureDir(dirPath: string): Promise<void>
 
   /** Release underlying resources (e.g. SSH connection) */
   dispose(): Promise<void>

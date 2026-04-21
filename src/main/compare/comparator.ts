@@ -7,6 +7,7 @@ import { QuickHashStrategy } from './strategies/quick-hash'
 import { SizeStrategy } from './strategies/size'
 import { MtimeStrategy } from './strategies/mtime'
 import { logger } from '../utils/logger'
+import { formatDuration } from '@shared/format-duration'
 
 const STRATEGY_MAP: Record<StrategyName, () => CompareStrategy> = {
   size: () => new SizeStrategy(),
@@ -14,6 +15,9 @@ const STRATEGY_MAP: Record<StrategyName, () => CompareStrategy> = {
   hash: () => new HashStrategy(),
   quick_hash: () => new QuickHashStrategy(),
 }
+
+const DIRECTORY_SCAN_CONCURRENCY = 8
+const DIRECTORY_LOG_INTERVAL = 200
 
 export interface ComparatorOptions {
   readonly leftSource: FileSource
@@ -134,62 +138,61 @@ export async function compareDirectories(options: ComparatorOptions): Promise<Co
 
   const allEntries: CompareEntry[] = []
   const stats = { total: 0, equal: 0, different: 0, leftOnly: 0, rightOnly: 0 }
+  let scannedDirCount = 0
 
-  // BFS queue: each item is { relative path prefix, left absolute, right absolute }
-  const queue: { rel: string; leftAbs: string; rightAbs: string }[] = [
+  let currentLevel: { rel: string; leftAbs: string; rightAbs: string }[] = [
     { rel: '', leftAbs: leftRoot, rightAbs: rightRoot },
   ]
 
-  while (queue.length > 0) {
-    throwIfAborted(signal)
+  while (currentLevel.length > 0) {
+    const nextLevel: { rel: string; leftAbs: string; rightAbs: string }[] = []
 
-    const { rel, leftAbs, rightAbs } = queue.shift()!
-    const dirLabel = rel || '.'
-    logger.info(`扫描层级: ${dirLabel}`)
-
-    // List both sides in parallel
-    const [leftList, rightList] = await Promise.all([
-      listSafe(leftSource, leftAbs, 'left', dirLabel),
-      listSafe(rightSource, rightAbs, 'right', dirLabel),
-    ])
-
-    const levelEntries = matchLevel(leftList, rightList, rel, pathFilters)
-    if (levelEntries.length === 0) continue
-
-    // Emit this batch so renderer can display immediately
-    throwIfAborted(signal)
-    onEntriesFound?.(levelEntries)
-
-    // Compare files and queue shared directories
-    for (const entry of levelEntries) {
+    await mapConcurrent(currentLevel, DIRECTORY_SCAN_CONCURRENCY, async ({ rel, leftAbs, rightAbs }) => {
       throwIfAborted(signal)
 
-      if (entry.isDirectory) {
-        if (entry.state === 'pending') {
-          // Both sides have this dir — queue for deeper scan
-          const childRel = entry.relativePath
-          queue.push({
-            rel: childRel,
-            leftAbs: joinPath(leftSource, leftAbs, entry.name),
-            rightAbs: joinPath(rightSource, rightAbs, entry.name),
-          })
-          // Mark directory as equal (structure match)
-          const resolved: CompareEntry = { ...entry, state: 'equal', reasons: [] }
-          allEntries.push(resolved)
-          stats.total++
-          stats.equal++
-          onEntryUpdate?.(resolved)
-        } else {
-          // One-side-only directory — do NOT recurse
-          allEntries.push(entry)
-          stats.total++
-          if (entry.state === 'left_only') stats.leftOnly++
-          else if (entry.state === 'right_only') stats.rightOnly++
+      scannedDirCount++
+      if (scannedDirCount === 1 || scannedDirCount % DIRECTORY_LOG_INTERVAL === 0) {
+        logger.info(`正在扫描目录，已处理 ${scannedDirCount} 个目录`)
+      }
+
+      const dirLabel = rel || '.'
+
+      const [leftList, rightList] = await Promise.all([
+        listSafe(leftSource, leftAbs, 'left', dirLabel),
+        listSafe(rightSource, rightAbs, 'right', dirLabel),
+      ])
+
+      const levelEntries = matchLevel(leftList, rightList, rel, pathFilters)
+      if (levelEntries.length === 0) return
+
+      throwIfAborted(signal)
+      onEntriesFound?.(levelEntries)
+
+      for (const entry of levelEntries) {
+        throwIfAborted(signal)
+
+        if (entry.isDirectory) {
+          if (entry.state === 'pending') {
+            nextLevel.push({
+              rel: entry.relativePath,
+              leftAbs: joinPath(leftSource, leftAbs, entry.name),
+              rightAbs: joinPath(rightSource, rightAbs, entry.name),
+            })
+            const resolved: CompareEntry = { ...entry, state: 'equal', reasons: [] }
+            allEntries.push(resolved)
+            stats.total++
+            stats.equal++
+            onEntryUpdate?.(resolved)
+          } else {
+            allEntries.push(entry)
+            stats.total++
+            if (entry.state === 'left_only') stats.leftOnly++
+            else if (entry.state === 'right_only') stats.rightOnly++
+          }
+          continue
         }
-      } else {
-        // File — compare immediately
+
         if (entry.state === 'pending') {
-          throwIfAborted(signal)
           onEntryUpdate?.({ ...entry, state: 'comparing' })
 
           const reasons: DiffReason[] = []
@@ -221,12 +224,32 @@ export async function compareDirectories(options: ComparatorOptions): Promise<Co
           else if (entry.state === 'right_only') stats.rightOnly++
         }
       }
-    }
+    })
+
+    currentLevel = nextLevel
   }
 
   const duration = Date.now() - startTime
-  logger.info(`对比完成，耗时 ${duration}ms — 共 ${stats.total} 项`)
+  logger.info(`对比完成，耗时 ${formatDuration(duration)} — 共 ${stats.total} 项`)
   return { entries: allEntries, stats, duration }
+}
+
+async function mapConcurrent<T>(
+  items: readonly T[],
+  concurrency: number,
+  worker: (item: T, index: number) => Promise<void>,
+): Promise<void> {
+  if (items.length === 0) return
+
+  let nextIndex = 0
+  const workerCount = Math.min(concurrency, items.length)
+
+  await Promise.all(Array.from({ length: workerCount }, async () => {
+    while (nextIndex < items.length) {
+      const currentIndex = nextIndex++
+      await worker(items[currentIndex], currentIndex)
+    }
+  }))
 }
 
 /** Safely list a directory, returning [] on error. */

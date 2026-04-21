@@ -2,16 +2,19 @@ import { ipcMain, dialog, shell, BrowserWindow } from 'electron'
 import * as fs from 'fs/promises'
 import * as path from 'path'
 import { IPC_CHANNELS } from '@shared/types'
-import type { CompareRequest, SourceConfig, SSHConfigInput } from '@shared/types'
+import type { CompareRequest, SourceConfig, SSHConfigInput, StartSyncRequest } from '@shared/types'
+import { formatDuration } from '@shared/format-duration'
 import { createFileSource } from '../file-source/index'
 import { compareDirectories } from '../compare/comparator'
 import { computeTextDiff } from '@shared/text-diff'
 import { wrapHandler } from '../utils/error'
 import { logger } from '../utils/logger'
+import { safeSendToWebContents, safeSendToWindow } from '../utils/safe-ipc'
 import * as configStore from '../ssh/config-store'
 import { connectionManager } from '../ssh/connection-manager'
 import { getConfigInternal } from '../ssh/config-store'
 import * as historyStore from '../history/history-store'
+import { syncManager } from '../sync/sync-manager'
 
 let activeCompare:
   | {
@@ -86,15 +89,15 @@ function registerCompareHandlers(): void {
           onEntriesFound: (entries) => {
             if (controller.signal.aborted) return
             logger.info(`发现新条目: ${entries.length} 项`)
-            event.sender.send(IPC_CHANNELS.COMPARE_SCAN_COMPLETE, request.compareId, entries)
+            safeSendToWebContents(event.sender, IPC_CHANNELS.COMPARE_SCAN_COMPLETE, request.compareId, entries)
           },
           onEntryUpdate: (entry) => {
             if (controller.signal.aborted) return
-            event.sender.send(IPC_CHANNELS.COMPARE_ENTRY_UPDATE, request.compareId, entry)
+            safeSendToWebContents(event.sender, IPC_CHANNELS.COMPARE_ENTRY_UPDATE, request.compareId, entry)
           },
         })
 
-        logger.info(`对比完成，耗时 ${result.duration}ms — 相同:${result.stats.equal} 不同:${result.stats.different} 仅左:${result.stats.leftOnly} 仅右:${result.stats.rightOnly}`)
+        logger.info(`对比完成，耗时 ${formatDuration(result.duration)} — 相同:${result.stats.equal} 不同:${result.stats.different} 仅左:${result.stats.leftOnly} 仅右:${result.stats.rightOnly}`)
 
         // Attach source info for history
         const enriched = { ...result, leftSource: request.left, rightSource: request.right }
@@ -180,6 +183,34 @@ function registerHistoryHandlers(): void {
   )
 }
 
+function registerSyncHandlers(): void {
+  syncManager.subscribe((task) => {
+    for (const win of BrowserWindow.getAllWindows()) {
+      safeSendToWindow(win, IPC_CHANNELS.SYNC_PROGRESS, task)
+    }
+  })
+
+  ipcMain.handle(IPC_CHANNELS.SYNC_START, (_event, request: StartSyncRequest) =>
+    wrapHandler(async () => syncManager.start(request)),
+  )
+
+  ipcMain.handle(IPC_CHANNELS.SYNC_PAUSE, () =>
+    wrapHandler(async () => syncManager.pause()),
+  )
+
+  ipcMain.handle(IPC_CHANNELS.SYNC_RESUME, () =>
+    wrapHandler(async () => syncManager.resume()),
+  )
+
+  ipcMain.handle(IPC_CHANNELS.SYNC_GET_STATUS, () =>
+    wrapHandler(async () => syncManager.getSnapshot()),
+  )
+
+  ipcMain.handle(IPC_CHANNELS.SYNC_CLEAR, () =>
+    wrapHandler(async () => syncManager.clear()),
+  )
+}
+
 function registerDialogHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.DIALOG_SELECT_FOLDER, async () => {
     const win = BrowserWindow.getFocusedWindow()
@@ -238,6 +269,7 @@ export function registerAllHandlers(): void {
   registerCompareHandlers()
   registerSSHHandlers()
   registerHistoryHandlers()
+  registerSyncHandlers()
   registerDialogHandlers()
   registerFileOperationHandlers()
 }

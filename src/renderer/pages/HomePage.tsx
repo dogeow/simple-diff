@@ -2,6 +2,7 @@ import SourceSelector from '../components/SourceSelector'
 import FilterModal from '../components/FilterModal'
 import { useCompareStore } from '../stores/compare-store'
 import { useCompare } from '../hooks/useCompare'
+import { useAppStore } from '../stores/app-store'
 import type { StrategyName } from '../../../shared/types'
 
 const STRATEGY_OPTIONS: { value: StrategyName; label: string }[] = [
@@ -13,7 +14,9 @@ const STRATEGY_OPTIONS: { value: StrategyName; label: string }[] = [
 
 export default function HomePage() {
   const store = useCompareStore()
+  const syncTask = useCompareStore((s) => s.syncTask)
   const { loading, error, runCompare } = useCompare()
+  const setPage = useAppStore((s) => s.setPage)
 
   const handleCompare = () => {
     runCompare()
@@ -81,6 +84,26 @@ export default function HomePage() {
       </div>
 
       {/* Action */}
+      {syncTask && (
+        <div className="flex items-center justify-between rounded border border-neutral-700 bg-neutral-800/70 px-4 py-3 text-sm">
+          <div className="flex flex-col gap-1">
+            <span className="text-neutral-200">
+              有一个同步任务{syncTask.status === 'running' ? '正在执行' : syncTask.status === 'completed' ? '已完成' : '待继续'}
+            </span>
+            <span className="text-xs text-neutral-500">
+              {syncTask.completedItems}/{syncTask.totalItems}
+              {syncTask.currentPath ? ` · ${syncTask.currentPath}` : ''}
+            </span>
+          </div>
+          <button
+            onClick={() => setPage('compare')}
+            className="rounded bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-500"
+          >
+            查看同步
+          </button>
+        </div>
+      )}
+
       <button
         onClick={handleCompare}
         disabled={loading || !store.leftPath || !store.rightPath || store.strategies.length === 0}

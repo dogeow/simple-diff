@@ -1,5 +1,5 @@
 import { createReadStream, type Dirent } from 'fs'
-import { readdir, stat as fsStat, access, readFile, writeFile } from 'fs/promises'
+import { mkdir, readdir, stat as fsStat, access, readFile, writeFile } from 'fs/promises'
 import { join, relative, basename } from 'path'
 import { createHash } from 'crypto'
 import type { FileEntry } from '@shared/types'
@@ -11,23 +11,22 @@ export class LocalSource implements FileSource {
 
   async list(dirPath: string): Promise<readonly FileEntry[]> {
     const entries = await readdir(dirPath, { withFileTypes: true })
-    const results: FileEntry[] = []
-
-    for (const entry of entries) {
+    const results = await mapConcurrent(entries, 64, async (entry) => {
       const fullPath = join(dirPath, entry.name)
       try {
         const stats = await fsStat(fullPath)
-        results.push({
+        return {
           name: entry.name,
           path: entry.name,
           isDirectory: entry.isDirectory(),
           size: stats.size,
           mtime: stats.mtimeMs,
-        })
+        }
       } catch {
         // skip entries we can't stat (permission errors, etc.)
+        return null
       }
-    }
+    })
 
     return results
   }
@@ -62,6 +61,10 @@ export class LocalSource implements FileSource {
     return readFile(filePath, 'utf-8')
   }
 
+  async readFileBuffer(filePath: string): Promise<Buffer> {
+    return readFile(filePath)
+  }
+
   async hashFile(filePath: string): Promise<string> {
     const hash = createHash('sha1')
 
@@ -92,13 +95,19 @@ export class LocalSource implements FileSource {
     await writeFile(filePath, content, 'utf-8')
   }
 
+  async writeFileBuffer(filePath: string, content: Buffer): Promise<void> {
+    await writeFile(filePath, content)
+  }
+
+  async ensureDir(dirPath: string): Promise<void> {
+    await mkdir(dirPath, { recursive: true })
+  }
+
   async dispose(): Promise<void> {
     // no-op for local
   }
 
   private async walkDir(rootPath: string, currentPath: string, results: FileEntry[]): Promise<void> {
-    const rel = relative(rootPath, currentPath) || '.'
-    logger.info(`[本地] 扫描目录: ${rel}  (已发现 ${results.length} 项)`)
     let entries: Dirent<string>[]
     try {
       entries = await readdir(currentPath, { withFileTypes: true, encoding: 'utf8' })
@@ -107,26 +116,51 @@ export class LocalSource implements FileSource {
       return // skip unreadable directories
     }
 
-    for (const entry of entries) {
+    const children = await mapConcurrent(entries, 64, async (entry) => {
       const fullPath = join(currentPath, entry.name)
       const relativePath = relative(rootPath, fullPath)
 
       try {
         const stats = await fsStat(fullPath)
-        results.push({
+        return {
           name: entry.name,
           path: relativePath,
           isDirectory: entry.isDirectory(),
           size: stats.size,
           mtime: stats.mtimeMs,
-        })
-
-        if (entry.isDirectory()) {
-          await this.walkDir(rootPath, fullPath, results)
         }
       } catch {
         // skip entries we can't stat
+        return null
+      }
+    })
+
+    for (const child of children) {
+      results.push(child)
+      if (child.isDirectory) {
+        await this.walkDir(rootPath, join(rootPath, child.path), results)
       }
     }
   }
+}
+
+async function mapConcurrent<T, R>(
+  items: readonly T[],
+  concurrency: number,
+  worker: (item: T, index: number) => Promise<R | null>,
+): Promise<R[]> {
+  if (items.length === 0) return []
+
+  const results: Array<R | null> = new Array(items.length).fill(null)
+  let nextIndex = 0
+  const workerCount = Math.min(concurrency, items.length)
+
+  await Promise.all(Array.from({ length: workerCount }, async () => {
+    while (nextIndex < items.length) {
+      const currentIndex = nextIndex++
+      results[currentIndex] = await worker(items[currentIndex], currentIndex)
+    }
+  }))
+
+  return results.filter((item): item is R => item != null)
 }

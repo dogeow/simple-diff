@@ -35,10 +35,42 @@ export default function CompareTree({ entries, filter, onFilterChange, onDoubleC
   const setHideDot = useCompareStore((s) => s.setHideDot)
   const hideDotFilter = useCompareStore((s) => s.hideDotFilter)
   const setHideDotFilter = useCompareStore((s) => s.setHideDotFilter)
+  const syncTask = useCompareStore((s) => s.syncTask)
+  const leftSource = useCompareStore((s) => s.leftSource)
+  const rightSource = useCompareStore((s) => s.rightSource)
+  const setSyncTask = useCompareStore((s) => s.setSyncTask)
 
   const stats = useMemo(() => computeStats(entries), [entries])
   const pendingCount = useMemo(() => entries.filter((e) => e.state === 'pending' || e.state === 'comparing').length, [entries])
   const visibleNodes = useVisibleCompareNodes({ entries, filter })
+
+  const handleStartSync = useCallback(async (direction: 'left_to_right' | 'right_to_left') => {
+    if (!leftSource || !rightSource) return
+    const response = await window.api.startSync({
+      leftSource,
+      rightSource,
+      direction,
+      entries,
+    })
+    if (response.success) {
+      setSyncTask(response.data ?? null)
+    }
+  }, [entries, leftSource, rightSource, setSyncTask])
+
+  const handlePauseSync = useCallback(async () => {
+    const response = await window.api.pauseSync()
+    if (response.success) setSyncTask(response.data ?? null)
+  }, [setSyncTask])
+
+  const handleResumeSync = useCallback(async () => {
+    const response = await window.api.resumeSync()
+    if (response.success) setSyncTask(response.data ?? null)
+  }, [setSyncTask])
+
+  const handleClearSync = useCallback(async () => {
+    const response = await window.api.clearSync()
+    if (response.success) setSyncTask(null)
+  }, [setSyncTask])
 
   return (
     <div className={toolbarOnly ? '' : 'flex h-full flex-col gap-2'}>
@@ -58,6 +90,11 @@ export default function CompareTree({ entries, filter, onFilterChange, onDoubleC
         setHideDot={setHideDot}
         hideDotFilter={hideDotFilter}
         setHideDotFilter={setHideDotFilter}
+        syncTask={syncTask}
+        onStartSync={handleStartSync}
+        onPauseSync={handlePauseSync}
+        onResumeSync={handleResumeSync}
+        onClearSync={handleClearSync}
       />
 
       {/* Dual-panel table (hidden in toolbarOnly mode) */}

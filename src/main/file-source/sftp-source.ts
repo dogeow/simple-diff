@@ -55,12 +55,17 @@ export class SFTPSource implements FileSource {
   }
 
   async readText(filePath: string): Promise<string> {
+    const content = await this.readFileBuffer(filePath)
+    return content.toString('utf-8')
+  }
+
+  async readFileBuffer(filePath: string): Promise<Buffer> {
     const sftp = await this.getSftp()
     return new Promise((resolve, reject) => {
       const chunks: Buffer[] = []
-      const stream = sftp.createReadStream(filePath, { encoding: 'utf8' })
+      const stream = sftp.createReadStream(filePath)
       stream.on('data', (chunk: Buffer | string) => chunks.push(Buffer.from(chunk)))
-      stream.on('end', () => resolve(Buffer.concat(chunks).toString('utf-8')))
+      stream.on('end', () => resolve(Buffer.concat(chunks)))
       stream.on('error', reject)
     })
   }
@@ -94,13 +99,41 @@ export class SFTPSource implements FileSource {
   }
 
   async writeText(filePath: string, content: string): Promise<void> {
+    await this.writeFileBuffer(filePath, Buffer.from(content, 'utf-8'))
+  }
+
+  async writeFileBuffer(filePath: string, content: Buffer): Promise<void> {
     const sftp = await this.getSftp()
     return new Promise((resolve, reject) => {
       const stream = sftp.createWriteStream(filePath)
       stream.on('close', () => resolve())
       stream.on('error', reject)
-      stream.end(content, 'utf-8')
+      stream.end(content)
     })
+  }
+
+  async ensureDir(dirPath: string): Promise<void> {
+    const sftp = await this.getSftp()
+    const normalized = posix.normalize(dirPath)
+    const segments = normalized.split('/').filter(Boolean)
+    let current = normalized.startsWith('/') ? '/' : ''
+
+    for (const segment of segments) {
+      current = current === '/' ? `/${segment}` : (current ? `${current}/${segment}` : segment)
+      // eslint-disable-next-line no-await-in-loop
+      const exists = await new Promise<boolean>((resolve) => {
+        sftp.stat(current, (err) => resolve(!err))
+      })
+      if (exists) continue
+      // eslint-disable-next-line no-await-in-loop
+      await new Promise<void>((resolve, reject) => {
+        sftp.mkdir(current, (err) => {
+          if (!err) return resolve()
+          if (String(err).includes('Failure')) return resolve()
+          reject(err)
+        })
+      })
+    }
   }
 
   async dispose(): Promise<void> {

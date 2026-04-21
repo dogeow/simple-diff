@@ -53,16 +53,36 @@ function truncateFilePath(path: string, maxLength: number): string {
   const parts = path.split('/').filter((p) => p !== '')
   if (parts.length <= 2) return path // Not worth truncating
 
-  const firstPart = parts[0]
-  const lastPart = parts[parts.length - 1]
+  const firstParts = [parts[0]]
+  const lastParts = [parts[parts.length - 1]]
+  let left = 1
+  let right = parts.length - 2
 
-  // Build path: first + (... for each hidden dir) + last
-  const hiddenCount = parts.length - 2 // Number of directories to hide
-  const hiddenParts = Array(hiddenCount).fill('...')
-  const hiddenPath = hiddenParts.join('/')
+  const render = (head: readonly string[], tail: readonly string[]) => `/${head.join('/')}/.../${tail.join('/')}`
 
-  const result = `/${firstPart}/${hiddenPath}/${lastPart}`
-  return result
+  let best = render(firstParts, lastParts)
+
+  while (left <= right) {
+    const candidateWithMoreHead = render([...firstParts, parts[left]], lastParts)
+    if (candidateWithMoreHead.length <= maxLength) {
+      firstParts.push(parts[left])
+      best = candidateWithMoreHead
+      left++
+      continue
+    }
+
+    const candidateWithMoreTail = render(firstParts, [parts[right], ...lastParts])
+    if (candidateWithMoreTail.length <= maxLength) {
+      lastParts.unshift(parts[right])
+      best = candidateWithMoreTail
+      right--
+      continue
+    }
+
+    break
+  }
+
+  return best
 }
 
 export interface TreeNode {
@@ -110,6 +130,7 @@ export function buildTree(entries: readonly CompareEntry[]): TreeNode {
     }
   }
 
+  sortTree(root)
   return root
 }
 
@@ -125,11 +146,7 @@ export function getVisibleNodes(
     }
 
     if (node.isDirectory && (node.depth < 0 || expandedDirs.has(node.relativePath))) {
-      const sorted = [...node.children].sort((a, b) => {
-        if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1
-        return a.name.localeCompare(b.name)
-      })
-      for (const child of sorted) {
+      for (const child of node.children) {
         walk(child)
       }
     }
@@ -137,6 +154,19 @@ export function getVisibleNodes(
 
   walk(root)
   return result
+}
+
+function sortTree(node: TreeNode): void {
+  node.children.sort((a, b) => {
+    if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1
+    return a.name.localeCompare(b.name)
+  })
+
+  for (const child of node.children) {
+    if (child.isDirectory) {
+      sortTree(child)
+    }
+  }
 }
 
 export function getAllDirPaths(entries: readonly CompareEntry[]): ReadonlySet<string> {

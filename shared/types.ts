@@ -98,6 +98,39 @@ export interface CompareResult {
   readonly rightSource?: SourceConfig
 }
 
+// ─── Sync ────────────────────────────────────────────────────
+
+export type SyncDirection = 'left_to_right' | 'right_to_left'
+export type SyncTaskStatus = 'running' | 'paused' | 'completed' | 'failed'
+export type SyncItemKind = 'directory' | 'file'
+
+export interface SyncItem {
+  readonly relativePath: string
+  readonly kind: SyncItemKind
+}
+
+export interface SyncTaskSnapshot {
+  readonly id: string
+  readonly leftSource: SourceConfig
+  readonly rightSource: SourceConfig
+  readonly direction: SyncDirection
+  readonly status: SyncTaskStatus
+  readonly totalItems: number
+  readonly completedItems: number
+  readonly currentPath: string | null
+  readonly lastCompletedPath: string | null
+  readonly lastError: string | null
+  readonly createdAt: number
+  readonly updatedAt: number
+}
+
+export interface StartSyncRequest {
+  readonly leftSource: SourceConfig
+  readonly rightSource: SourceConfig
+  readonly direction: SyncDirection
+  readonly entries: readonly CompareEntry[]
+}
+
 // ─── Text Diff ───────────────────────────────────────────────
 
 export interface DiffLine {
@@ -154,6 +187,12 @@ export const IPC_CHANNELS = {
   HISTORY_LIST: 'history:list',
   HISTORY_CLEAR: 'history:clear',
   HISTORY_DELETE: 'history:delete',
+  SYNC_START: 'sync:start',
+  SYNC_PAUSE: 'sync:pause',
+  SYNC_RESUME: 'sync:resume',
+  SYNC_GET_STATUS: 'sync:get-status',
+  SYNC_CLEAR: 'sync:clear',
+  SYNC_PROGRESS: 'sync:progress',
   DIALOG_SELECT_FOLDER: 'dialog:select-folder',
   DIALOG_SELECT_FILE: 'dialog:select-file',
   FILE_SHOW_IN_FOLDER: 'file:show-in-folder',

@@ -1,13 +1,12 @@
 import { BrowserWindow } from 'electron'
 import { IPC_CHANNELS } from '@shared/types'
 import type { LogLevel } from '@shared/types'
+import { safeSendToWindow } from './safe-ipc'
 
 function send(level: LogLevel, message: string): void {
   const entry = { timestamp: Date.now(), level, message }
   for (const win of BrowserWindow.getAllWindows()) {
-    if (!win.isDestroyed()) {
-      win.webContents.send(IPC_CHANNELS.LOG, entry)
-    }
+    safeSendToWindow(win, IPC_CHANNELS.LOG, entry)
   }
 }
 

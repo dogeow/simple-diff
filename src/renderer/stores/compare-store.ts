@@ -1,6 +1,15 @@
 import { create } from 'zustand'
 import { joinSourcePath } from '@shared/source-path'
-import type { CompareEntry, CompareResult, CompareState, CompareStats, FileEntry, SourceConfig, StrategyName } from '../../../shared/types'
+import type {
+  CompareEntry,
+  CompareResult,
+  CompareState,
+  CompareStats,
+  FileEntry,
+  SourceConfig,
+  StrategyName,
+  SyncTaskSnapshot,
+} from '../../../shared/types'
 
 export type ViewMode = 'split' | 'merged'
 export type HideDotFilter = 'all' | 'files' | 'dirs'
@@ -32,6 +41,7 @@ interface CompareStore {
   readonly expandedDirs: ReadonlySet<string>
   readonly viewMode: ViewMode
   readonly activeCompareId: string | null
+  readonly syncTask: SyncTaskSnapshot | null
 
   setLeftPath: (path: string) => void
   setRightPath: (path: string) => void
@@ -58,6 +68,7 @@ interface CompareStore {
   expandAll: () => void
   collapseAll: () => void
   resetCompare: () => void
+  setSyncTask: (task: SyncTaskSnapshot | null) => void
 }
 
 function computeStats(entries: readonly CompareEntry[]): CompareStats {
@@ -85,6 +96,7 @@ const compareInitial = {
   expandedDirs: new Set<string>() as ReadonlySet<string>,
   viewMode: 'split' as ViewMode,
   activeCompareId: null as string | null,
+  syncTask: null as SyncTaskSnapshot | null,
 }
 
 const initialState = {
@@ -338,7 +350,16 @@ export const useCompareStore = create<CompareStore>((set, get) => ({
 
   collapseAll: () => set({ expandedDirs: new Set() }),
 
-  resetCompare: () => set(compareInitial),
+  resetCompare: () => {
+    const syncTask = get().syncTask
+    set({
+      ...compareInitial,
+      syncTask,
+      leftSource: syncTask?.leftSource ?? null,
+      rightSource: syncTask?.rightSource ?? null,
+    })
+  },
+  setSyncTask: (syncTask) => set({ syncTask }),
 }))
 
 export { computeStats }

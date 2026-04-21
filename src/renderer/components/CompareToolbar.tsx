@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import type { CompareState, StrategyName } from '../../../shared/types'
+import type { CompareState, StrategyName, SyncTaskSnapshot } from '../../../shared/types'
 import type { CompareStats } from '../../../shared/types'
 import type { ViewMode, HideDotFilter } from '../stores/compare-store'
 import FilterModal from './FilterModal'
@@ -35,6 +35,11 @@ interface CompareToolbarProps {
   readonly setHideDot: (v: boolean) => void
   readonly hideDotFilter: HideDotFilter
   readonly setHideDotFilter: (v: HideDotFilter) => void
+  readonly syncTask: SyncTaskSnapshot | null
+  readonly onStartSync: (direction: 'left_to_right' | 'right_to_left') => void
+  readonly onPauseSync: () => void
+  readonly onResumeSync: () => void
+  readonly onClearSync: () => void
 }
 
 export default function CompareToolbar({
@@ -53,6 +58,11 @@ export default function CompareToolbar({
   setHideDot,
   hideDotFilter,
   setHideDotFilter,
+  syncTask,
+  onStartSync,
+  onPauseSync,
+  onResumeSync,
+  onClearSync,
 }: CompareToolbarProps) {
   const [dotDropOpen, setDotDropOpen] = useState(false)
   const dotDropRef = useRef<HTMLDivElement>(null)
@@ -107,6 +117,40 @@ export default function CompareToolbar({
           ))}
         </div>
         <div className="ml-auto flex items-center gap-3">
+          {syncTask && (
+            <div className="flex min-w-0 items-center gap-2 rounded border border-neutral-700 bg-neutral-800/70 px-2 py-1 text-xs text-neutral-300">
+              <span className="shrink-0 tabular-nums">
+                同步 {syncTask.completedItems}/{syncTask.totalItems}
+              </span>
+              <span className={`w-12 shrink-0 text-left ${syncTask.status === 'running' ? 'text-blue-400' : syncTask.status === 'completed' ? 'text-green-400' : 'text-yellow-400'}`}>
+                {syncTask.status === 'running'
+                  ? '进行中'
+                  : syncTask.status === 'paused'
+                    ? '已暂停'
+                    : syncTask.status === 'completed'
+                      ? '已完成'
+                      : '失败'}
+              </span>
+              <div className="min-w-0 w-56">
+                {syncTask.currentPath && <span className="block truncate text-neutral-500">{syncTask.currentPath}</span>}
+              </div>
+              {syncTask.status === 'running' && (
+                <button onClick={onPauseSync} className="shrink-0 rounded bg-neutral-700 px-2 py-1 hover:bg-neutral-600">
+                  暂停
+                </button>
+              )}
+              {(syncTask.status === 'paused' || syncTask.status === 'failed') && (
+                <button onClick={onResumeSync} className="shrink-0 rounded bg-blue-600 px-2 py-1 text-white hover:bg-blue-500">
+                  继续
+                </button>
+              )}
+              {syncTask.status !== 'running' && (
+                <button onClick={onClearSync} className="shrink-0 rounded bg-neutral-700 px-2 py-1 hover:bg-neutral-600">
+                  清除
+                </button>
+              )}
+            </div>
+          )}
           <div className="flex gap-2 text-xs text-neutral-400">
             <span>共 {stats.total}</span>
             <span className="text-green-400">同 {stats.equal}</span>
@@ -116,11 +160,33 @@ export default function CompareToolbar({
             {pendingCount > 0 && <span className="text-neutral-500">待 {pendingCount}</span>}
           </div>
           <div className="flex gap-1">
+            {!syncTask && (
+              <>
+                <button
+                  onClick={() => onStartSync('left_to_right')}
+                  className="rounded bg-emerald-700 px-2 py-1 text-xs text-white hover:bg-emerald-600"
+                >
+                  同步到右
+                </button>
+                <button
+                  onClick={() => onStartSync('right_to_left')}
+                  className="rounded bg-cyan-700 px-2 py-1 text-xs text-white hover:bg-cyan-600"
+                >
+                  同步到左
+                </button>
+              </>
+            )}
             {viewModeBtn('split', '分栏')}
             {viewModeBtn('merged', '合并')}
           </div>
         </div>
       </div>
+
+      {syncTask?.lastError && (
+        <div className="rounded border border-red-800 bg-red-900/20 px-2 py-1 text-xs text-red-300">
+          同步错误: {syncTask.lastError}
+        </div>
+      )}
 
       {/* Toolbar row 2: strategies + extension filter + hidden files */}
       <div className="flex items-center gap-3">

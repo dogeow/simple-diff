@@ -8,8 +8,10 @@ import type {
   SourceConfig,
   FileEntry,
   IpcResult,
+  StartSyncRequest,
   SSHConfig,
   SSHConfigInput,
+  SyncTaskSnapshot,
   TextDiffResult,
   CompareHistoryEntry,
 } from '../../shared/types'
@@ -32,6 +34,21 @@ const api = {
   cancelCompare: (): Promise<IpcResult<void>> =>
     ipcRenderer.invoke(IPC_CHANNELS.COMPARE_CANCEL),
 
+  startSync: (request: StartSyncRequest): Promise<IpcResult<SyncTaskSnapshot>> =>
+    ipcRenderer.invoke(IPC_CHANNELS.SYNC_START, request),
+
+  pauseSync: (): Promise<IpcResult<SyncTaskSnapshot | null>> =>
+    ipcRenderer.invoke(IPC_CHANNELS.SYNC_PAUSE),
+
+  resumeSync: (): Promise<IpcResult<SyncTaskSnapshot | null>> =>
+    ipcRenderer.invoke(IPC_CHANNELS.SYNC_RESUME),
+
+  getSyncStatus: (): Promise<IpcResult<SyncTaskSnapshot | null>> =>
+    ipcRenderer.invoke(IPC_CHANNELS.SYNC_GET_STATUS),
+
+  clearSync: (): Promise<IpcResult<void>> =>
+    ipcRenderer.invoke(IPC_CHANNELS.SYNC_CLEAR),
+
   onScanComplete: (callback: (compareId: string, entries: readonly CompareEntry[]) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, compareId: string, entries: readonly CompareEntry[]) =>
       callback(compareId, entries)
@@ -47,6 +64,14 @@ const api = {
     ipcRenderer.on(IPC_CHANNELS.COMPARE_ENTRY_UPDATE, listener)
     return () => {
       ipcRenderer.removeListener(IPC_CHANNELS.COMPARE_ENTRY_UPDATE, listener)
+    }
+  },
+
+  onSyncProgress: (callback: (task: SyncTaskSnapshot | null) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, task: SyncTaskSnapshot | null) => callback(task)
+    ipcRenderer.on(IPC_CHANNELS.SYNC_PROGRESS, listener)
+    return () => {
+      ipcRenderer.removeListener(IPC_CHANNELS.SYNC_PROGRESS, listener)
     }
   },
 

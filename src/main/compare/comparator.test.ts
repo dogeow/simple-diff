@@ -61,9 +61,12 @@ function createMockSource(options: MockSourceOptions): FileSource & {
     readDir: vi.fn(async () => []),
     exists: vi.fn(async () => true),
     readText: vi.fn(async () => ''),
+    readFileBuffer: vi.fn(async () => Buffer.alloc(0)),
     hashFile: hashFileSpy,
     hashFileRange: hashFileRangeSpy,
     writeText: vi.fn(async () => {}),
+    writeFileBuffer: vi.fn(async () => {}),
+    ensureDir: vi.fn(async () => {}),
     dispose: vi.fn(async () => {}),
   }
 }
