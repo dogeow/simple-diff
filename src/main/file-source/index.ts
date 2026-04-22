@@ -6,6 +6,8 @@ import { connectionManager } from '../ssh/connection-manager'
 import { getConfigInternal } from '../ssh/config-store'
 import { logger } from '../utils/logger'
 
+const sshLogger = logger.child('ssh')
+
 export type { FileSource } from './types'
 export { LocalSource } from './local-source'
 export { SFTPSource } from './sftp-source'
@@ -17,12 +19,12 @@ export async function createFileSource(config: SourceConfig): Promise<FileSource
     case 'sftp': {
       const sshConfig = getConfigInternal(config.configId)
       if (!sshConfig) {
-        logger.error(`SSH 配置未找到: ${config.configId}`)
+        sshLogger.error(`SSH 配置未找到: ${config.configId}`)
         throw new Error(`SSH config not found: ${config.configId}`)
       }
-      logger.info(`SFTP 正在连接: ${sshConfig.host}:${sshConfig.port}`)
+      sshLogger.info(`SFTP 正在连接: ${sshConfig.host}:${sshConfig.port}`)
       const ssh = await connectionManager.connect(sshConfig)
-      logger.info(`SFTP 连接就绪: ${sshConfig.host}`)
+      sshLogger.info(`SFTP 连接就绪: ${sshConfig.host}`)
       return new SFTPSource(ssh)
     }
   }

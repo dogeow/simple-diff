@@ -30,6 +30,12 @@ vi.mock('../utils/logger', () => ({
     info: mocks.loggerInfo,
     warn: mocks.loggerWarn,
     error: mocks.loggerError,
+    child: vi.fn(() => ({
+      info: mocks.loggerInfo,
+      warn: mocks.loggerWarn,
+      error: mocks.loggerError,
+      child: vi.fn(),
+    })),
   },
 }))
 

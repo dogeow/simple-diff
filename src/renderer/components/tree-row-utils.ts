@@ -13,10 +13,18 @@ export function formatTime(ms: number): string {
 
 export function rowBg(state: CompareState): string {
   switch (state) {
-    case 'different': return 'bg-yellow-900/10'
-    case 'left_only': return 'bg-blue-900/10'
-    case 'right_only': return 'bg-purple-900/10'
-    case 'comparing': return 'bg-blue-900/5'
+    case 'different': return 'bg-rose-950/12'
+    case 'left_only': return 'bg-sky-950/12'
+    case 'right_only': return 'bg-violet-950/12'
+    case 'comparing': return 'bg-cyan-950/10'
     default: return ''
   }
+}
+
+export function shouldShowDirectorySpinner(
+  isDirectory: boolean,
+  loading: boolean,
+  state: CompareState,
+): boolean {
+  return isDirectory && (loading || state === 'comparing')
 }

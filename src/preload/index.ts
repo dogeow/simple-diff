@@ -31,8 +31,8 @@ const api = {
   runCompare: (request: CompareRequest): Promise<IpcResult<CompareResult>> =>
     ipcRenderer.invoke(IPC_CHANNELS.COMPARE_RUN, request),
 
-  cancelCompare: (): Promise<IpcResult<void>> =>
-    ipcRenderer.invoke(IPC_CHANNELS.COMPARE_CANCEL),
+  cancelCompare: (compareId?: string): Promise<IpcResult<void>> =>
+    ipcRenderer.invoke(IPC_CHANNELS.COMPARE_CANCEL, compareId),
 
   startSync: (request: StartSyncRequest): Promise<IpcResult<SyncTaskSnapshot>> =>
     ipcRenderer.invoke(IPC_CHANNELS.SYNC_START, request),

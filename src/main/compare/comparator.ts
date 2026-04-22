@@ -1,5 +1,6 @@
 import type { FileEntry, CompareEntry, CompareResult, CompareStats, DiffReason, StrategyName } from '@shared/types'
 import { joinSourcePath } from '@shared/source-path'
+import { matchesPathFilter } from '@shared/path-filter'
 import type { FileSource } from '../file-source/types'
 import type { CompareContext, CompareStrategy } from './types'
 import { HashStrategy } from './strategies/hash'
@@ -8,6 +9,8 @@ import { SizeStrategy } from './strategies/size'
 import { MtimeStrategy } from './strategies/mtime'
 import { logger } from '../utils/logger'
 import { formatDuration } from '@shared/format-duration'
+
+const compareLogger = logger.child('compare')
 
 const STRATEGY_MAP: Record<StrategyName, () => CompareStrategy> = {
   size: () => new SizeStrategy(),
@@ -18,6 +21,13 @@ const STRATEGY_MAP: Record<StrategyName, () => CompareStrategy> = {
 
 const DIRECTORY_SCAN_CONCURRENCY = 8
 const DIRECTORY_LOG_INTERVAL = 200
+
+interface PendingDirectoryScan {
+  readonly rel: string
+  readonly leftAbs: string
+  readonly rightAbs: string
+  readonly entry?: CompareEntry
+}
 
 export interface ComparatorOptions {
   readonly leftSource: FileSource
@@ -36,28 +46,6 @@ function throwIfAborted(signal?: AbortSignal): void {
   if (signal?.aborted) {
     throw new Error('对比已取消')
   }
-}
-
-function normalizeFilterValue(value: string): string {
-  return value.trim().replace(/^\/+|\/+$/g, '').toLowerCase()
-}
-
-function matchesPathFilter(relativePath: string, filters: readonly string[]): boolean {
-  const normalizedPath = normalizeFilterValue(relativePath)
-  if (!normalizedPath) return false
-
-  const segments = normalizedPath.split('/')
-
-  return filters.some((filter) => {
-    const normalizedFilter = normalizeFilterValue(filter)
-    if (!normalizedFilter) return false
-
-    if (normalizedFilter.includes('/')) {
-      return normalizedPath === normalizedFilter || normalizedPath.startsWith(`${normalizedFilter}/`)
-    }
-
-    return segments.includes(normalizedFilter)
-  })
 }
 
 /**
@@ -90,7 +78,7 @@ function matchLevel(
 
     if (matchesPathFilter(relativePath, pathFilters)) {
       if (isDir) {
-        logger.info(`跳过已过滤目录: ${relativePath}`)
+          compareLogger.info(`跳过已过滤目录: ${relativePath}`)
       }
       continue
     }
@@ -118,6 +106,17 @@ function matchLevel(
   return entries
 }
 
+function summarizeEntries(entries: readonly CompareEntry[]): string {
+  const dirCount = entries.filter((entry) => entry.isDirectory).length
+  const fileCount = entries.length - dirCount
+  const pendingDirCount = entries.filter((entry) => entry.isDirectory && entry.state === 'pending').length
+  const sample = entries.slice(0, 3).map((entry) => entry.relativePath).join('、')
+  const more = entries.length > 3 ? '…' : ''
+  const scanTail = pendingDirCount > 0 ? `，待继续扫描 ${pendingDirCount} 个目录` : ''
+
+  return `发现 ${entries.length} 项（目录 ${dirCount}，文件 ${fileCount}${scanTail}）：${sample}${more}`
+}
+
 export async function compareDirectories(options: ComparatorOptions): Promise<CompareResult> {
   const {
     leftSource,
@@ -140,30 +139,46 @@ export async function compareDirectories(options: ComparatorOptions): Promise<Co
   const stats = { total: 0, equal: 0, different: 0, leftOnly: 0, rightOnly: 0 }
   let scannedDirCount = 0
 
-  let currentLevel: { rel: string; leftAbs: string; rightAbs: string }[] = [
+  let currentLevel: readonly PendingDirectoryScan[] = [
     { rel: '', leftAbs: leftRoot, rightAbs: rightRoot },
   ]
 
   while (currentLevel.length > 0) {
-    const nextLevel: { rel: string; leftAbs: string; rightAbs: string }[] = []
+    const nextLevel: PendingDirectoryScan[] = []
 
-    await mapConcurrent(currentLevel, DIRECTORY_SCAN_CONCURRENCY, async ({ rel, leftAbs, rightAbs }) => {
+    await mapConcurrent(currentLevel, DIRECTORY_SCAN_CONCURRENCY, async ({ rel, leftAbs, rightAbs, entry: directoryEntry }) => {
       throwIfAborted(signal)
 
       scannedDirCount++
       if (scannedDirCount === 1 || scannedDirCount % DIRECTORY_LOG_INTERVAL === 0) {
-        logger.info(`正在扫描目录，已处理 ${scannedDirCount} 个目录`)
+        compareLogger.info(`正在扫描目录，已处理 ${scannedDirCount} 个目录`)
       }
 
       const dirLabel = rel || '.'
 
+      if (directoryEntry) {
+        onEntryUpdate?.({ ...directoryEntry, state: 'comparing', reasons: [] })
+      }
+
+      const failOnListError = rel === ''
       const [leftList, rightList] = await Promise.all([
-        listSafe(leftSource, leftAbs, 'left', dirLabel),
-        listSafe(rightSource, rightAbs, 'right', dirLabel),
+        listSafe(leftSource, leftAbs, 'left', dirLabel, failOnListError),
+        listSafe(rightSource, rightAbs, 'right', dirLabel, failOnListError),
       ])
 
       const levelEntries = matchLevel(leftList, rightList, rel, pathFilters)
+
+      if (directoryEntry) {
+        const resolvedDirectory: CompareEntry = { ...directoryEntry, state: 'equal', reasons: [] }
+        allEntries.push(resolvedDirectory)
+        stats.total++
+        stats.equal++
+        onEntryUpdate?.(resolvedDirectory)
+      }
+
       if (levelEntries.length === 0) return
+
+      compareLogger.info(`目录 ${dirLabel} ${summarizeEntries(levelEntries)}`)
 
       throwIfAborted(signal)
       onEntriesFound?.(levelEntries)
@@ -177,12 +192,8 @@ export async function compareDirectories(options: ComparatorOptions): Promise<Co
               rel: entry.relativePath,
               leftAbs: joinPath(leftSource, leftAbs, entry.name),
               rightAbs: joinPath(rightSource, rightAbs, entry.name),
+              entry,
             })
-            const resolved: CompareEntry = { ...entry, state: 'equal', reasons: [] }
-            allEntries.push(resolved)
-            stats.total++
-            stats.equal++
-            onEntryUpdate?.(resolved)
           } else {
             allEntries.push(entry)
             stats.total++
@@ -230,7 +241,7 @@ export async function compareDirectories(options: ComparatorOptions): Promise<Co
   }
 
   const duration = Date.now() - startTime
-  logger.info(`对比完成，耗时 ${formatDuration(duration)} — 共 ${stats.total} 项`)
+  compareLogger.info(`对比完成，耗时 ${formatDuration(duration)} — 共 ${stats.total} 项`)
   return { entries: allEntries, stats, duration }
 }
 
@@ -252,12 +263,22 @@ async function mapConcurrent<T>(
   }))
 }
 
-/** Safely list a directory, returning [] on error. */
-async function listSafe(source: FileSource, dirPath: string, side: string, label: string): Promise<readonly FileEntry[]> {
+/** Safely list a directory, optionally failing fast on critical errors. */
+async function listSafe(
+  source: FileSource,
+  dirPath: string,
+  side: string,
+  label: string,
+  failOnError = false,
+): Promise<readonly FileEntry[]> {
   try {
     return await source.list(dirPath)
   } catch (err) {
-    logger.warn(`[${side}] 无法列出目录 ${label}: ${err instanceof Error ? err.message : err}`)
+    const message = `[${side}] 无法列出目录 ${label}: ${err instanceof Error ? err.message : err}`
+    compareLogger.warn(message)
+    if (failOnError) {
+      throw new Error(message)
+    }
     return []
   }
 }

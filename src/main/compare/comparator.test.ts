@@ -8,6 +8,12 @@ vi.mock('../utils/logger', () => ({
     info: vi.fn(),
     warn: vi.fn(),
     error: vi.fn(),
+    child: vi.fn(() => ({
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+      child: vi.fn(),
+    })),
   },
 }))
 
@@ -127,11 +133,12 @@ describe('compareDirectories', () => {
       ['src/child.txt'],
     ])
     expect(updates).toEqual([
-      { path: 'src', state: 'equal' },
       { path: 'diff.txt', state: 'comparing' },
       { path: 'diff.txt', state: 'different' },
       { path: 'same.txt', state: 'comparing' },
       { path: 'same.txt', state: 'equal' },
+      { path: 'src', state: 'comparing' },
+      { path: 'src', state: 'equal' },
       { path: 'src/child.txt', state: 'comparing' },
       { path: 'src/child.txt', state: 'equal' },
     ])
@@ -143,10 +150,10 @@ describe('compareDirectories', () => {
       rightOnly: 0,
     })
     expect(result.entries.map((entry) => [entry.relativePath, entry.state])).toEqual([
-      ['src', 'equal'],
       ['diff.txt', 'different'],
       ['left-only.txt', 'left_only'],
       ['same.txt', 'equal'],
+      ['src', 'equal'],
       ['src/child.txt', 'equal'],
     ])
   })
@@ -187,6 +194,44 @@ describe('compareDirectories', () => {
     expect(result.entries.map((entry) => entry.relativePath)).toEqual(['src', 'src/app.ts'])
     expect(leftSource.list.mock.calls.map(([dirPath]) => dirPath)).toEqual(['/left', '/left/src'])
     expect(rightSource.list.mock.calls.map(([dirPath]) => dirPath)).toEqual(['/right', '/right/src'])
+  })
+
+  it('supports exact path filters without skipping same-named nested directories elsewhere', async () => {
+    const leftSource = createMockSource({
+      type: 'local',
+      listings: {
+        '/left': [
+          createFileEntry('config', { isDirectory: true, size: 0 }),
+          createFileEntry('src', { isDirectory: true, size: 0 }),
+        ],
+        '/left/src': [createFileEntry('config', { isDirectory: true, size: 0 })],
+        '/left/src/config': [createFileEntry('app.ts', { size: 10, mtime: 100 })],
+      },
+    })
+    const rightSource = createMockSource({
+      type: 'local',
+      listings: {
+        '/right': [
+          createFileEntry('config', { isDirectory: true, size: 0 }),
+          createFileEntry('src', { isDirectory: true, size: 0 }),
+        ],
+        '/right/src': [createFileEntry('config', { isDirectory: true, size: 0 })],
+        '/right/src/config': [createFileEntry('app.ts', { size: 10, mtime: 100 })],
+      },
+    })
+
+    const result = await compareDirectories({
+      leftSource,
+      rightSource,
+      leftRoot: '/left',
+      rightRoot: '/right',
+      strategies: ['size'],
+      extensionFilter: ['path:config'],
+    })
+
+    expect(result.entries.map((entry) => entry.relativePath)).toEqual(['src', 'src/config', 'src/config/app.ts'])
+    expect(leftSource.list.mock.calls.map(([dirPath]) => dirPath)).toEqual(['/left', '/left/src', '/left/src/config'])
+    expect(rightSource.list.mock.calls.map(([dirPath]) => dirPath)).toEqual(['/right', '/right/src', '/right/src/config'])
   })
 
   it('passes joined file paths into quick hash comparison for local windows-style roots', async () => {
@@ -254,5 +299,28 @@ describe('compareDirectories', () => {
         controller.abort()
       },
     })).rejects.toThrow('对比已取消')
+  })
+
+  it('fails fast when a root directory cannot be listed', async () => {
+    const leftSource = createMockSource({
+      type: 'local',
+      listings: {
+        '/left': new Error('ENOENT'),
+      },
+    })
+    const rightSource = createMockSource({
+      type: 'local',
+      listings: {
+        '/right': [createFileEntry('file.txt', { size: 1, mtime: 100 })],
+      },
+    })
+
+    await expect(compareDirectories({
+      leftSource,
+      rightSource,
+      leftRoot: '/left',
+      rightRoot: '/right',
+      strategies: ['size'],
+    })).rejects.toThrow('[left] 无法列出目录 .: ENOENT')
   })
 })

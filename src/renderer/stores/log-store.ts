@@ -8,6 +8,7 @@ interface LogStore {
   readonly visible: boolean
   addLog: (entry: LogEntry) => void
   toggleVisible: () => void
+  setVisible: (visible: boolean) => void
   clear: () => void
 }
 
@@ -21,6 +22,8 @@ export const useLogStore = create<LogStore>((set, get) => ({
   },
 
   toggleVisible: () => set({ visible: !get().visible }),
+
+  setVisible: (visible) => set({ visible }),
 
   clear: () => set({ logs: [] }),
 }))

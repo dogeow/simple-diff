@@ -3,10 +3,14 @@ import { resolveSourcePath } from '@shared/source-path'
 import { formatDuration } from '@shared/format-duration'
 import { useCompareStore } from '../stores/compare-store'
 import { useAppStore, type DiffTab } from '../stores/app-store'
+import CompareSessionTabs from '../components/CompareSessionTabs'
 import CompareTree from '../components/CompareTree'
 import SplitTree from '../components/SplitTree'
 import FileDiffView from '../components/FileDiffView'
 import type { CompareEntry } from '../../../shared/types'
+import { useCompare } from '../hooks/useCompare'
+import { openCompareTab, openDirectoryCompareHome } from '../utils/compare-session-navigation'
+import { useLogStore } from '../stores/log-store'
 
 function createDiffTabSessionId(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -26,21 +30,91 @@ export default function ComparePage() {
   const filter = useCompareStore((s) => s.filter)
   const setFilter = useCompareStore((s) => s.setFilter)
   const viewMode = useCompareStore((s) => s.viewMode)
-  const setViewMode = useCompareStore((s) => s.setViewMode)
   const resetCompare = useCompareStore((s) => s.resetCompare)
   const setPage = useAppStore((s) => s.setPage)
   const diffTabs = useAppStore((s) => s.diffTabs)
   const activeDiffTabId = useAppStore((s) => s.activeDiffTabId)
-  const { addDiffTab, closeDiffTab, setActiveDiffTab, updateDiffTab, clearDiffTabs } = useAppStore()
+  const compareTabs = useAppStore((s) => s.compareTabs)
+  const activeCompareTabId = useAppStore((s) => s.activeCompareTabId)
+  const { addDiffTab, closeDiffTab, setActiveDiffTab, updateDiffTab, replaceDiffTabs, saveCompareTab, closeCompareTab, setActiveCompareTab, clearDiffTabs } = useAppStore()
+  const { runCompare } = useCompare()
 
   const activeTab = diffTabs.find((t) => t.id === activeDiffTabId) ?? null
+  const emptyStateMessage = scanning ? '正在扫描目录，等待首批目录…' : '无匹配项'
 
-  const handleBack = async () => {
-    await window.api.cancelCompare()
+  const handleRerunCompare = useCallback(async () => {
+    await runCompare({ reuseActiveSession: true })
+  }, [runCompare])
+
+  const handleExtensionFilterChange = useCallback(async (nextFilters: readonly string[]) => {
+    useCompareStore.getState().setExtensionFilter(nextFilters)
+    await handleRerunCompare()
+  }, [handleRerunCompare])
+
+  const handleSelectCompareTab = useCallback(async (compareTabId: string) => {
+    if (compareTabId === activeCompareTabId) return
+
+    useAppStore.getState().saveCompareTab({
+      id: activeCompareTabId ?? compareTabId,
+      title: compareTabs.find((tab) => tab.id === activeCompareTabId)?.title ?? '未命名对比',
+      snapshot: useCompareStore.getState().createSnapshot(),
+      diffTabs: useAppStore.getState().diffTabs,
+      activeDiffTabId: useAppStore.getState().activeDiffTabId,
+    })
+
+    const targetCompareTab = useAppStore.getState().compareTabs.find((tab) => tab.id === compareTabId)
+    if (!targetCompareTab) return
+
+    openCompareTab(compareTabId, { expandLogs: true })
+  }, [activeCompareTabId, compareTabs])
+
+  const handleSourcePathSubmit = useCallback(async (side: 'left' | 'right', nextPath: string) => {
+    const compareState = useCompareStore.getState()
+
+    if (compareState.activeCompareId && (compareState.scanning || compareState.comparing)) {
+      await window.api.cancelCompare(compareState.activeCompareId)
+    }
+
+    if (side === 'left') {
+      compareState.setLeftPath(nextPath)
+    } else {
+      compareState.setRightPath(nextPath)
+    }
+
+    compareState.invalidateCompareResult()
     clearDiffTabs()
-    resetCompare()
-    setPage('home')
-  }
+    useLogStore.getState().setVisible(true)
+  }, [clearDiffTabs])
+
+  const handleCloseCompareSession = useCallback(async (compareTabId: string) => {
+    const appState = useAppStore.getState()
+    const targetCompareTab = appState.compareTabs.find((tab) => tab.id === compareTabId)
+    const isActive = appState.activeCompareTabId === compareTabId
+
+    if (targetCompareTab?.snapshot.activeCompareId && (targetCompareTab.snapshot.scanning || targetCompareTab.snapshot.comparing)) {
+      await window.api.cancelCompare(targetCompareTab.snapshot.activeCompareId)
+    }
+
+    if (!isActive) {
+      closeCompareTab(compareTabId)
+      return
+    }
+
+    const remainingTabs = appState.compareTabs.filter((tab) => tab.id !== compareTabId)
+    closeCompareTab(compareTabId)
+
+    if (remainingTabs.length === 0) {
+      replaceDiffTabs([], null)
+      resetCompare()
+      setPage('home')
+      return
+    }
+
+    const nextCompareTab = remainingTabs[remainingTabs.length - 1]
+    useCompareStore.getState().restoreSnapshot(nextCompareTab.snapshot)
+    replaceDiffTabs(nextCompareTab.diffTabs, nextCompareTab.activeDiffTabId)
+    setActiveCompareTab(nextCompareTab.id)
+  }, [closeCompareTab, replaceDiffTabs, resetCompare, setActiveCompareTab, setPage])
 
   const handleDoubleClickFile = useCallback(
     async (entry: CompareEntry) => {
@@ -119,52 +193,17 @@ export default function ComparePage() {
     <div className="flex h-full flex-col">
       {/* Header */}
       <div className="flex items-center gap-3 border-b border-neutral-700 bg-neutral-800 px-3 py-2">
-        <button
-          onClick={handleBack}
-          className="rounded bg-neutral-700 px-2.5 py-1 text-xs hover:bg-neutral-600"
-        >
-          ← 退出对比
-        </button>
-
-        {/* Tab bar */}
-        <div className="flex gap-0.5 overflow-x-auto">
-          <button
-            onClick={() => setActiveDiffTab(null)}
-            className={`rounded-t px-3 py-1 text-xs font-medium transition-colors ${
-              activeDiffTabId === null
-                ? 'bg-neutral-900 text-white'
-                : 'bg-neutral-700 text-neutral-300 hover:bg-neutral-600'
-            }`}
-          >
-            目录树
-          </button>
-          {diffTabs.map((tab) => (
-            <div key={tab.id} className="group flex items-center">
-              <button
-                onClick={() => setActiveDiffTab(tab.id)}
-                className={`rounded-t-l px-3 py-1 text-xs font-medium transition-colors ${
-                  activeDiffTabId === tab.id
-                    ? 'bg-neutral-900 text-white'
-                    : 'bg-neutral-700 text-neutral-300 hover:bg-neutral-600'
-                }`}
-              >
-                {tab.fileName}
-                {tab.leftContent !== tab.originalLeftContent || tab.rightContent !== tab.originalRightContent
-                  ? ' ●'
-                  : ''}
-              </button>
-              <button
-                onClick={(e) => {
-                  e.stopPropagation()
-                  closeDiffTab(tab.id)
-                }}
-                className="rounded-t-r bg-neutral-700 px-1.5 py-1 text-xs text-neutral-400 hover:bg-neutral-600 hover:text-white"
-              >
-                ×
-              </button>
-            </div>
-          ))}
-        </div>
+        <CompareSessionTabs
+          compareTabs={compareTabs}
+          activeCompareTabId={activeCompareTabId}
+          onSelectNewCompare={() => openDirectoryCompareHome()}
+          onSelectCompareTab={(compareTabId) => {
+            void handleSelectCompareTab(compareTabId)
+          }}
+          onCloseCompareTab={(compareTabId) => {
+            void handleCloseCompareSession(compareTabId)
+          }}
+        />
 
         {/* Status indicator */}
         <div className="ml-auto flex items-center gap-3 text-xs text-neutral-400">
@@ -184,17 +223,53 @@ export default function ComparePage() {
         </div>
       </div>
 
+      {diffTabs.length > 0 && (
+        <div className="flex items-center gap-3 border-b border-neutral-700 bg-neutral-900/70 px-3 py-2">
+          <div className="flex gap-0.5 overflow-x-auto">
+            <button
+              onClick={() => setActiveDiffTab(null)}
+              className={`rounded px-3 py-1 text-xs font-medium transition-colors ${
+                activeDiffTabId === null
+                  ? 'bg-neutral-800 text-white'
+                  : 'bg-neutral-700 text-neutral-300 hover:bg-neutral-600'
+              }`}
+            >
+              目录树
+            </button>
+            {diffTabs.map((tab) => (
+              <div key={tab.id} className="group flex items-center">
+                <button
+                  onClick={() => setActiveDiffTab(tab.id)}
+                  className={`rounded-l px-3 py-1 text-xs font-medium transition-colors ${
+                    activeDiffTabId === tab.id
+                      ? 'bg-neutral-800 text-white'
+                      : 'bg-neutral-700 text-neutral-300 hover:bg-neutral-600'
+                  }`}
+                >
+                  {tab.fileName}
+                  {tab.leftContent !== tab.originalLeftContent || tab.rightContent !== tab.originalRightContent
+                    ? ' ●'
+                    : ''}
+                </button>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    closeDiffTab(tab.id)
+                  }}
+                  className="rounded-r bg-neutral-700 px-1.5 py-1 text-xs text-neutral-400 hover:bg-neutral-600 hover:text-white"
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Content */}
       <div className="flex-1 overflow-hidden">
         {activeTab ? (
           <FileDiffView tab={activeTab} />
-        ) : scanning && entries.length === 0 ? (
-          <div className="flex h-full items-center justify-center">
-            <div className="flex flex-col items-center gap-3 text-neutral-400">
-              <span className="inline-block h-8 w-8 animate-spin rounded-full border-4 border-neutral-600 border-t-blue-400" />
-              <span className="text-sm">正在扫描目录…</span>
-            </div>
-          </div>
         ) : viewMode === 'split' ? (
           <div className="h-full p-3">
             <div className="flex h-full flex-col gap-2">
@@ -205,11 +280,16 @@ export default function ComparePage() {
                 onFilterChange={setFilter}
                 onDoubleClickFile={handleDoubleClickFile}
                 toolbarOnly
+                onRerunCompare={handleRerunCompare}
+                onExtensionFilterChange={handleExtensionFilterChange}
               />
               <SplitTree
                 entries={entries}
                 filter={filter}
                 onDoubleClickFile={handleDoubleClickFile}
+                emptyStateMessage={emptyStateMessage}
+                onExtensionFilterChange={handleExtensionFilterChange}
+                onSourcePathSubmit={handleSourcePathSubmit}
               />
             </div>
           </div>
@@ -220,6 +300,9 @@ export default function ComparePage() {
               filter={filter}
               onFilterChange={setFilter}
               onDoubleClickFile={handleDoubleClickFile}
+              emptyStateMessage={emptyStateMessage}
+              onRerunCompare={handleRerunCompare}
+              onExtensionFilterChange={handleExtensionFilterChange}
             />
           </div>
         )}

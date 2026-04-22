@@ -29,12 +29,18 @@ interface CompareToolbarProps {
   readonly allExpanded: boolean
   readonly toggleExpandAll: () => void
   readonly strategies: readonly StrategyName[]
+  readonly onToggleStrategy: (strategy: StrategyName) => void
   readonly extensionFilter: readonly string[]
-  readonly setExtensionFilter: (filter: readonly string[]) => void
+  readonly setExtensionFilter: (filter: readonly string[]) => void | Promise<void>
   readonly hideDot: boolean
   readonly setHideDot: (v: boolean) => void
   readonly hideDotFilter: HideDotFilter
   readonly setHideDotFilter: (v: HideDotFilter) => void
+  readonly compareLoading: boolean
+  readonly compareDone: boolean
+  readonly hasComparedResult: boolean
+  readonly onRerunCompare: () => void
+  readonly hasGlobalSyncTask: boolean
   readonly syncTask: SyncTaskSnapshot | null
   readonly onStartSync: (direction: 'left_to_right' | 'right_to_left') => void
   readonly onPauseSync: () => void
@@ -52,12 +58,18 @@ export default function CompareToolbar({
   allExpanded,
   toggleExpandAll,
   strategies,
+  onToggleStrategy,
   extensionFilter,
   setExtensionFilter,
   hideDot,
   setHideDot,
   hideDotFilter,
   setHideDotFilter,
+  compareLoading,
+  compareDone,
+  hasComparedResult,
+  onRerunCompare,
+  hasGlobalSyncTask,
   syncTask,
   onStartSync,
   onPauseSync,
@@ -78,10 +90,16 @@ export default function CompareToolbar({
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [dotDropOpen])
 
+  const buttonBaseClass = 'h-9 rounded px-4 text-sm font-medium transition-colors'
+  const compactButtonBaseClass = 'h-9 rounded px-3 text-sm font-medium transition-colors'
+  const compareActionLabel = compareLoading
+    ? (hasComparedResult ? '重新对比中…' : '首次对比中…')
+    : (hasComparedResult ? '重新对比' : '首次对比')
+
   const viewModeBtn = (mode: ViewMode, label: string) => (
     <button
       onClick={() => setViewMode(mode)}
-      className={`rounded px-2 py-1 text-xs transition-colors ${
+      className={`${compactButtonBaseClass} ${
         viewMode === mode
           ? 'bg-blue-600 text-white'
           : 'bg-neutral-700 text-neutral-300 hover:bg-neutral-600'
@@ -91,13 +109,15 @@ export default function CompareToolbar({
     </button>
   )
 
+  const canStartSync = compareDone && !compareLoading && pendingCount === 0 && stats.total > 0
+
   return (
     <>
       {/* Toolbar row 1: filters + stats + view mode */}
       <div className="flex items-center gap-2">
         <button
           onClick={toggleExpandAll}
-          className="rounded bg-neutral-700 px-2 py-1 text-xs hover:bg-neutral-600"
+          className={`${compactButtonBaseClass} bg-neutral-700 text-neutral-200 hover:bg-neutral-600`}
         >
           {allExpanded ? '收起' : '展开'}
         </button>
@@ -106,7 +126,7 @@ export default function CompareToolbar({
             <button
               key={f.value}
               onClick={() => onFilterChange(f.value)}
-              className={`rounded px-2.5 py-1 text-xs font-medium transition-colors ${
+              className={`${compactButtonBaseClass} ${
                 filter === f.value
                   ? 'bg-blue-600 text-white'
                   : 'bg-neutral-700 text-neutral-300 hover:bg-neutral-600'
@@ -116,9 +136,9 @@ export default function CompareToolbar({
             </button>
           ))}
         </div>
-        <div className="ml-auto flex items-center gap-3">
+        <div className="ml-auto flex min-w-0 items-center gap-3">
           {syncTask && (
-            <div className="flex min-w-0 items-center gap-2 rounded border border-neutral-700 bg-neutral-800/70 px-2 py-1 text-xs text-neutral-300">
+            <div className="flex min-w-0 max-w-full items-center gap-2 rounded border border-neutral-700 bg-neutral-800/70 px-2 py-1 text-xs text-neutral-300">
               <span className="shrink-0 tabular-nums">
                 同步 {syncTask.completedItems}/{syncTask.totalItems}
               </span>
@@ -135,17 +155,17 @@ export default function CompareToolbar({
                 {syncTask.currentPath && <span className="block truncate text-neutral-500">{syncTask.currentPath}</span>}
               </div>
               {syncTask.status === 'running' && (
-                <button onClick={onPauseSync} className="shrink-0 rounded bg-neutral-700 px-2 py-1 hover:bg-neutral-600">
+                <button onClick={onPauseSync} className="shrink-0 whitespace-nowrap rounded bg-neutral-700 px-3 py-1.5 text-sm font-medium hover:bg-neutral-600">
                   暂停
                 </button>
               )}
               {(syncTask.status === 'paused' || syncTask.status === 'failed') && (
-                <button onClick={onResumeSync} className="shrink-0 rounded bg-blue-600 px-2 py-1 text-white hover:bg-blue-500">
+                <button onClick={onResumeSync} className="shrink-0 whitespace-nowrap rounded bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-500">
                   继续
                 </button>
               )}
               {syncTask.status !== 'running' && (
-                <button onClick={onClearSync} className="shrink-0 rounded bg-neutral-700 px-2 py-1 hover:bg-neutral-600">
+                <button onClick={onClearSync} className="shrink-0 whitespace-nowrap rounded bg-neutral-700 px-3 py-1.5 text-sm font-medium hover:bg-neutral-600">
                   清除
                 </button>
               )}
@@ -160,17 +180,19 @@ export default function CompareToolbar({
             {pendingCount > 0 && <span className="text-neutral-500">待 {pendingCount}</span>}
           </div>
           <div className="flex gap-1">
-            {!syncTask && (
+            {!hasGlobalSyncTask && (
               <>
                 <button
                   onClick={() => onStartSync('left_to_right')}
-                  className="rounded bg-emerald-700 px-2 py-1 text-xs text-white hover:bg-emerald-600"
+                  disabled={!canStartSync}
+                  className="h-9 rounded bg-emerald-700 px-3 text-sm font-medium text-white hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   同步到右
                 </button>
                 <button
                   onClick={() => onStartSync('right_to_left')}
-                  className="rounded bg-cyan-700 px-2 py-1 text-xs text-white hover:bg-cyan-600"
+                  disabled={!canStartSync}
+                  className="h-9 rounded bg-cyan-700 px-3 text-sm font-medium text-white hover:bg-cyan-600 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   同步到左
                 </button>
@@ -188,27 +210,58 @@ export default function CompareToolbar({
         </div>
       )}
 
+      {compareLoading && filter !== 'all' && pendingCount > 0 && (
+        <div className="rounded border border-neutral-700 bg-neutral-800/70 px-2 py-1 text-xs text-neutral-400">
+          当前筛选隐藏了 {pendingCount} 个待比或对比中条目，切到“全部”可查看它们。
+        </div>
+      )}
+
+      {!compareLoading && !compareDone && stats.total > 0 && (
+        <div className="rounded border border-amber-800 bg-amber-900/20 px-2 py-1 text-xs text-amber-200">
+          当前结果未完成，需先重新对比后才能执行同步。
+        </div>
+      )}
+
       {/* Toolbar row 2: strategies + extension filter + hidden files */}
-      <div className="flex items-center gap-3">
-        <div className="flex items-center gap-1.5">
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="flex flex-wrap items-center gap-1.5">
           <span className="text-xs text-neutral-500">策略:</span>
-          {strategies.length === 0 ? (
-            <span className="text-xs text-neutral-600">无</span>
-          ) : (
-            strategies.map((s) => (
-              <span key={s} className="rounded bg-neutral-700 px-1.5 py-0.5 text-xs text-neutral-300">
-                {STRATEGY_LABELS[s] ?? s}
-              </span>
-            ))
+          {(Object.keys(STRATEGY_LABELS) as StrategyName[]).map((strategy) => {
+            const active = strategies.includes(strategy)
+
+            return (
+              <button
+                key={strategy}
+                onClick={() => onToggleStrategy(strategy)}
+                className={`h-9 rounded px-4 text-sm font-medium transition-colors ${
+                  active
+                    ? 'bg-blue-600 text-white hover:bg-blue-500'
+                    : 'bg-neutral-700 text-neutral-300 hover:bg-neutral-600'
+                }`}
+              >
+                {STRATEGY_LABELS[strategy] ?? strategy}
+              </button>
+            )
+          })}
+          {strategies.length === 0 && (
+            <span className="text-xs text-neutral-600">至少选择一个策略</span>
           )}
         </div>
 
         <FilterModal extensionFilter={extensionFilter} onChange={setExtensionFilter} />
 
+        <button
+          onClick={onRerunCompare}
+          disabled={compareLoading || strategies.length === 0}
+          className="h-9 rounded bg-blue-600 px-4 text-sm font-medium text-white transition-colors hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {compareActionLabel}
+        </button>
+
         <div className="relative flex items-center" ref={dotDropRef}>
           <button
             onClick={() => setHideDot(!hideDot)}
-            className={`rounded-l px-2 py-1 text-xs transition-colors ${
+            className={`h-9 rounded-l px-4 text-sm font-medium transition-colors ${
               hideDot
                 ? 'bg-blue-600 text-white'
                 : 'bg-neutral-700 text-neutral-300 hover:bg-neutral-600'
@@ -218,7 +271,7 @@ export default function CompareToolbar({
           </button>
           <button
             onClick={() => setDotDropOpen(!dotDropOpen)}
-            className={`rounded-r border-l px-1.5 py-1 text-xs transition-colors ${
+            className={`h-9 rounded-r border-l px-2.5 text-sm font-medium transition-colors ${
               hideDot
                 ? 'border-blue-500 bg-blue-600 text-white hover:bg-blue-500'
                 : 'border-neutral-600 bg-neutral-700 text-neutral-300 hover:bg-neutral-600'
@@ -240,7 +293,7 @@ export default function CompareToolbar({
                     if (!hideDot) setHideDot(true)
                     setDotDropOpen(false)
                   }}
-                  className={`w-full px-3 py-1.5 text-left text-xs hover:bg-neutral-700 ${
+                  className={`w-full px-3 py-2 text-left text-sm hover:bg-neutral-700 ${
                     hideDotFilter === opt.value ? 'text-blue-400' : 'text-neutral-300'
                   }`}
                 >

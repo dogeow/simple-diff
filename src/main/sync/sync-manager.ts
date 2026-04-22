@@ -14,6 +14,8 @@ import type {
 import { expandDirectoryEntries, seedSyncQueues } from './plan'
 import { getSyncTask, setSyncTask, type PersistedSyncTask } from './sync-store'
 
+const syncLogger = logger.child('sync')
+
 type Listener = (task: SyncTaskSnapshot | null) => void
 
 function now(): number {
@@ -98,7 +100,7 @@ export class SyncManager {
     }
     this.persistAndNotify()
 
-    logger.info(`开始同步: ${request.direction === 'left_to_right' ? '左 -> 右' : '右 -> 左'}`)
+    syncLogger.info(`开始同步: ${request.direction === 'left_to_right' ? '左 -> 右' : '右 -> 左'}`)
 
     if (this.task.status === 'running') {
       this.ensureLoop()
@@ -212,12 +214,12 @@ export class SyncManager {
           currentPath: null,
           updatedAt: now(),
         }
-        logger.info('同步完成')
+        syncLogger.info('同步完成')
         this.persistAndNotify()
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : '同步失败'
-      logger.error(`同步失败: ${message}`)
+      syncLogger.error(`同步失败: ${message}`)
       if (this.task) {
         this.task = {
           ...this.task,
@@ -239,7 +241,7 @@ export class SyncManager {
     source: SourceConfig,
     sourceFileSource: Awaited<ReturnType<typeof createFileSource>>,
   ): Promise<void> {
-    logger.info(`正在扫描同步目录: ${dirPath}`)
+    syncLogger.info(`正在扫描同步目录: ${dirPath}`)
     const fullPath = joinSourcePath(source, source.path, dirPath)
     const children = await sourceFileSource.list(fullPath)
     const expanded = expandDirectoryEntries(
@@ -274,7 +276,7 @@ export class SyncManager {
 
     if (item.kind === 'directory') {
       await targetFileSource.ensureDir(targetPath)
-      logger.info(`同步目录: ${item.relativePath}`)
+      syncLogger.info(`同步目录: ${item.relativePath}`)
       await this.expandDirectory(item.relativePath, source, sourceFileSource)
       return
     }
@@ -282,7 +284,7 @@ export class SyncManager {
     await targetFileSource.ensureDir(getParentDir(target, targetPath))
     const content = await sourceFileSource.readFileBuffer(sourcePath)
     await targetFileSource.writeFileBuffer(targetPath, content)
-    logger.info(`同步文件: ${item.relativePath}`)
+    syncLogger.info(`同步文件: ${item.relativePath}`)
   }
 
   private persistAndNotify(): void {

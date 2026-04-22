@@ -16,25 +16,55 @@ import { getConfigInternal } from '../ssh/config-store'
 import * as historyStore from '../history/history-store'
 import { syncManager } from '../sync/sync-manager'
 
+const compareLogger = logger.child('compare')
+
 interface ActiveCompare {
   readonly compareId: string
   readonly controller: AbortController
 }
 
-const activeCompares = new WeakMap<object, ActiveCompare>()
+const activeCompares = new WeakMap<object, Map<string, ActiveCompare>>()
 
-function getActiveCompare(sender: object): ActiveCompare | null {
-  return activeCompares.get(sender) ?? null
+function getActiveCompareMap(sender: object): Map<string, ActiveCompare> {
+  let compares = activeCompares.get(sender)
+  if (!compares) {
+    compares = new Map<string, ActiveCompare>()
+    activeCompares.set(sender, compares)
+  }
+  return compares
 }
 
 function setActiveCompare(sender: object, compare: ActiveCompare): void {
-  activeCompares.set(sender, compare)
+  const compares = getActiveCompareMap(sender)
+  compares.set(compare.compareId, compare)
 }
 
-function clearActiveCompare(sender: object, controller: AbortController): void {
-  const activeCompare = getActiveCompare(sender)
+function getActiveCompare(sender: object, compareId: string): ActiveCompare | null {
+  return activeCompares.get(sender)?.get(compareId) ?? null
+}
+
+function clearActiveCompare(sender: object, compareId: string, controller: AbortController): void {
+  const compares = activeCompares.get(sender)
+  const activeCompare = compares?.get(compareId)
   if (activeCompare?.controller === controller) {
+    compares.delete(compareId)
+  }
+  if (compares && compares.size === 0) {
     activeCompares.delete(sender)
+  }
+}
+
+function cancelActiveCompare(sender: object, compareId?: string): void {
+  const compares = activeCompares.get(sender)
+  if (!compares) return
+
+  if (compareId) {
+    compares.get(compareId)?.controller.abort()
+    return
+  }
+
+  for (const compare of compares.values()) {
+    compare.controller.abort()
   }
 }
 
@@ -76,23 +106,23 @@ function registerFileHandlers(): void {
 function registerCompareHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.COMPARE_RUN, (event, request: CompareRequest) =>
     wrapHandler(async () => {
-      getActiveCompare(event.sender)?.controller.abort()
+      getActiveCompare(event.sender, request.compareId)?.controller.abort()
 
       const controller = new AbortController()
       setActiveCompare(event.sender, { compareId: request.compareId, controller })
 
-      logger.info(`开始对比: 左=${request.left.type === 'sftp' ? 'SFTP' : '本地'}(${request.left.path}) 右=${request.right.type === 'sftp' ? 'SFTP' : '本地'}(${request.right.path})`)
+      compareLogger.info(`开始对比: 左=${request.left.type === 'sftp' ? 'SFTP' : '本地'}(${request.left.path}) 右=${request.right.type === 'sftp' ? 'SFTP' : '本地'}(${request.right.path})`)
 
-      logger.info('正在创建左侧数据源...')
+      compareLogger.info('正在创建左侧数据源...')
       const leftSource = await createFileSource(request.left)
-      logger.info('左侧数据源就绪')
+      compareLogger.info('左侧数据源就绪')
 
-      logger.info('正在创建右侧数据源...')
+      compareLogger.info('正在创建右侧数据源...')
       const rightSource = await createFileSource(request.right)
-      logger.info('右侧数据源就绪')
+      compareLogger.info('右侧数据源就绪')
 
       try {
-        logger.info('开始逐层对比目录...')
+        compareLogger.info('开始逐层对比目录...')
         const result = await compareDirectories({
           leftSource,
           rightSource,
@@ -103,7 +133,6 @@ function registerCompareHandlers(): void {
           signal: controller.signal,
           onEntriesFound: (entries) => {
             if (controller.signal.aborted) return
-            logger.info(`发现新条目: ${entries.length} 项`)
             safeSendToWebContents(event.sender, IPC_CHANNELS.COMPARE_SCAN_COMPLETE, request.compareId, entries)
           },
           onEntryUpdate: (entry) => {
@@ -112,7 +141,7 @@ function registerCompareHandlers(): void {
           },
         })
 
-        logger.info(`对比完成，耗时 ${formatDuration(result.duration)} — 相同:${result.stats.equal} 不同:${result.stats.different} 仅左:${result.stats.leftOnly} 仅右:${result.stats.rightOnly}`)
+        compareLogger.info(`对比完成，耗时 ${formatDuration(result.duration)} — 相同:${result.stats.equal} 不同:${result.stats.different} 仅左:${result.stats.leftOnly} 仅右:${result.stats.rightOnly}`)
 
         // Attach source info for history
         const enriched = { ...result, leftSource: request.left, rightSource: request.right }
@@ -120,23 +149,20 @@ function registerCompareHandlers(): void {
         return enriched
       } catch (error) {
         if (controller.signal.aborted) {
-          logger.info('对比已取消')
+          compareLogger.info('对比已取消')
         }
         throw error
       } finally {
         await leftSource.dispose()
         await rightSource.dispose()
-        clearActiveCompare(event.sender, controller)
+        clearActiveCompare(event.sender, request.compareId, controller)
       }
     }),
   )
 
-  ipcMain.handle(IPC_CHANNELS.COMPARE_CANCEL, (event) =>
+  ipcMain.handle(IPC_CHANNELS.COMPARE_CANCEL, (event, compareId?: string) =>
     wrapHandler(async () => {
-      const activeCompare = getActiveCompare(event.sender)
-      if (activeCompare) {
-        activeCompare.controller.abort()
-      }
+      cancelActiveCompare(event.sender, compareId)
     }),
   )
 

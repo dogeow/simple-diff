@@ -15,7 +15,6 @@ export function useVisibleCompareNodes({
   side,
 }: UseVisibleCompareNodesOptions): readonly TreeNode[] {
   const expandedDirs = useCompareStore((state) => state.expandedDirs)
-  const extensionFilter = useCompareStore((state) => state.extensionFilter)
   const hideDot = useCompareStore((state) => state.hideDot)
   const hideDotFilter = useCompareStore((state) => state.hideDotFilter)
 
@@ -23,12 +22,12 @@ export function useVisibleCompareNodes({
     () =>
       prepareCompareEntries(entries, {
         filter,
-        pathFilter: extensionFilter,
+        pathFilter: [],
         hideDot,
         hideDotFilter,
         side,
       }),
-    [entries, extensionFilter, filter, hideDot, hideDotFilter, side],
+    [entries, filter, hideDot, hideDotFilter, side],
   )
 
   const tree = useMemo(() => buildTree(preparedEntries), [preparedEntries])

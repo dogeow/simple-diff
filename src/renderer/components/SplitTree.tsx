@@ -3,18 +3,22 @@ import { joinSourcePath } from '@shared/source-path'
 import type { CompareEntry, CompareState } from '../../../shared/types'
 import { truncatePath, type TreeNode } from '../utils/tree-utils'
 import TreeEntryCell from './TreeEntryCell'
-import { formatSize, formatTime, rowBg } from './tree-row-utils'
+import { formatSize, formatTime, rowBg, shouldShowDirectorySpinner } from './tree-row-utils'
 import { useVisibleCompareNodes } from '../hooks/useVisibleCompareNodes'
 import { useCompareNodeInteractions, type CompareNodeInteractions } from '../hooks/useCompareNodeInteractions'
 import { useCompareStore } from '../stores/compare-store'
 import StatusBadge from './StatusBadge'
 import ScrollGutter from './ScrollGutter'
 import FileContextMenu, { type ContextMenuAction } from './FileContextMenu'
+import { createExactPathFilter } from '@shared/path-filter'
 
 interface SplitTreeProps {
   readonly entries: readonly CompareEntry[]
   readonly filter: CompareState | 'all'
   readonly onDoubleClickFile: (entry: CompareEntry) => void
+  readonly emptyStateMessage?: string
+  readonly onExtensionFilterChange?: (filter: readonly string[]) => void | Promise<void>
+  readonly onSourcePathSubmit?: (side: Side, path: string) => void | Promise<void>
 }
 
 type Side = 'left' | 'right'
@@ -23,12 +27,14 @@ const OVERSCAN_ROWS = 12
 
 // ─── Path Header ─────────────────────────────────────────────
 
-function PathHeader({ side }: { readonly side: Side }) {
-  const source = useCompareStore((s) => side === 'left' ? s.leftSource : s.rightSource)
-  const setLeftPath = useCompareStore((s) => s.setLeftPath)
-  const setRightPath = useCompareStore((s) => s.setRightPath)
-
-  const sourcePath = source?.path ?? ''
+function PathHeader({
+  side,
+  onSourcePathSubmit,
+}: {
+  readonly side: Side
+  readonly onSourcePathSubmit?: (side: Side, path: string) => void | Promise<void>
+}) {
+  const sourcePath = useCompareStore((s) => side === 'left' ? s.leftPath : s.rightPath)
   const [editingPath, setEditingPath] = useState(false)
   const [pathInput, setPathInput] = useState(sourcePath)
 
@@ -40,11 +46,10 @@ function PathHeader({ side }: { readonly side: Side }) {
   const handlePathSubmit = useCallback(() => {
     const trimmed = pathInput.trim()
     if (trimmed && trimmed !== sourcePath) {
-      if (side === 'left') setLeftPath(trimmed)
-      else setRightPath(trimmed)
+      void onSourcePathSubmit?.(side, trimmed)
     }
     setEditingPath(false)
-  }, [pathInput, sourcePath, side, setLeftPath, setRightPath])
+  }, [onSourcePathSubmit, pathInput, sourcePath, side])
 
   return (
     <div className="flex flex-1 flex-col overflow-hidden">
@@ -94,6 +99,8 @@ interface SideTableProps {
   readonly endIndex: number
   readonly topSpacerHeight: number
   readonly bottomSpacerHeight: number
+  readonly emptyStateMessage: string
+  readonly onExtensionFilterChange?: (filter: readonly string[]) => void | Promise<void>
 }
 
 function SideTable({
@@ -106,8 +113,12 @@ function SideTable({
   endIndex,
   topSpacerHeight,
   bottomSpacerHeight,
+  emptyStateMessage,
+  onExtensionFilterChange,
 }: SideTableProps) {
   const refreshDir = useCompareStore((s) => s.refreshDir)
+  const extensionFilter = useCompareStore((s) => s.extensionFilter)
+  const setExtensionFilter = useCompareStore((s) => s.setExtensionFilter)
   const [ctxMenu, setCtxMenu] = useState<ContextMenuState | null>(null)
   const [renaming, setRenaming] = useState<string | null>(null)
   const [renameValue, setRenameValue] = useState('')
@@ -128,8 +139,25 @@ function SideTable({
   }, [])
 
   const getContextActions = (node: TreeNode): readonly ContextMenuAction[] => {
-    if (!isLocal || !node.entry) return []
+    if (!node.entry) return []
     const fullPath = buildFullPath(node.relativePath)
+    const ignoreAction: ContextMenuAction = {
+      label: node.isDirectory ? '忽略此目录' : '忽略此文件',
+      onClick: () => {
+        const rule = createExactPathFilter(node.relativePath)
+        if (extensionFilter.includes(rule)) return
+        const nextFilters = [...extensionFilter, rule]
+        if (onExtensionFilterChange) {
+          void onExtensionFilterChange(nextFilters)
+          return
+        }
+        setExtensionFilter(nextFilters)
+      },
+    }
+
+    if (!isLocal) {
+      return [ignoreAction]
+    }
 
     const actions: ContextMenuAction[] = [
       {
@@ -156,6 +184,7 @@ function SideTable({
           }
         },
       },
+      ignoreAction,
     ]
     return actions
   }
@@ -187,7 +216,7 @@ function SideTable({
           {visibleNodes.length === 0 && (
             <tr>
               <td colSpan={4} className="px-3 py-6 text-center text-neutral-500 text-xs">
-                无匹配项
+                {emptyStateMessage}
               </td>
             </tr>
           )}
@@ -255,6 +284,7 @@ function SideRow({ node, side, expanded, loading, onToggle, onDoubleClick, onCon
   if (!entry) return null
 
   const fileInfo = side === 'left' ? entry.left : entry.right
+  const showSpinner = shouldShowDirectorySpinner(entry.isDirectory, loading, entry.state)
 
   return (
     <tr
@@ -266,7 +296,7 @@ function SideRow({ node, side, expanded, loading, onToggle, onDoubleClick, onCon
         <TreeEntryCell
           node={node}
           expanded={expanded}
-          loading={loading}
+          loading={showSpinner}
           onToggle={onToggle}
           indentSize={16}
         >
@@ -305,7 +335,7 @@ function SideRow({ node, side, expanded, loading, onToggle, onDoubleClick, onCon
 
 // ─── Main Component ──────────────────────────────────────────
 
-export default function SplitTree({ entries, filter, onDoubleClickFile }: SplitTreeProps) {
+export default function SplitTree({ entries, filter, onDoubleClickFile, emptyStateMessage = '无匹配项', onExtensionFilterChange, onSourcePathSubmit }: SplitTreeProps) {
   const leftRef = useRef<HTMLDivElement>(null)
   const rightRef = useRef<HTMLDivElement>(null)
   const syncing = useRef(false)
@@ -365,9 +395,9 @@ export default function SplitTree({ entries, filter, onDoubleClickFile }: SplitT
     <div className="flex h-full flex-col">
       {/* Fixed headers */}
       <div className="flex shrink-0">
-        <PathHeader side="left" />
+        <PathHeader side="left" onSourcePathSubmit={onSourcePathSubmit} />
         <div className="w-4 shrink-0 border-x border-neutral-600 bg-neutral-700" />
-        <PathHeader side="right" />
+        <PathHeader side="right" onSourcePathSubmit={onSourcePathSubmit} />
       </div>
 
       {/* Two panels with synchronized scroll */}
@@ -383,6 +413,8 @@ export default function SplitTree({ entries, filter, onDoubleClickFile }: SplitT
             endIndex={endIndex}
             topSpacerHeight={topSpacerHeight}
             bottomSpacerHeight={bottomSpacerHeight}
+            emptyStateMessage={emptyStateMessage}
+            onExtensionFilterChange={onExtensionFilterChange}
           />
         </div>
         <ScrollGutter scrollRef={leftRef} />
@@ -397,6 +429,8 @@ export default function SplitTree({ entries, filter, onDoubleClickFile }: SplitT
             endIndex={endIndex}
             topSpacerHeight={topSpacerHeight}
             bottomSpacerHeight={bottomSpacerHeight}
+            emptyStateMessage={emptyStateMessage}
+            onExtensionFilterChange={onExtensionFilterChange}
           />
         </div>
       </div>

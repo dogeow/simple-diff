@@ -1,7 +1,7 @@
 import type { TreeNode } from '../utils/tree-utils'
 import TreeEntryCell from './TreeEntryCell'
 import StatusBadge from './StatusBadge'
-import { formatSize, formatTime, rowBg } from './tree-row-utils'
+import { formatSize, formatTime, rowBg, shouldShowDirectorySpinner } from './tree-row-utils'
 
 interface TreeRowProps {
   readonly node: TreeNode
@@ -9,16 +9,20 @@ interface TreeRowProps {
   readonly loading: boolean
   readonly onToggle: () => void
   readonly onDoubleClick: () => void
+  readonly onContextMenu?: (event: React.MouseEvent<HTMLTableRowElement>) => void
 }
 
-export default function TreeRow({ node, expanded, loading, onToggle, onDoubleClick }: TreeRowProps) {
+export default function TreeRow({ node, expanded, loading, onToggle, onDoubleClick, onContextMenu }: TreeRowProps) {
   const entry = node.entry
   if (!entry) return null
+
+  const showSpinner = shouldShowDirectorySpinner(entry.isDirectory, loading, entry.state)
 
   return (
     <tr
       className={`border-b border-neutral-800 hover:bg-neutral-800/50 cursor-pointer select-none ${rowBg(entry.state)}`}
       onDoubleClick={onDoubleClick}
+      onContextMenu={onContextMenu}
     >
       {/* Left size */}
       <td className="border-r border-neutral-800/50 px-2 py-1.5 text-right text-xs text-neutral-400">
@@ -33,7 +37,7 @@ export default function TreeRow({ node, expanded, loading, onToggle, onDoubleCli
         <TreeEntryCell
           node={node}
           expanded={expanded}
-          loading={loading}
+          loading={showSpinner}
           onToggle={onToggle}
         />
       </td>

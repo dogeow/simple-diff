@@ -76,6 +76,29 @@ describe('prepareCompareEntries', () => {
     expect(result.map((entry) => entry.relativePath)).toEqual(['src', 'src/index.ts'])
   })
 
+  it('supports exact path rules without hiding same-named nested directories elsewhere', () => {
+    const entries = [
+      createEntry('config', 'equal', { isDirectory: true }),
+      createEntry('config/app.php', 'equal'),
+      createEntry('src', 'equal', { isDirectory: true }),
+      createEntry('src/config', 'equal', { isDirectory: true }),
+      createEntry('src/config/app.php', 'equal'),
+    ]
+
+    const result = prepareCompareEntries(entries, {
+      filter: 'all',
+      pathFilter: ['path:config'],
+      hideDot: false,
+      hideDotFilter: 'all',
+    })
+
+    expect(result.map((entry) => entry.relativePath)).toEqual([
+      'src',
+      'src/config',
+      'src/config/app.php',
+    ])
+  })
+
   it('hides dot files and descendants under dot directories', () => {
     const entries = [
       createEntry('.env', 'equal'),
@@ -117,6 +140,27 @@ describe('prepareCompareEntries', () => {
       ['src', 'different'],
       ['src/components', 'different'],
       ['src/components/Button.tsx', 'different'],
+    ])
+  })
+
+  it('treats common directories with one-sided descendants as different', () => {
+    const entries = [
+      createEntry('src', 'equal', { isDirectory: true }),
+      createEntry('src/generated', 'equal', { isDirectory: true }),
+      createEntry('src/generated/only-on-right.ts', 'right_only', { left: undefined }),
+    ]
+
+    const result = prepareCompareEntries(entries, {
+      filter: 'all',
+      pathFilter: [],
+      hideDot: false,
+      hideDotFilter: 'all',
+    })
+
+    expect(result.map((entry) => [entry.relativePath, entry.state])).toEqual([
+      ['src', 'different'],
+      ['src/generated', 'different'],
+      ['src/generated/only-on-right.ts', 'right_only'],
     ])
   })
 })

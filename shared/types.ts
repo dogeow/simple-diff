@@ -159,10 +159,12 @@ export interface CompareHistoryEntry {
 // ─── Log ─────────────────────────────────────────────────────
 
 export type LogLevel = 'info' | 'warn' | 'error'
+export type LogScope = 'app' | 'compare' | 'sync' | 'ssh'
 
 export interface LogEntry {
   readonly timestamp: number
   readonly level: LogLevel
+  readonly scope: LogScope
   readonly message: string
 }
 

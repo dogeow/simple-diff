@@ -14,6 +14,32 @@ import type {
 export type ViewMode = 'split' | 'merged'
 export type HideDotFilter = 'all' | 'files' | 'dirs'
 
+export interface CompareSessionSnapshot {
+  readonly leftPath: string
+  readonly rightPath: string
+  readonly leftSourceType: 'local' | 'sftp'
+  readonly rightSourceType: 'local' | 'sftp'
+  readonly leftSSHConfigId: string
+  readonly rightSSHConfigId: string
+  readonly strategies: readonly StrategyName[]
+  readonly extensionFilter: readonly string[]
+  readonly hideDot: boolean
+  readonly hideDotFilter: HideDotFilter
+  readonly entries: readonly CompareEntry[]
+  readonly scanning: boolean
+  readonly comparing: boolean
+  readonly done: boolean
+  readonly error: string | null
+  readonly duration: number
+  readonly leftSource: SourceConfig | null
+  readonly rightSource: SourceConfig | null
+  readonly loadingDirs: readonly string[]
+  readonly filter: CompareState | 'all'
+  readonly expandedDirs: readonly string[]
+  readonly viewMode: ViewMode
+  readonly activeCompareId: string | null
+}
+
 interface CompareStore {
   readonly leftPath: string
   readonly rightPath: string
@@ -55,7 +81,7 @@ interface CompareStore {
   setHideDot: (hide: boolean) => void
   setHideDotFilter: (filter: HideDotFilter) => void
 
-  startScanning: (compareId: string) => void
+  startScanning: (compareId: string, options?: { readonly preserveEntries?: boolean }) => void
   setScanEntries: (compareId: string, entries: readonly CompareEntry[]) => void
   updateEntry: (compareId: string, entry: CompareEntry) => void
   finishCompare: (compareId: string, result: CompareResult) => void
@@ -63,6 +89,7 @@ interface CompareStore {
   refreshDir: (relativePath: string) => Promise<void>
   setError: (error: string | null, compareId?: string) => void
   setFilter: (filter: CompareState | 'all') => void
+  hydrateSourceInputs: (left: SourceConfig, right: SourceConfig) => void
   setSources: (left: SourceConfig, right: SourceConfig) => void
   setViewMode: (mode: ViewMode) => void
   toggleDir: (path: string) => void
@@ -70,7 +97,103 @@ interface CompareStore {
   expandAll: () => void
   collapseAll: () => void
   resetCompare: () => void
+  invalidateCompareResult: () => void
   setSyncTask: (task: SyncTaskSnapshot | null) => void
+  createSnapshot: () => CompareSessionSnapshot
+  restoreSnapshot: (snapshot: CompareSessionSnapshot) => void
+}
+
+export function hasCompareSessionContent(snapshot: CompareSessionSnapshot): boolean {
+  return Boolean(
+    snapshot.leftSource
+    || snapshot.rightSource
+    || snapshot.entries.length > 0
+    || snapshot.scanning
+    || snapshot.comparing
+    || snapshot.done
+    || snapshot.error,
+  )
+}
+
+export function sanitizePersistedCompareSessionSnapshot(snapshot: CompareSessionSnapshot): CompareSessionSnapshot {
+  return {
+    ...snapshot,
+    scanning: false,
+    comparing: false,
+    loadingDirs: [],
+    activeCompareId: null,
+  }
+}
+
+export function applyScanEntriesToSnapshot(
+  snapshot: CompareSessionSnapshot,
+  compareId: string,
+  entries: readonly CompareEntry[],
+): CompareSessionSnapshot {
+  if (snapshot.activeCompareId !== compareId) return snapshot
+
+  return {
+    ...snapshot,
+    entries: upsertEntries(snapshot.entries, entries),
+    scanning: true,
+    comparing: true,
+    done: false,
+    error: null,
+  }
+}
+
+export function applyEntryUpdateToSnapshot(
+  snapshot: CompareSessionSnapshot,
+  compareId: string,
+  entry: CompareEntry,
+): CompareSessionSnapshot {
+  if (snapshot.activeCompareId !== compareId) return snapshot
+
+  return {
+    ...snapshot,
+    entries: upsertEntries(snapshot.entries, [entry]),
+    scanning: true,
+    comparing: true,
+    done: false,
+    error: null,
+  }
+}
+
+export function applyFinishCompareToSnapshot(
+  snapshot: CompareSessionSnapshot,
+  compareId: string,
+  result: CompareResult,
+): CompareSessionSnapshot {
+  if (snapshot.activeCompareId !== compareId) return snapshot
+
+  return {
+    ...snapshot,
+    entries: upsertEntries([], result.entries),
+    scanning: false,
+    comparing: false,
+    done: true,
+    error: null,
+    duration: result.duration,
+    loadingDirs: [],
+    activeCompareId: null,
+  }
+}
+
+export function applyCompareErrorToSnapshot(
+  snapshot: CompareSessionSnapshot,
+  compareId: string,
+  error: string | null,
+): CompareSessionSnapshot {
+  if (snapshot.activeCompareId !== compareId) return snapshot
+
+  return {
+    ...snapshot,
+    scanning: false,
+    comparing: false,
+    error,
+    loadingDirs: [],
+    activeCompareId: null,
+  }
 }
 
 function computeStats(entries: readonly CompareEntry[]): CompareStats {
@@ -172,6 +295,58 @@ function replaceDirectoryChildren(
   return upsertEntries(preserved, incomingChildren)
 }
 
+function deriveSourceState(source: SourceConfig): {
+  sourceType: 'local' | 'sftp'
+  path: string
+  sshConfigId: string
+} {
+  if (source.type === 'sftp') {
+    return {
+      sourceType: 'sftp',
+      path: source.path,
+      sshConfigId: source.configId,
+    }
+  }
+
+  return {
+    sourceType: 'local',
+    path: source.path,
+    sshConfigId: '',
+  }
+}
+
+function cloneEntries(entries: readonly CompareEntry[]): readonly CompareEntry[] {
+  return [...entries]
+}
+
+function createCompareSessionSnapshot(state: CompareStore): CompareSessionSnapshot {
+  return {
+    leftPath: state.leftPath,
+    rightPath: state.rightPath,
+    leftSourceType: state.leftSourceType,
+    rightSourceType: state.rightSourceType,
+    leftSSHConfigId: state.leftSSHConfigId,
+    rightSSHConfigId: state.rightSSHConfigId,
+    strategies: [...state.strategies],
+    extensionFilter: [...state.extensionFilter],
+    hideDot: state.hideDot,
+    hideDotFilter: state.hideDotFilter,
+    entries: cloneEntries(state.entries),
+    scanning: state.scanning,
+    comparing: state.comparing,
+    done: state.done,
+    error: state.error,
+    duration: state.duration,
+    leftSource: state.leftSource,
+    rightSource: state.rightSource,
+    loadingDirs: [...state.loadingDirs],
+    filter: state.filter,
+    expandedDirs: [...state.expandedDirs],
+    viewMode: state.viewMode,
+    activeCompareId: state.activeCompareId,
+  }
+}
+
 /** Match two file lists into CompareEntry[] for a given parent relative path. */
 function matchChildren(
   leftList: readonly FileEntry[],
@@ -191,7 +366,7 @@ function matchChildren(
     const left = leftMap.get(name)
     const right = rightMap.get(name)
     const isDir = left?.isDirectory ?? right?.isDirectory ?? false
-    const relativePath = `${parentRelative}/${name}`
+    const relativePath = parentRelative ? `${parentRelative}/${name}` : name
 
     if (left && !right) {
       entries.push({ relativePath, name, isDirectory: isDir, state: 'left_only', left: { ...left, path: relativePath }, reasons: [] })
@@ -216,7 +391,7 @@ function matchChildren(
         })
       } else {
         entries.push({
-          relativePath, name, isDirectory: isDir, state: 'equal',
+          relativePath, name, isDirectory: isDir, state: 'pending',
           left: { ...left, path: relativePath },
           right: { ...right, path: relativePath },
           reasons: [],
@@ -272,8 +447,14 @@ export const useCompareStore = create<CompareStore>((set, get) => ({
   setHideDot: (hideDot) => set({ hideDot }),
   setHideDotFilter: (hideDotFilter) => set({ hideDotFilter }),
 
-  startScanning: (activeCompareId) => set((state) => ({
+  startScanning: (activeCompareId, options) => set((state) => ({
     ...compareInitial,
+    entries: options?.preserveEntries ? state.entries : compareInitial.entries,
+    expandedDirs: options?.preserveEntries ? state.expandedDirs : compareInitial.expandedDirs,
+    filter: options?.preserveEntries ? state.filter : compareInitial.filter,
+    viewMode: options?.preserveEntries ? state.viewMode : compareInitial.viewMode,
+    leftSource: options?.preserveEntries ? state.leftSource : compareInitial.leftSource,
+    rightSource: options?.preserveEntries ? state.rightSource : compareInitial.rightSource,
     activeCompareId,
     scanning: true,
     compareVersion: state.compareVersion + 1,
@@ -300,7 +481,10 @@ export const useCompareStore = create<CompareStore>((set, get) => ({
       scanning: false,
       comparing: false,
       done: true,
+      error: null,
       duration: result.duration,
+      loadingDirs: new Set(),
+      activeCompareId: null,
     })
   },
 
@@ -346,11 +530,39 @@ export const useCompareStore = create<CompareStore>((set, get) => ({
 
   setError: (error, compareId) => {
     if (compareId && get().activeCompareId !== compareId) return
-    set({ error, scanning: false, comparing: false })
+    set({ error, scanning: false, comparing: false, loadingDirs: new Set(), activeCompareId: null })
   },
   setFilter: (filter) => set({ filter }),
 
-  setSources: (left, right) => set({ leftSource: left, rightSource: right }),
+  hydrateSourceInputs: (left, right) => {
+    const leftState = deriveSourceState(left)
+    const rightState = deriveSourceState(right)
+
+    set({
+      leftPath: leftState.path,
+      rightPath: rightState.path,
+      leftSourceType: leftState.sourceType,
+      rightSourceType: rightState.sourceType,
+      leftSSHConfigId: leftState.sshConfigId,
+      rightSSHConfigId: rightState.sshConfigId,
+    })
+  },
+
+  setSources: (left, right) => {
+    const leftState = deriveSourceState(left)
+    const rightState = deriveSourceState(right)
+
+    set({
+      leftSource: left,
+      rightSource: right,
+      leftPath: leftState.path,
+      rightPath: rightState.path,
+      leftSourceType: leftState.sourceType,
+      rightSourceType: rightState.sourceType,
+      leftSSHConfigId: leftState.sshConfigId,
+      rightSSHConfigId: rightState.sshConfigId,
+    })
+  },
 
   setViewMode: (viewMode) => set({ viewMode }),
 
@@ -410,7 +622,51 @@ export const useCompareStore = create<CompareStore>((set, get) => ({
       rightSource: syncTask?.rightSource ?? null,
     })
   },
+
+  invalidateCompareResult: () => {
+    const { compareVersion, syncTask, filter, viewMode } = get()
+    set({
+      ...compareInitial,
+      compareVersion: compareVersion + 1,
+      syncTask,
+      filter,
+      viewMode,
+    })
+  },
   setSyncTask: (syncTask) => set({ syncTask }),
+
+  createSnapshot: () => createCompareSessionSnapshot(get()),
+
+  restoreSnapshot: (snapshot) => {
+    const { compareVersion } = get()
+
+    set({
+      leftPath: snapshot.leftPath,
+      rightPath: snapshot.rightPath,
+      leftSourceType: snapshot.leftSourceType,
+      rightSourceType: snapshot.rightSourceType,
+      leftSSHConfigId: snapshot.leftSSHConfigId,
+      rightSSHConfigId: snapshot.rightSSHConfigId,
+      strategies: [...snapshot.strategies],
+      extensionFilter: [...snapshot.extensionFilter],
+      hideDot: snapshot.hideDot,
+      hideDotFilter: snapshot.hideDotFilter,
+      entries: cloneEntries(snapshot.entries),
+      scanning: snapshot.scanning,
+      comparing: snapshot.comparing,
+      done: snapshot.done,
+      error: snapshot.error,
+      duration: snapshot.duration,
+      leftSource: snapshot.leftSource,
+      rightSource: snapshot.rightSource,
+      loadingDirs: new Set(snapshot.loadingDirs),
+      filter: snapshot.filter,
+      expandedDirs: new Set(snapshot.expandedDirs),
+      viewMode: snapshot.viewMode,
+      activeCompareId: snapshot.activeCompareId,
+      compareVersion: compareVersion + 1,
+    })
+  },
 }))
 
 export { computeStats }

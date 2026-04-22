@@ -5,6 +5,8 @@ import { homedir } from 'os'
 import { join } from 'path'
 import { logger } from '../utils/logger'
 
+const sshLogger = logger.child('ssh')
+
 const DEFAULT_KEY_PATHS = [
   'id_ed25519',
   'id_rsa',
@@ -38,11 +40,11 @@ export class ConnectionManager {
   async connect(config: SSHConfigInternal): Promise<NodeSSH> {
     const existing = this.connections.get(config.id)
     if (existing?.isConnected()) {
-      logger.info(`SSH 复用已有连接: ${config.host}:${config.port}`)
+      sshLogger.info(`SSH 复用已有连接: ${config.host}:${config.port}`)
       return existing
     }
 
-    logger.info(`SSH 正在连接: ${config.username}@${config.host}:${config.port}`)
+    sshLogger.info(`SSH 正在连接: ${config.username}@${config.host}:${config.port}`)
     const ssh = new NodeSSH()
     const connectConfig: Record<string, unknown> = {
       host: config.host,
@@ -72,7 +74,7 @@ export class ConnectionManager {
     }
 
     await ssh.connect(connectConfig)
-    logger.info(`SSH 连接成功: ${config.host}:${config.port}`)
+  sshLogger.info(`SSH 连接成功: ${config.host}:${config.port}`)
     this.connections.set(config.id, ssh)
     return ssh
   }

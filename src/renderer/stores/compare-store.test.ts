@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { CompareEntry, FileEntry, IpcResult, SourceConfig } from '../../../shared/types'
-import { useCompareStore } from './compare-store'
+import { hasCompareSessionContent, useCompareStore } from './compare-store'
 
 const leftSource: SourceConfig = { type: 'local', path: '/left' }
 const rightSource: SourceConfig = { type: 'local', path: '/right' }
@@ -101,6 +101,127 @@ describe('compare-store', () => {
     const { entries } = useCompareStore.getState()
     expect(entries).toHaveLength(1)
     expect(entries[0]?.state).toBe('pending')
+  })
+
+  it('hydrates rerunnable source fields from source configs', () => {
+    const store = useCompareStore.getState()
+
+    store.setSources(
+      { type: 'sftp', configId: 'left-ssh', path: '/remote/left' },
+      { type: 'local', path: '/local/right' },
+    )
+
+    const state = useCompareStore.getState()
+    expect(state.leftSource).toEqual({ type: 'sftp', configId: 'left-ssh', path: '/remote/left' })
+    expect(state.rightSource).toEqual({ type: 'local', path: '/local/right' })
+    expect(state.leftSourceType).toBe('sftp')
+    expect(state.leftSSHConfigId).toBe('left-ssh')
+    expect(state.leftPath).toBe('/remote/left')
+    expect(state.rightSourceType).toBe('local')
+    expect(state.rightSSHConfigId).toBe('')
+    expect(state.rightPath).toBe('/local/right')
+  })
+
+  it('hydrates source inputs without replacing the active compare sources', () => {
+    const store = useCompareStore.getState()
+
+    useCompareStore.setState({
+      leftSource: { type: 'local', path: '/active/left' },
+      rightSource: { type: 'local', path: '/active/right' },
+    })
+
+    store.hydrateSourceInputs(
+      { type: 'sftp', configId: 'left-ssh', path: '/remote/left' },
+      { type: 'sftp', configId: 'right-ssh', path: '/remote/right' },
+    )
+
+    const state = useCompareStore.getState()
+    expect(state.leftPath).toBe('/remote/left')
+    expect(state.rightPath).toBe('/remote/right')
+    expect(state.leftSourceType).toBe('sftp')
+    expect(state.rightSourceType).toBe('sftp')
+    expect(state.leftSSHConfigId).toBe('left-ssh')
+    expect(state.rightSSHConfigId).toBe('right-ssh')
+    expect(state.leftSource).toEqual({ type: 'local', path: '/active/left' })
+    expect(state.rightSource).toEqual({ type: 'local', path: '/active/right' })
+  })
+
+  it('creates and restores compare snapshots for tab switching', () => {
+    const store = useCompareStore.getState()
+
+    useCompareStore.setState({
+      leftPath: '/saved/left',
+      rightPath: '/saved/right',
+      leftSourceType: 'sftp',
+      rightSourceType: 'local',
+      leftSSHConfigId: 'ssh-left',
+      strategies: ['hash'],
+      extensionFilter: ['path:config'],
+      hideDot: false,
+      hideDotFilter: 'dirs',
+      entries: [createCompareEntry('config/app.php', { state: 'different' })],
+      scanning: false,
+      comparing: false,
+      done: true,
+      error: null,
+      duration: 99,
+      leftSource: { type: 'sftp', configId: 'ssh-left', path: '/saved/left' },
+      rightSource: { type: 'local', path: '/saved/right' },
+      loadingDirs: new Set(['config']),
+      filter: 'different',
+      expandedDirs: new Set(['config']),
+      viewMode: 'merged',
+      activeCompareId: 'compare-saved',
+    })
+
+    const snapshot = store.createSnapshot()
+
+    useCompareStore.setState({
+      leftPath: '/other/left',
+      rightPath: '/other/right',
+      strategies: ['size'],
+      extensionFilter: [],
+      entries: [],
+      expandedDirs: new Set(),
+      viewMode: 'split',
+      activeCompareId: 'compare-other',
+    })
+
+    store.restoreSnapshot(snapshot)
+
+    const currentState = useCompareStore.getState()
+    expect(currentState.leftPath).toBe('/saved/left')
+    expect(currentState.rightPath).toBe('/saved/right')
+    expect(currentState.leftSourceType).toBe('sftp')
+    expect(currentState.leftSSHConfigId).toBe('ssh-left')
+    expect(currentState.strategies).toEqual(['hash'])
+    expect(currentState.extensionFilter).toEqual(['path:config'])
+    expect(currentState.hideDot).toBe(false)
+    expect(currentState.hideDotFilter).toBe('dirs')
+    expect(currentState.entries.map((entry) => entry.relativePath)).toEqual(['config/app.php'])
+    expect(currentState.expandedDirs.has('config')).toBe(true)
+    expect(currentState.loadingDirs.has('config')).toBe(true)
+    expect(currentState.viewMode).toBe('merged')
+    expect(currentState.activeCompareId).toBe('compare-saved')
+  })
+
+  it('treats home-page draft inputs as non-session state', () => {
+    useCompareStore.setState({
+      leftPath: '/draft/left',
+      rightPath: '/draft/right',
+      leftSourceType: 'local',
+      rightSourceType: 'local',
+      leftSource: null,
+      rightSource: null,
+      entries: [],
+      scanning: false,
+      comparing: false,
+      done: false,
+      error: null,
+      activeCompareId: null,
+    })
+
+    expect(hasCompareSessionContent(useCompareStore.getState().createSnapshot())).toBe(false)
   })
 
   it('loads directory children once and clears loading state after lazy loading', async () => {
@@ -306,5 +427,116 @@ describe('compare-store', () => {
       'src/renamed.txt',
     ])
     expect(listFiles).toHaveBeenCalledTimes(2)
+  })
+
+  it('marks refreshed shared directories as pending until they are compared again', async () => {
+    const listFiles = vi.fn<(
+      source: SourceConfig,
+      dirPath: string,
+    ) => Promise<IpcResult<readonly FileEntry[]>>>()
+
+    listFiles.mockImplementation(async (source, dirPath) => {
+      if (source.type === 'local' && dirPath === '/left/src') {
+        return {
+          success: true,
+          data: [createFileEntry('nested', { isDirectory: true })],
+        }
+      }
+      if (source.type === 'local' && dirPath === '/right/src') {
+        return {
+          success: true,
+          data: [createFileEntry('nested', { isDirectory: true })],
+        }
+      }
+      return { success: false, error: `unexpected path: ${dirPath}` }
+    })
+
+    vi.stubGlobal('window', {
+      api: { listFiles },
+    })
+
+    useCompareStore.setState({
+      leftSource,
+      rightSource,
+      entries: [
+        createCompareEntry('src', {
+          isDirectory: true,
+          state: 'equal',
+          left: createFileEntry('src', { path: 'src', isDirectory: true }),
+          right: createFileEntry('src', { path: 'src', isDirectory: true }),
+        }),
+      ],
+    })
+
+    await useCompareStore.getState().refreshDir('src')
+
+    const nestedDir = useCompareStore.getState().entries.find((entry) => entry.relativePath === 'src/nested')
+    expect(nestedDir?.state).toBe('pending')
+  })
+
+  it('clears the active compare id when a compare finishes', () => {
+    const store = useCompareStore.getState()
+    store.startScanning('compare-1')
+
+    store.finishCompare('compare-1', {
+      entries: [createCompareEntry('done.txt', { state: 'equal' })],
+      stats: { total: 1, equal: 1, different: 0, leftOnly: 0, rightOnly: 0 },
+      duration: 42,
+    })
+
+    const state = useCompareStore.getState()
+    expect(state.done).toBe(true)
+    expect(state.activeCompareId).toBeNull()
+    expect(state.loadingDirs.size).toBe(0)
+  })
+
+  it('preserves existing entries when restarting the active compare session', () => {
+    const store = useCompareStore.getState()
+
+    useCompareStore.setState({
+      entries: [createCompareEntry('src/app.ts', { state: 'different' })],
+      filter: 'different',
+      viewMode: 'merged',
+      leftSource,
+      rightSource,
+    })
+
+    store.startScanning('compare-rerun', { preserveEntries: true })
+
+    const state = useCompareStore.getState()
+    expect(state.activeCompareId).toBe('compare-rerun')
+    expect(state.scanning).toBe(true)
+    expect(state.entries.map((entry) => entry.relativePath)).toEqual(['src/app.ts'])
+    expect(state.filter).toBe('different')
+    expect(state.viewMode).toBe('merged')
+  })
+
+  it('invalidates compare results while preserving current inputs and mode', () => {
+    const store = useCompareStore.getState()
+
+    useCompareStore.setState({
+      leftPath: '/changed/left',
+      rightPath: '/changed/right',
+      leftSource: leftSource,
+      rightSource: rightSource,
+      entries: [createCompareEntry('src/app.ts', { state: 'different' })],
+      done: true,
+      filter: 'different',
+      viewMode: 'merged',
+      activeCompareId: 'compare-1',
+    })
+
+    store.invalidateCompareResult()
+
+    const state = useCompareStore.getState()
+    expect(state.leftPath).toBe('/changed/left')
+    expect(state.rightPath).toBe('/changed/right')
+    expect(state.entries).toEqual([])
+    expect(state.done).toBe(false)
+    expect(state.leftSource).toBeNull()
+    expect(state.rightSource).toBeNull()
+    expect(state.activeCompareId).toBeNull()
+    expect(state.filter).toBe('different')
+    expect(state.viewMode).toBe('merged')
   })
 })

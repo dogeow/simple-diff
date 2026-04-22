@@ -2,40 +2,10 @@ import { useMemo, useCallback, useEffect, useRef } from 'react'
 import type { DiffTab } from '../stores/app-store'
 import { useAppStore } from '../stores/app-store'
 import type { DiffLine } from '../../../shared/types'
+import { computeTextDiff } from '../../../shared/text-diff'
 import { truncatePath } from '../utils/tree-utils'
 import ScrollGutter, { type GutterMarker } from './ScrollGutter'
-
-interface Hunk {
-  readonly startIndex: number
-  readonly endIndex: number
-  readonly type: 'equal' | 'diff'
-}
-
-function groupIntoHunks(leftLines: readonly DiffLine[], rightLines: readonly DiffLine[]): readonly Hunk[] {
-  const hunks: Hunk[] = []
-  const len = Math.max(leftLines.length, rightLines.length)
-  let i = 0
-
-  while (i < len) {
-    const lType = leftLines[i]?.type ?? 'equal'
-    const rType = rightLines[i]?.type ?? 'equal'
-    const isEqual = lType === 'equal' && rType === 'equal'
-    const type = isEqual ? 'equal' : 'diff'
-    const start = i
-
-    while (i < len) {
-      const lt = leftLines[i]?.type ?? 'equal'
-      const rt = rightLines[i]?.type ?? 'equal'
-      const curIsEqual = lt === 'equal' && rt === 'equal'
-      if (curIsEqual !== isEqual) break
-      i++
-    }
-
-    hunks.push({ startIndex: start, endIndex: i, type })
-  }
-
-  return hunks
-}
+import { applyDiffRange, canApplyLine, groupIntoHunks, type Hunk } from './file-diff-utils'
 
 interface FileDiffViewProps {
   readonly tab: DiffTab
@@ -138,67 +108,37 @@ export default function FileDiffView({ tab }: FileDiffViewProps) {
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [scrollToDiff])
 
-  const handleCopyHunk = useCallback(
-    async (hunk: Hunk, direction: 'left-to-right' | 'right-to-left') => {
-      if (!tab.diffResult) return
+  const handleApplyRange = useCallback(
+    (range: { startIndex: number; endIndex: number }, direction: 'left-to-right' | 'right-to-left') => {
+      const latestTab = useAppStore
+        .getState()
+        .diffTabs
+        .find((candidate) => candidate.id === tab.id && candidate.sessionId === tab.sessionId)
 
-      const { leftLines, rightLines } = tab.diffResult
+      if (!latestTab?.diffResult) return
 
-      // Collect source lines (real content, not placeholder)
-      const sourceLines: string[] = []
+      const { leftLines, rightLines } = latestTab.diffResult
       const srcDiffLines = direction === 'left-to-right' ? leftLines : rightLines
-      for (let i = hunk.startIndex; i < hunk.endIndex; i++) {
-        if (srcDiffLines[i].lineNumber >= 0) {
-          sourceLines.push(srcDiffLines[i].content)
-        }
-      }
-
-      // Find target range
       const targetDiffLines = direction === 'left-to-right' ? rightLines : leftLines
-      const targetContent = direction === 'left-to-right' ? tab.rightContent : tab.leftContent
-      const targetAllLines = targetContent.split('\n')
+      const targetContent = direction === 'left-to-right' ? latestTab.rightContent : latestTab.leftContent
 
-      let firstLineNum = -1
-      let lastLineNum = -1
-      for (let i = hunk.startIndex; i < hunk.endIndex; i++) {
-        if (targetDiffLines[i].lineNumber >= 0) {
-          if (firstLineNum < 0) firstLineNum = targetDiffLines[i].lineNumber
-          lastLineNum = targetDiffLines[i].lineNumber
-        }
-      }
+      const newTargetContent = applyDiffRange({
+        sourceDiffLines: srcDiffLines,
+        targetDiffLines,
+        targetContent,
+        range,
+      })
+      const newLeft = direction === 'left-to-right' ? latestTab.leftContent : newTargetContent
+      const newRight = direction === 'left-to-right' ? newTargetContent : latestTab.rightContent
+      const nextDiff = computeTextDiff(newLeft, newRight)
 
-      if (firstLineNum >= 0) {
-        targetAllLines.splice(firstLineNum - 1, lastLineNum - firstLineNum + 1, ...sourceLines)
-      } else {
-        // Insert after previous real line
-        let insertAt = 0
-        for (let i = hunk.startIndex - 1; i >= 0; i--) {
-          if (targetDiffLines[i].lineNumber >= 0) {
-            insertAt = targetDiffLines[i].lineNumber
-            break
-          }
-        }
-        targetAllLines.splice(insertAt, 0, ...sourceLines)
-      }
-
-      const newTargetContent = targetAllLines.join('\n')
-      const newLeft = direction === 'left-to-right' ? tab.leftContent : newTargetContent
-      const newRight = direction === 'left-to-right' ? newTargetContent : tab.rightContent
-
-      // Re-diff
-      const result = await window.api.textDiff(newLeft, newRight)
-      if (!hasDiffTabSession(tab.id, tab.sessionId)) {
-        return
-      }
-      if (result.success && result.data) {
-        updateDiffTab(tab.id, {
-          leftContent: newLeft,
-          rightContent: newRight,
-          diffResult: result.data,
-        })
-      }
+      updateDiffTab(tab.id, {
+        leftContent: newLeft,
+        rightContent: newRight,
+        diffResult: nextDiff,
+      })
     },
-    [tab, hasDiffTabSession, updateDiffTab],
+    [tab.id, tab.sessionId, updateDiffTab],
   )
 
   const handleSave = useCallback(async (side: 'left' | 'right') => {
@@ -299,8 +239,10 @@ export default function FileDiffView({ tab }: FileDiffViewProps) {
               key={hunk.startIndex}
               hunk={hunk}
               lines={leftLines}
+              otherLines={rightLines}
               side="left"
-              onCopy={() => handleCopyHunk(hunk, 'left-to-right')}
+              onApplyHunk={() => handleApplyRange(hunk, 'left-to-right')}
+              onApplyLine={(lineIndex) => handleApplyRange({ startIndex: lineIndex, endIndex: lineIndex + 1 }, 'left-to-right')}
               containerRef={(element) => {
                 diffHunkRefs.current[hunk.startIndex] = element
               }}
@@ -318,8 +260,10 @@ export default function FileDiffView({ tab }: FileDiffViewProps) {
               key={hunk.startIndex}
               hunk={hunk}
               lines={rightLines}
+              otherLines={leftLines}
               side="right"
-              onCopy={() => handleCopyHunk(hunk, 'right-to-left')}
+              onApplyHunk={() => handleApplyRange(hunk, 'right-to-left')}
+              onApplyLine={(lineIndex) => handleApplyRange({ startIndex: lineIndex, endIndex: lineIndex + 1 }, 'right-to-left')}
             />
           ))}
         </div>
@@ -337,34 +281,50 @@ const LINE_BG: Record<DiffLine['type'], string> = {
 interface HunkBlockProps {
   readonly hunk: Hunk
   readonly lines: readonly DiffLine[]
+  readonly otherLines: readonly DiffLine[]
   readonly side: 'left' | 'right'
-  readonly onCopy: () => void
+  readonly onApplyHunk: () => void
+  readonly onApplyLine: (lineIndex: number) => void
   readonly containerRef?: (element: HTMLDivElement | null) => void
 }
 
-function HunkBlock({ hunk, lines, side, onCopy, containerRef }: HunkBlockProps) {
+function HunkBlock({ hunk, lines, otherLines, side, onApplyHunk, onApplyLine, containerRef }: HunkBlockProps) {
   const hunkLines = lines.slice(hunk.startIndex, hunk.endIndex)
+  const isMultiLineDiff = hunk.endIndex - hunk.startIndex > 1
 
   return (
     <div ref={containerRef} className="group relative">
       {hunk.type === 'diff' && (
         <button
-          onClick={onCopy}
+          onClick={onApplyHunk}
           className="absolute top-0 z-20 rounded bg-blue-600/80 px-1 py-0.5 text-[10px] text-white opacity-0 transition-opacity group-hover:opacity-100"
           style={side === 'left' ? { right: 2, top: 2 } : { left: 2, top: 2 }}
-          title={side === 'left' ? '复制到右侧 →' : '← 复制到左侧'}
+          title={side === 'left' ? '整块应用到右侧' : '整块应用到左侧'}
         >
-          {side === 'left' ? '→' : '←'}
+          {isMultiLineDiff ? (side === 'left' ? '整块→' : '←整块') : (side === 'left' ? '→' : '←')}
         </button>
       )}
       {hunkLines.map((line, i) => (
         <div
           key={hunk.startIndex + i}
-          className={`flex min-w-full w-max border-b border-neutral-800/30 ${LINE_BG[line.type]}`}
+          className={`group/line flex min-w-full w-max border-b border-neutral-800/30 ${LINE_BG[line.type]}`}
         >
           <span className="inline-block w-12 shrink-0 select-none border-r border-neutral-800 px-2 py-0.5 text-right text-neutral-500">
             {line.lineNumber >= 0 ? line.lineNumber : ''}
           </span>
+          {canApplyLine({
+            hunkType: hunk.type,
+            currentLine: line,
+            otherLine: otherLines[hunk.startIndex + i],
+          }) && (
+            <button
+              onClick={() => onApplyLine(hunk.startIndex + i)}
+              className="mx-1 my-0.5 shrink-0 rounded bg-blue-600/70 px-1 py-0 text-[10px] text-white opacity-0 transition-opacity group-hover/line:opacity-100"
+              title={side === 'left' ? '仅应用当前行到右侧' : '仅应用当前行到左侧'}
+            >
+              {side === 'left' ? '→' : '←'}
+            </button>
+          )}
           <pre className="min-w-0 whitespace-pre px-2 py-0.5">
             {line.content}
           </pre>

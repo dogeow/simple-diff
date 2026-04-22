@@ -1,6 +1,14 @@
-import { useCallback, useEffect } from 'react'
-import { useCompareStore } from '../stores/compare-store'
-import { useAppStore } from '../stores/app-store'
+import { useCallback } from 'react'
+import { mergePathFilters } from '@shared/path-filter'
+import {
+  applyCompareErrorToSnapshot,
+  applyFinishCompareToSnapshot,
+  hasCompareSessionContent,
+  type CompareSessionSnapshot,
+  useCompareStore,
+} from '../stores/compare-store'
+import { useAppStore, type CompareTab } from '../stores/app-store'
+import { useSettingsStore } from '../stores/settings-store'
 import type { SourceConfig } from '../../../shared/types'
 
 function buildSourceConfig(type: 'local' | 'sftp', path: string, sshConfigId: string): SourceConfig {
@@ -17,6 +25,44 @@ function createCompareId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2)}`
 }
 
+function createCompareSessionId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID()
+  }
+  return Math.random().toString(36).slice(2)
+}
+
+function formatCompareTabTitle(leftPath: string, rightPath: string): string {
+  const getLabel = (path: string) => {
+    const normalized = path.replace(/[\\/]+$/g, '')
+    const segments = normalized.split(/[\\/]/).filter(Boolean)
+    return segments.at(-1) ?? normalized ?? ''
+  }
+
+  return `${getLabel(leftPath) || leftPath || '左侧'} ↔ ${getLabel(rightPath) || rightPath || '右侧'}`
+}
+
+interface RunCompareOptions {
+  readonly reuseActiveSession?: boolean
+  readonly navigateToCompare?: boolean
+}
+
+export function resolveReusableCompareId(
+  currentSnapshot: CompareSessionSnapshot,
+  activeCompareTab?: CompareTab,
+): string | null {
+  if (currentSnapshot.activeCompareId && (currentSnapshot.scanning || currentSnapshot.comparing)) {
+    return currentSnapshot.activeCompareId
+  }
+
+  const activeTabSnapshot = activeCompareTab?.snapshot
+  if (activeTabSnapshot?.activeCompareId && (activeTabSnapshot.scanning || activeTabSnapshot.comparing)) {
+    return activeTabSnapshot.activeCompareId
+  }
+
+  return null
+}
+
 export function useCompare() {
   const store = useCompareStore()
   const setPage = useAppStore((s) => s.setPage)
@@ -26,65 +72,151 @@ export function useCompare() {
     scanning, comparing, done, error, entries,
   } = store
 
-  // Listen for progressive IPC events
-  useEffect(() => {
-    const unsubScan = window.api.onScanComplete((compareId, scanEntries) => {
-      useCompareStore.getState().setScanEntries(compareId, scanEntries)
-    })
-    const unsubEntry = window.api.onEntryUpdate((compareId, entry) => {
-      useCompareStore.getState().updateEntry(compareId, entry)
-    })
-    return () => {
-      unsubScan()
-      unsubEntry()
-    }
-  }, [])
+  const runCompare = useCallback(async (options?: RunCompareOptions) => {
+    const compareState = useCompareStore.getState()
+    const {
+      leftPath: currentLeftPath,
+      rightPath: currentRightPath,
+      strategies: currentStrategies,
+      extensionFilter: currentExtensionFilter,
+      leftSourceType: currentLeftSourceType,
+      rightSourceType: currentRightSourceType,
+      leftSSHConfigId: currentLeftSSHConfigId,
+      rightSSHConfigId: currentRightSSHConfigId,
+    } = compareState
 
-  const runCompare = useCallback(async () => {
-    if (!leftPath || !rightPath) {
+    if (!currentLeftPath || !currentRightPath) {
       store.setError('请选择左右两侧目录')
       return
     }
 
-    const compareId = createCompareId()
+    const appStore = useAppStore.getState()
+    const currentSnapshot = compareState.createSnapshot()
+    const activeCompareTabId = appStore.activeCompareTabId
+    const currentCompareTab = activeCompareTabId
+      ? appStore.compareTabs.find((tab) => tab.id === activeCompareTabId)
+      : undefined
+    const reuseActiveSession = options?.reuseActiveSession === true && activeCompareTabId !== null
+    const compareIdToCancel = reuseActiveSession
+      ? resolveReusableCompareId(currentSnapshot, currentCompareTab)
+      : null
+    const globalPathFilters = useSettingsStore.getState().globalPathFilters
+    const effectivePathFilters = mergePathFilters(globalPathFilters, currentExtensionFilter)
 
-    const left = buildSourceConfig(leftSourceType, leftPath, leftSSHConfigId)
-    const right = buildSourceConfig(rightSourceType, rightPath, rightSSHConfigId)
+    if (!reuseActiveSession && activeCompareTabId && hasCompareSessionContent(currentSnapshot)) {
+      appStore.saveCompareTab({
+        id: activeCompareTabId,
+        title: currentCompareTab?.title ?? formatCompareTabTitle(currentSnapshot.leftPath, currentSnapshot.rightPath),
+        snapshot: currentSnapshot,
+        diffTabs: appStore.diffTabs,
+        activeDiffTabId: appStore.activeDiffTabId,
+      })
+    }
+
+    const compareId = createCompareId()
+    const compareTabId = reuseActiveSession ? activeCompareTabId : createCompareSessionId()
+
+    const left = buildSourceConfig(currentLeftSourceType, currentLeftPath, currentLeftSSHConfigId)
+    const right = buildSourceConfig(currentRightSourceType, currentRightPath, currentRightSSHConfigId)
+
+    if (compareIdToCancel) {
+      await window.api.cancelCompare(compareIdToCancel)
+    }
+
+    appStore.replaceDiffTabs([], null)
+    appStore.setActiveCompareTab(compareTabId)
 
     // Start scanning — navigate immediately
-    store.startScanning(compareId)
+    store.startScanning(compareId, { preserveEntries: reuseActiveSession })
     store.setSources(left, right)
-    setPage('compare')
+
+    appStore.saveCompareTab({
+      id: compareTabId,
+      title: formatCompareTabTitle(left.path, right.path),
+      snapshot: useCompareStore.getState().createSnapshot(),
+      diffTabs: [],
+      activeDiffTabId: null,
+    })
+
+    if (options?.navigateToCompare !== false) {
+      setPage('compare')
+    }
 
     try {
       const response = await window.api.runCompare({
         compareId,
         left,
         right,
-        strategies: [...strategies],
-        extensionFilter: extensionFilter.length > 0 ? [...extensionFilter] : undefined,
+        strategies: [...currentStrategies],
+        extensionFilter: effectivePathFilters.length > 0 ? effectivePathFilters : undefined,
       })
 
-      if (useCompareStore.getState().activeCompareId !== compareId) {
-        return
-      }
-
       if (response.success && response.data) {
-        store.finishCompare(compareId, response.data)
+        if (useCompareStore.getState().activeCompareId === compareId) {
+          store.finishCompare(compareId, response.data)
+        }
+        useAppStore.getState().updateCompareTabSnapshot(compareTabId, (snapshot) =>
+          applyFinishCompareToSnapshot(snapshot, compareId, response.data!),
+        )
       } else if (response.error === '对比已取消') {
-        store.setError(null, compareId)
+        if (useCompareStore.getState().activeCompareId === compareId) {
+          store.setError(null, compareId)
+        }
+        useAppStore.getState().updateCompareTabSnapshot(compareTabId, (snapshot) =>
+          applyCompareErrorToSnapshot(snapshot, compareId, null),
+        )
       } else {
-        store.setError(response.error ?? '对比失败', compareId)
+        const message = response.error ?? '对比失败'
+        if (useCompareStore.getState().activeCompareId === compareId) {
+          store.setError(message, compareId)
+        }
+        useAppStore.getState().updateCompareTabSnapshot(compareTabId, (snapshot) =>
+          applyCompareErrorToSnapshot(snapshot, compareId, message),
+        )
       }
     } catch (error) {
-      if (useCompareStore.getState().activeCompareId !== compareId) {
-        return
+      const message = error instanceof Error ? error.message : '对比失败'
+      if (useCompareStore.getState().activeCompareId === compareId) {
+        store.setError(message, compareId)
       }
-      store.setError(error instanceof Error ? error.message : '对比失败', compareId)
+      useAppStore.getState().updateCompareTabSnapshot(compareTabId, (snapshot) =>
+        applyCompareErrorToSnapshot(snapshot, compareId, message),
+      )
     }
-  }, [leftPath, rightPath, strategies, extensionFilter, leftSourceType, rightSourceType, leftSSHConfigId, rightSSHConfigId, store, setPage])
+  }, [store, setPage])
+
+  const rerunActiveSessionIfRunning = useCallback(async () => {
+    const appStore = useAppStore.getState()
+    const activeCompareTab = appStore.activeCompareTabId
+      ? appStore.compareTabs.find((tab) => tab.id === appStore.activeCompareTabId)
+      : undefined
+
+    if (!activeCompareTab) {
+      return false
+    }
+
+    const currentSnapshot = useCompareStore.getState().createSnapshot()
+    if (!resolveReusableCompareId(currentSnapshot, activeCompareTab)) {
+      return false
+    }
+
+    await runCompare({ reuseActiveSession: true, navigateToCompare: false })
+    return true
+  }, [runCompare])
 
   const loading = scanning || comparing
 
-  return { leftPath, rightPath, strategies, loading, scanning, comparing, done, error, entries, runCompare }
+  return {
+    leftPath,
+    rightPath,
+    strategies,
+    loading,
+    scanning,
+    comparing,
+    done,
+    error,
+    entries,
+    runCompare,
+    rerunActiveSessionIfRunning,
+  }
 }

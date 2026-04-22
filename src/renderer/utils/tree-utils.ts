@@ -1,29 +1,8 @@
 import type { CompareEntry, CompareState } from '../../../shared/types'
+import { matchesPathFilter } from '@shared/path-filter'
 
 export type TreeSide = 'left' | 'right'
 export type DotEntryFilter = 'all' | 'files' | 'dirs'
-
-function normalizeFilterValue(value: string): string {
-  return value.trim().replace(/^\/+|\/+$/g, '').toLowerCase()
-}
-
-function matchesPathFilter(relativePath: string, filters: readonly string[]): boolean {
-  const normalizedPath = normalizeFilterValue(relativePath)
-  if (!normalizedPath) return false
-
-  const segments = normalizedPath.split('/')
-
-  return filters.some((filter) => {
-    const normalizedFilter = normalizeFilterValue(filter)
-    if (!normalizedFilter) return false
-
-    if (normalizedFilter.includes('/')) {
-      return normalizedPath === normalizedFilter || normalizedPath.startsWith(`${normalizedFilter}/`)
-    }
-
-    return segments.includes(normalizedFilter)
-  })
-}
 
 /**
  * Truncate path by hiding the middle parts with .../.../
@@ -287,13 +266,14 @@ export function prepareCompareEntries(
   return filterEntriesByState(result, filter)
 }
 
-const DIR_STATE_PRIORITY: CompareState[] = ['different', 'left_only', 'right_only', 'comparing', 'pending', 'equal']
+const DIR_STATE_PRIORITY: CompareState[] = ['different', 'comparing', 'pending', 'equal']
 
 /**
  * Compute effective directory states by propagating descendant entry states upward.
  * A directory's effective state is the highest-priority state among its descendants.
  */
 export function computeEffectiveDirStates(entries: readonly CompareEntry[]): ReadonlyMap<string, CompareState> {
+  const entryByPath = new Map(entries.map((entry) => [entry.relativePath, entry]))
   const dirStates = new Map<string, Set<CompareState>>()
 
   for (const entry of entries) {
@@ -311,6 +291,19 @@ export function computeEffectiveDirStates(entries: readonly CompareEntry[]): Rea
 
   const result = new Map<string, CompareState>()
   for (const [dirPath, states] of dirStates) {
+    const dirEntry = entryByPath.get(dirPath)
+    if (!dirEntry?.isDirectory) continue
+
+    if (dirEntry.state === 'left_only' || dirEntry.state === 'right_only') {
+      result.set(dirPath, dirEntry.state)
+      continue
+    }
+
+    if (states.has('different') || states.has('left_only') || states.has('right_only')) {
+      result.set(dirPath, 'different')
+      continue
+    }
+
     for (const p of DIR_STATE_PRIORITY) {
       if (states.has(p)) {
         result.set(dirPath, p)

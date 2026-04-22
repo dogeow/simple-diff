@@ -1,10 +1,17 @@
-import { useMemo, useCallback } from 'react'
+import { useMemo, useCallback, useState } from 'react'
 import type { CompareEntry, CompareState } from '../../../shared/types'
 import { useCompareNodeInteractions } from '../hooks/useCompareNodeInteractions'
 import { useVisibleCompareNodes } from '../hooks/useVisibleCompareNodes'
 import { useCompareStore, computeStats } from '../stores/compare-store'
 import CompareToolbar from './CompareToolbar'
 import TreeRow from './TreeRow'
+import FileContextMenu, { type ContextMenuAction } from './FileContextMenu'
+import { useCompare } from '../hooks/useCompare'
+import { useAppStore } from '../stores/app-store'
+import type { StrategyName } from '../../../shared/types'
+import { shouldShowSyncTaskInCompare } from '../utils/sync-task-visibility'
+import { createExactPathFilter } from '@shared/path-filter'
+import type { TreeNode } from '../utils/tree-utils'
 
 interface CompareTreeProps {
   readonly entries: readonly CompareEntry[]
@@ -12,13 +19,26 @@ interface CompareTreeProps {
   readonly onFilterChange: (filter: CompareState | 'all') => void
   readonly onDoubleClickFile: (entry: CompareEntry) => void
   readonly toolbarOnly?: boolean
+  readonly emptyStateMessage?: string
+  readonly onRerunCompare?: () => void
+  readonly onExtensionFilterChange?: (filter: readonly string[]) => void | Promise<void>
 }
 
-export default function CompareTree({ entries, filter, onFilterChange, onDoubleClickFile, toolbarOnly = false }: CompareTreeProps) {
+interface ContextMenuState {
+  readonly x: number
+  readonly y: number
+  readonly node: TreeNode
+}
+
+export default function CompareTree({ entries, filter, onFilterChange, onDoubleClickFile, toolbarOnly = false, emptyStateMessage = '无匹配项', onRerunCompare, onExtensionFilterChange }: CompareTreeProps) {
   const expandedDirs = useCompareStore((s) => s.expandedDirs)
   const expandAll = useCompareStore((s) => s.expandAll)
   const collapseAll = useCompareStore((s) => s.collapseAll)
   const nodeInteractions = useCompareNodeInteractions(onDoubleClickFile)
+  const setStrategies = useCompareStore((s) => s.setStrategies)
+  const clearDiffTabs = useAppStore((s) => s.clearDiffTabs)
+  const setActiveDiffTab = useAppStore((s) => s.setActiveDiffTab)
+  const { loading, runCompare } = useCompare()
 
   const allDirCount = useMemo(() => entries.filter((e) => e.isDirectory).length, [entries])
   const allExpanded = allDirCount > 0 && expandedDirs.size >= allDirCount
@@ -39,13 +59,73 @@ export default function CompareTree({ entries, filter, onFilterChange, onDoubleC
   const leftSource = useCompareStore((s) => s.leftSource)
   const rightSource = useCompareStore((s) => s.rightSource)
   const setSyncTask = useCompareStore((s) => s.setSyncTask)
+  const visibleSyncTask = useMemo(() => {
+    return shouldShowSyncTaskInCompare(syncTask, leftSource, rightSource)
+      ? syncTask
+      : null
+  }, [leftSource, rightSource, syncTask])
+  const compareDone = useCompareStore((s) => s.done)
+  const [ctxMenu, setCtxMenu] = useState<ContextMenuState | null>(null)
 
   const stats = useMemo(() => computeStats(entries), [entries])
   const pendingCount = useMemo(() => entries.filter((e) => e.state === 'pending' || e.state === 'comparing').length, [entries])
+  const hasComparedResult = compareDone || pendingCount > 0 || entries.length > 0
   const visibleNodes = useVisibleCompareNodes({ entries, filter })
 
+  const handleIgnoreNode = useCallback((node: TreeNode) => {
+    const rule = createExactPathFilter(node.relativePath)
+    if (extensionFilter.includes(rule)) return
+    const nextFilters = [...extensionFilter, rule]
+    if (onExtensionFilterChange) {
+      void onExtensionFilterChange(nextFilters)
+      return
+    }
+    setExtensionFilter(nextFilters)
+  }, [extensionFilter, onExtensionFilterChange, setExtensionFilter])
+
+  const getContextActions = useCallback((node: TreeNode): readonly ContextMenuAction[] => {
+    if (!node.entry) return []
+    return [{
+      label: node.isDirectory ? '忽略此目录' : '忽略此文件',
+      onClick: () => handleIgnoreNode(node),
+    }]
+  }, [handleIgnoreNode])
+
+  const handleToggleStrategy = useCallback((strategy: StrategyName) => {
+    const nextStrategies = [...strategies]
+    const index = nextStrategies.indexOf(strategy)
+
+    if (index >= 0) {
+      nextStrategies.splice(index, 1)
+    } else {
+      nextStrategies.push(strategy)
+    }
+
+    setStrategies(nextStrategies)
+  }, [setStrategies, strategies])
+
+  const handleRerunCompare = useCallback(async () => {
+    if (onRerunCompare) {
+      await onRerunCompare()
+      return
+    }
+
+    clearDiffTabs()
+    setActiveDiffTab(null)
+    await runCompare()
+  }, [clearDiffTabs, onRerunCompare, runCompare, setActiveDiffTab])
+
+  const handleExtensionFilterChange = useCallback(async (nextFilters: readonly string[]) => {
+    if (onExtensionFilterChange) {
+      await onExtensionFilterChange(nextFilters)
+      return
+    }
+
+    setExtensionFilter(nextFilters)
+  }, [onExtensionFilterChange, setExtensionFilter])
+
   const handleStartSync = useCallback(async (direction: 'left_to_right' | 'right_to_left') => {
-    if (!leftSource || !rightSource) return
+    if (!leftSource || !rightSource || !compareDone || pendingCount > 0 || entries.length === 0) return
     const response = await window.api.startSync({
       leftSource,
       rightSource,
@@ -55,7 +135,7 @@ export default function CompareTree({ entries, filter, onFilterChange, onDoubleC
     if (response.success) {
       setSyncTask(response.data ?? null)
     }
-  }, [entries, leftSource, rightSource, setSyncTask])
+  }, [compareDone, entries, leftSource, pendingCount, rightSource, setSyncTask])
 
   const handlePauseSync = useCallback(async () => {
     const response = await window.api.pauseSync()
@@ -84,13 +164,19 @@ export default function CompareTree({ entries, filter, onFilterChange, onDoubleC
         allExpanded={allExpanded}
         toggleExpandAll={toggleExpandAll}
         strategies={strategies}
+        onToggleStrategy={handleToggleStrategy}
         extensionFilter={extensionFilter}
-        setExtensionFilter={setExtensionFilter}
+        setExtensionFilter={handleExtensionFilterChange}
         hideDot={hideDot}
         setHideDot={setHideDot}
         hideDotFilter={hideDotFilter}
         setHideDotFilter={setHideDotFilter}
-        syncTask={syncTask}
+        compareLoading={loading}
+        compareDone={compareDone}
+        hasComparedResult={hasComparedResult}
+        onRerunCompare={handleRerunCompare}
+        hasGlobalSyncTask={syncTask !== null}
+        syncTask={visibleSyncTask}
         onStartSync={handleStartSync}
         onPauseSync={handlePauseSync}
         onResumeSync={handleResumeSync}
@@ -117,7 +203,7 @@ export default function CompareTree({ entries, filter, onFilterChange, onDoubleC
             {visibleNodes.length === 0 && (
               <tr>
                 <td colSpan={6} className="px-3 py-8 text-center text-neutral-500">
-                  无匹配项
+                  {emptyStateMessage}
                 </td>
               </tr>
             )}
@@ -129,11 +215,24 @@ export default function CompareTree({ entries, filter, onFilterChange, onDoubleC
                 loading={nodeInteractions.isLoading(node)}
                 onToggle={() => nodeInteractions.toggleNode(node)}
                 onDoubleClick={() => nodeInteractions.openNode(node)}
+                onContextMenu={(event) => {
+                  event.preventDefault()
+                  setCtxMenu({ x: event.clientX, y: event.clientY, node })
+                }}
               />
             ))}
           </tbody>
         </table>
       </div>}
+
+      {ctxMenu && (
+        <FileContextMenu
+          x={ctxMenu.x}
+          y={ctxMenu.y}
+          actions={getContextActions(ctxMenu.node)}
+          onClose={() => setCtxMenu(null)}
+        />
+      )}
     </div>
   )
 }

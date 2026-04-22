@@ -15,7 +15,7 @@ function normalizeRelativePath(relativePath: string, separator: '/' | '\\'): str
     .join(separator)
 }
 
-function trimTrailingSeparators(path: string): string {
+export function trimTrailingSeparators(path: string): string {
   if (!path) return path
   if (/^[\\/]+$/.test(path)) return path[0]
   if (/^[A-Za-z]:[\\/]*$/.test(path)) return path.slice(0, 2)
