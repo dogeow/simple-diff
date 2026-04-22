@@ -142,7 +142,11 @@ export default function HomePage() {
                 )}
               </div>
               <button
-                onClick={() => setPage('compare')}
+                onClick={() => {
+                  if (!openCompareTab(undefined, { expandLogs: true })) {
+                    setPage('compare')
+                  }
+                }}
                 className="shrink-0 whitespace-nowrap rounded bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-500"
               >
                 查看同步

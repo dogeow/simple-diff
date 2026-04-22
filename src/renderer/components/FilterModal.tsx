@@ -44,7 +44,7 @@ export default function FilterModal({ extensionFilter, onChange }: FilterModalPr
           setInput(extensionFilter.join('\n'))
           setOpen(!open)
         }}
-        className={`h-9 rounded px-4 text-sm font-medium transition-colors ${
+        className={`h-7 rounded px-2.5 text-[11px] font-medium leading-none transition-colors ${
           active
             ? 'bg-blue-600 text-white hover:bg-blue-500'
             : 'bg-neutral-700 text-neutral-300 hover:bg-neutral-600'
@@ -68,13 +68,13 @@ export default function FilterModal({ extensionFilter, onChange }: FilterModalPr
           <div className="flex gap-2">
             <button
               onClick={handleApply}
-              className="h-9 flex-1 rounded bg-blue-600 px-3 text-sm font-medium text-white hover:bg-blue-500"
+              className="h-7 flex-1 rounded bg-blue-600 px-2 text-[11px] font-medium leading-none text-white hover:bg-blue-500"
             >
               应用
             </button>
             <button
               onClick={handleClear}
-              className="h-9 flex-1 rounded bg-neutral-700 px-3 text-sm font-medium text-neutral-300 hover:bg-neutral-600"
+              className="h-7 flex-1 rounded bg-neutral-700 px-2 text-[11px] font-medium leading-none text-neutral-300 hover:bg-neutral-600"
             >
               清除
             </button>

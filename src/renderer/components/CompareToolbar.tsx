@@ -90,8 +90,7 @@ export default function CompareToolbar({
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [dotDropOpen])
 
-  const buttonBaseClass = 'h-9 rounded px-4 text-sm font-medium transition-colors'
-  const compactButtonBaseClass = 'h-9 rounded px-3 text-sm font-medium transition-colors'
+  const compactButtonBaseClass = 'h-7 rounded px-2 text-[11px] font-medium leading-none transition-colors'
   const compareActionLabel = compareLoading
     ? (hasComparedResult ? '重新对比中…' : '首次对比中…')
     : (hasComparedResult ? '重新对比' : '首次对比')
@@ -112,16 +111,16 @@ export default function CompareToolbar({
   const canStartSync = compareDone && !compareLoading && pendingCount === 0 && stats.total > 0
 
   return (
-    <>
+    <div className="flex flex-col gap-1.5 px-1.5 py-1">
       {/* Toolbar row 1: filters + stats + view mode */}
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-1.5">
         <button
           onClick={toggleExpandAll}
           className={`${compactButtonBaseClass} bg-neutral-700 text-neutral-200 hover:bg-neutral-600`}
         >
           {allExpanded ? '收起' : '展开'}
         </button>
-        <div className="flex gap-1">
+        <div className="flex flex-wrap gap-1">
           {FILTERS.map((f) => (
             <button
               key={f.value}
@@ -136,7 +135,7 @@ export default function CompareToolbar({
             </button>
           ))}
         </div>
-        <div className="ml-auto flex min-w-0 items-center gap-3">
+        <div className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-2">
           {syncTask && (
             <div className="flex min-w-0 max-w-full items-center gap-2 rounded border border-neutral-700 bg-neutral-800/70 px-2 py-1 text-xs text-neutral-300">
               <span className="shrink-0 tabular-nums">
@@ -155,17 +154,17 @@ export default function CompareToolbar({
                 {syncTask.currentPath && <span className="block truncate text-neutral-500">{syncTask.currentPath}</span>}
               </div>
               {syncTask.status === 'running' && (
-                <button onClick={onPauseSync} className="shrink-0 whitespace-nowrap rounded bg-neutral-700 px-3 py-1.5 text-sm font-medium hover:bg-neutral-600">
+                <button onClick={onPauseSync} className="shrink-0 whitespace-nowrap rounded bg-neutral-700 px-2 py-1 text-[11px] font-medium leading-none hover:bg-neutral-600">
                   暂停
                 </button>
               )}
               {(syncTask.status === 'paused' || syncTask.status === 'failed') && (
-                <button onClick={onResumeSync} className="shrink-0 whitespace-nowrap rounded bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-500">
+                <button onClick={onResumeSync} className="shrink-0 whitespace-nowrap rounded bg-blue-600 px-2 py-1 text-[11px] font-medium leading-none text-white hover:bg-blue-500">
                   继续
                 </button>
               )}
               {syncTask.status !== 'running' && (
-                <button onClick={onClearSync} className="shrink-0 whitespace-nowrap rounded bg-neutral-700 px-3 py-1.5 text-sm font-medium hover:bg-neutral-600">
+                <button onClick={onClearSync} className="shrink-0 whitespace-nowrap rounded bg-neutral-700 px-2 py-1 text-[11px] font-medium leading-none hover:bg-neutral-600">
                   清除
                 </button>
               )}
@@ -179,20 +178,20 @@ export default function CompareToolbar({
             <span className="text-purple-400">右 {stats.rightOnly}</span>
             {pendingCount > 0 && <span className="text-neutral-500">待 {pendingCount}</span>}
           </div>
-          <div className="flex gap-1">
+          <div className="flex flex-wrap gap-1">
             {!hasGlobalSyncTask && (
               <>
                 <button
                   onClick={() => onStartSync('left_to_right')}
                   disabled={!canStartSync}
-                  className="h-9 rounded bg-emerald-700 px-3 text-sm font-medium text-white hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="h-7 rounded bg-emerald-700 px-2 text-[11px] font-medium leading-none text-white hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   同步到右
                 </button>
                 <button
                   onClick={() => onStartSync('right_to_left')}
                   disabled={!canStartSync}
-                  className="h-9 rounded bg-cyan-700 px-3 text-sm font-medium text-white hover:bg-cyan-600 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="h-7 rounded bg-cyan-700 px-2 text-[11px] font-medium leading-none text-white hover:bg-cyan-600 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   同步到左
                 </button>
@@ -223,7 +222,7 @@ export default function CompareToolbar({
       )}
 
       {/* Toolbar row 2: strategies + extension filter + hidden files */}
-      <div className="flex flex-wrap items-center gap-3">
+      <div className="flex flex-wrap items-center gap-2">
         <div className="flex flex-wrap items-center gap-1.5">
           <span className="text-xs text-neutral-500">策略:</span>
           {(Object.keys(STRATEGY_LABELS) as StrategyName[]).map((strategy) => {
@@ -233,7 +232,7 @@ export default function CompareToolbar({
               <button
                 key={strategy}
                 onClick={() => onToggleStrategy(strategy)}
-                className={`h-9 rounded px-4 text-sm font-medium transition-colors ${
+                className={`h-7 rounded px-2.5 text-[11px] font-medium leading-none transition-colors ${
                   active
                     ? 'bg-blue-600 text-white hover:bg-blue-500'
                     : 'bg-neutral-700 text-neutral-300 hover:bg-neutral-600'
@@ -253,7 +252,7 @@ export default function CompareToolbar({
         <button
           onClick={onRerunCompare}
           disabled={compareLoading || strategies.length === 0}
-          className="h-9 rounded bg-blue-600 px-4 text-sm font-medium text-white transition-colors hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
+          className="h-7 rounded bg-blue-600 px-2.5 text-[11px] font-medium leading-none text-white transition-colors hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
         >
           {compareActionLabel}
         </button>
@@ -261,7 +260,7 @@ export default function CompareToolbar({
         <div className="relative flex items-center" ref={dotDropRef}>
           <button
             onClick={() => setHideDot(!hideDot)}
-            className={`h-9 rounded-l px-4 text-sm font-medium transition-colors ${
+            className={`h-7 rounded-l px-2.5 text-[11px] font-medium leading-none transition-colors ${
               hideDot
                 ? 'bg-blue-600 text-white'
                 : 'bg-neutral-700 text-neutral-300 hover:bg-neutral-600'
@@ -271,7 +270,7 @@ export default function CompareToolbar({
           </button>
           <button
             onClick={() => setDotDropOpen(!dotDropOpen)}
-            className={`h-9 rounded-r border-l px-2.5 text-sm font-medium transition-colors ${
+            className={`h-7 rounded-r border-l px-1.5 text-[11px] font-medium leading-none transition-colors ${
               hideDot
                 ? 'border-blue-500 bg-blue-600 text-white hover:bg-blue-500'
                 : 'border-neutral-600 bg-neutral-700 text-neutral-300 hover:bg-neutral-600'
@@ -293,7 +292,7 @@ export default function CompareToolbar({
                     if (!hideDot) setHideDot(true)
                     setDotDropOpen(false)
                   }}
-                  className={`w-full px-3 py-2 text-left text-sm hover:bg-neutral-700 ${
+                  className={`w-full px-3 py-1.5 text-left text-[11px] hover:bg-neutral-700 ${
                     hideDotFilter === opt.value ? 'text-blue-400' : 'text-neutral-300'
                   }`}
                 >
@@ -304,6 +303,6 @@ export default function CompareToolbar({
           )}
         </div>
       </div>
-    </>
+    </div>
   )
 }

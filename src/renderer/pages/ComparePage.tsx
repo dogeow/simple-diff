@@ -52,7 +52,10 @@ export default function ComparePage() {
   }, [handleRerunCompare])
 
   const handleSelectCompareTab = useCallback(async (compareTabId: string) => {
-    if (compareTabId === activeCompareTabId) return
+    if (compareTabId === activeCompareTabId) {
+      useLogStore.getState().setVisible(true)
+      return
+    }
 
     useAppStore.getState().saveCompareTab({
       id: activeCompareTabId ?? compareTabId,
