@@ -1,6 +1,89 @@
-import { hasCompareSessionContent, useCompareStore } from '../stores/compare-store'
-import { useAppStore, type Page } from '../stores/app-store'
+import { trimTrailingSeparators } from '@shared/source-path'
+import type { SourceConfig } from '../../../shared/types'
+import { hasCompareSessionContent, useCompareStore, type CompareSessionSnapshot } from '../stores/compare-store'
+import { useAppStore, type CompareTab, type Page } from '../stores/app-store'
 import { useLogStore } from '../stores/log-store'
+
+function isSameSource(left: SourceConfig, right: SourceConfig): boolean {
+  if (left.type !== right.type) {
+    return false
+  }
+
+  if (trimTrailingSeparators(left.path) !== trimTrailingSeparators(right.path)) {
+    return false
+  }
+
+  if (left.type === 'sftp' && right.type === 'sftp') {
+    return left.configId === right.configId
+  }
+
+  return true
+}
+
+function resolveSnapshotSource(snapshot: CompareSessionSnapshot, side: 'left' | 'right'): SourceConfig | null {
+  const source = side === 'left' ? snapshot.leftSource : snapshot.rightSource
+  if (source) {
+    return source
+  }
+
+  const sourceType = side === 'left' ? snapshot.leftSourceType : snapshot.rightSourceType
+  const path = side === 'left' ? snapshot.leftPath : snapshot.rightPath
+
+  if (!path) {
+    return null
+  }
+
+  if (sourceType === 'sftp') {
+    const configId = side === 'left' ? snapshot.leftSSHConfigId : snapshot.rightSSHConfigId
+    if (!configId) {
+      return null
+    }
+
+    return { type: 'sftp', configId, path }
+  }
+
+  return { type: 'local', path }
+}
+
+function snapshotMatchesSources(
+  snapshot: CompareSessionSnapshot,
+  leftSource: SourceConfig,
+  rightSource: SourceConfig,
+): boolean {
+  const snapshotLeftSource = resolveSnapshotSource(snapshot, 'left')
+  const snapshotRightSource = resolveSnapshotSource(snapshot, 'right')
+
+  if (!snapshotLeftSource || !snapshotRightSource) {
+    return false
+  }
+
+  return isSameSource(snapshotLeftSource, leftSource)
+    && isSameSource(snapshotRightSource, rightSource)
+}
+
+export function findCompareTabForSources(
+  compareTabs: readonly CompareTab[],
+  activeCompareTabId: string | null,
+  leftSource: SourceConfig,
+  rightSource: SourceConfig,
+): CompareTab | null {
+  const activeCompareTab = activeCompareTabId
+    ? compareTabs.find((tab) => tab.id === activeCompareTabId)
+    : undefined
+
+  if (activeCompareTab && snapshotMatchesSources(activeCompareTab.snapshot, leftSource, rightSource)) {
+    return activeCompareTab
+  }
+
+  for (let index = compareTabs.length - 1; index >= 0; index -= 1) {
+    const compareTab = compareTabs[index]
+    if (snapshotMatchesSources(compareTab.snapshot, leftSource, rightSource)) {
+      return compareTab
+    }
+  }
+
+  return null
+}
 
 function persistActiveCompareTab(): void {
   const appState = useAppStore.getState()
@@ -38,6 +121,38 @@ export function openCompareTab(compareTabId?: string, options?: { readonly expan
   useCompareStore.getState().restoreSnapshot(targetCompareTab.snapshot)
   appState.replaceDiffTabs(targetCompareTab.diffTabs, targetCompareTab.activeDiffTabId)
   appState.setActiveCompareTab(targetCompareTab.id)
+  appState.setPage('compare')
+
+  if (options?.expandLogs) {
+    useLogStore.getState().setVisible(true)
+  }
+
+  return true
+}
+
+export function openSyncTaskView(options?: { readonly expandLogs?: boolean }): boolean {
+  const syncTask = useCompareStore.getState().syncTask
+
+  if (!syncTask) {
+    return openCompareTab(undefined, options)
+  }
+
+  const appState = useAppStore.getState()
+  const matchingCompareTab = findCompareTabForSources(
+    appState.compareTabs,
+    appState.activeCompareTabId,
+    syncTask.leftSource,
+    syncTask.rightSource,
+  )
+
+  if (matchingCompareTab) {
+    return openCompareTab(matchingCompareTab.id, options)
+  }
+
+  if (openCompareTab(undefined, options)) {
+    return true
+  }
+
   appState.setPage('compare')
 
   if (options?.expandLogs) {

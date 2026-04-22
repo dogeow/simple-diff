@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { leaveComparePage, openCompareTab } from './compare-session-navigation'
+import type { SourceConfig, SyncTaskSnapshot } from '../../../shared/types'
+import { leaveComparePage, openCompareTab, openSyncTaskView } from './compare-session-navigation'
 import { useAppStore, type DiffTab } from '../stores/app-store'
 import { useCompareStore, type CompareSessionSnapshot } from '../stores/compare-store'
 import { useLogStore } from '../stores/log-store'
@@ -50,6 +51,23 @@ function createDiffTab(overrides: Partial<DiffTab> = {}): DiffTab {
     diffResult: null,
     loading: false,
     ...overrides,
+  }
+}
+
+function createSyncTask(leftSource: SourceConfig, rightSource: SourceConfig): SyncTaskSnapshot {
+  return {
+    id: 'sync-task-1',
+    leftSource,
+    rightSource,
+    direction: 'left_to_right',
+    status: 'running',
+    totalItems: 10,
+    completedItems: 3,
+    currentPath: '/left/src/app.ts',
+    lastCompletedPath: null,
+    lastError: null,
+    createdAt: 1,
+    updatedAt: 2,
   }
 }
 
@@ -186,6 +204,62 @@ describe('leaveComparePage', () => {
     expect(opened).toBe(true)
     expect(useAppStore.getState().page).toBe('compare')
     expect(useCompareStore.getState().entries.map((entry) => entry.relativePath)).toEqual(['src/app.ts'])
+    expect(useLogStore.getState().visible).toBe(true)
+  })
+
+  it('opens the compare tab matching the active sync task sources', () => {
+    const syncLeftSource: SourceConfig = { type: 'sftp', configId: 'dogeow', path: '/var/www/dogeow-api-next' }
+    const syncRightSource: SourceConfig = { type: 'sftp', configId: 'hermes', path: '/var/www/dogeow-api' }
+
+    useAppStore.setState({
+      page: 'home',
+      compareTabs: [
+        {
+          id: 'compare-tab-other',
+          title: 'other ↔ other',
+          snapshot: createCompareSnapshot({
+            leftPath: '/other-left',
+            rightPath: '/other-right',
+            leftSource: { type: 'local', path: '/other-left' },
+            rightSource: { type: 'local', path: '/other-right' },
+            activeCompareId: null,
+          }),
+          diffTabs: [],
+          activeDiffTabId: null,
+        },
+        {
+          id: 'compare-tab-sync',
+          title: 'dogeow-api-next ↔ dogeow-api',
+          snapshot: createCompareSnapshot({
+            leftPath: syncLeftSource.path,
+            rightPath: syncRightSource.path,
+            leftSourceType: 'sftp',
+            rightSourceType: 'sftp',
+            leftSSHConfigId: 'dogeow',
+            rightSSHConfigId: 'hermes',
+            leftSource: syncLeftSource,
+            rightSource: syncRightSource,
+            activeCompareId: null,
+          }),
+          diffTabs: [createDiffTab()],
+          activeDiffTabId: 'src/file.txt',
+        },
+      ],
+      activeCompareTabId: 'compare-tab-other',
+    })
+
+    useCompareStore.setState({
+      syncTask: createSyncTask(syncLeftSource, syncRightSource),
+    })
+
+    const opened = openSyncTaskView({ expandLogs: true })
+
+    expect(opened).toBe(true)
+    expect(useAppStore.getState().page).toBe('compare')
+    expect(useAppStore.getState().activeCompareTabId).toBe('compare-tab-sync')
+    expect(useAppStore.getState().diffTabs.map((tab) => tab.id)).toEqual(['src/file.txt'])
+    expect(useCompareStore.getState().leftSource).toEqual(syncLeftSource)
+    expect(useCompareStore.getState().rightSource).toEqual(syncRightSource)
     expect(useLogStore.getState().visible).toBe(true)
   })
 })

@@ -5,7 +5,7 @@ import { useCompareStore } from '../stores/compare-store'
 import { useCompare } from '../hooks/useCompare'
 import { useAppStore } from '../stores/app-store'
 import { useSettingsStore } from '../stores/settings-store'
-import { openCompareTab } from '../utils/compare-session-navigation'
+import { openCompareTab, openSyncTaskView } from '../utils/compare-session-navigation'
 import type { StrategyName } from '../../../shared/types'
 
 const STRATEGY_OPTIONS: { value: StrategyName; label: string }[] = [
@@ -143,7 +143,7 @@ export default function HomePage() {
               </div>
               <button
                 onClick={() => {
-                  if (!openCompareTab(undefined, { expandLogs: true })) {
+                  if (!openSyncTaskView({ expandLogs: true })) {
                     setPage('compare')
                   }
                 }}
