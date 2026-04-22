@@ -5,6 +5,7 @@ export type Page = 'home' | 'compare' | 'text' | 'ssh' | 'history'
 
 export interface DiffTab {
   readonly id: string
+  readonly sessionId: string
   readonly relativePath: string
   readonly fileName: string
   readonly leftSource: SourceConfig | null
@@ -30,6 +31,7 @@ interface AppStore {
   closeDiffTab: (id: string) => void
   setActiveDiffTab: (id: string | null) => void
   clearDiffTabs: () => void
+  hasDiffTabSession: (id: string, sessionId: string) => boolean
 }
 
 export const useAppStore = create<AppStore>((set, get) => ({
@@ -73,4 +75,8 @@ export const useAppStore = create<AppStore>((set, get) => ({
   setActiveDiffTab: (id) => set({ activeDiffTabId: id }),
 
   clearDiffTabs: () => set({ diffTabs: [], activeDiffTabId: null }),
+
+  hasDiffTabSession: (id, sessionId) => {
+    return get().diffTabs.some((tab) => tab.id === id && tab.sessionId === sessionId)
+  },
 }))

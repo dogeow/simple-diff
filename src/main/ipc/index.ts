@@ -16,12 +16,27 @@ import { getConfigInternal } from '../ssh/config-store'
 import * as historyStore from '../history/history-store'
 import { syncManager } from '../sync/sync-manager'
 
-let activeCompare:
-  | {
-      compareId: string
-      controller: AbortController
-    }
-  | null = null
+interface ActiveCompare {
+  readonly compareId: string
+  readonly controller: AbortController
+}
+
+const activeCompares = new WeakMap<object, ActiveCompare>()
+
+function getActiveCompare(sender: object): ActiveCompare | null {
+  return activeCompares.get(sender) ?? null
+}
+
+function setActiveCompare(sender: object, compare: ActiveCompare): void {
+  activeCompares.set(sender, compare)
+}
+
+function clearActiveCompare(sender: object, controller: AbortController): void {
+  const activeCompare = getActiveCompare(sender)
+  if (activeCompare?.controller === controller) {
+    activeCompares.delete(sender)
+  }
+}
 
 function registerFileHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.FILE_SOURCE_LIST, (_event, sourceConfig: SourceConfig, dirPath: string) =>
@@ -61,10 +76,10 @@ function registerFileHandlers(): void {
 function registerCompareHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.COMPARE_RUN, (event, request: CompareRequest) =>
     wrapHandler(async () => {
-      activeCompare?.controller.abort()
+      getActiveCompare(event.sender)?.controller.abort()
 
       const controller = new AbortController()
-      activeCompare = { compareId: request.compareId, controller }
+      setActiveCompare(event.sender, { compareId: request.compareId, controller })
 
       logger.info(`开始对比: 左=${request.left.type === 'sftp' ? 'SFTP' : '本地'}(${request.left.path}) 右=${request.right.type === 'sftp' ? 'SFTP' : '本地'}(${request.right.path})`)
 
@@ -111,15 +126,14 @@ function registerCompareHandlers(): void {
       } finally {
         await leftSource.dispose()
         await rightSource.dispose()
-        if (activeCompare?.compareId === request.compareId) {
-          activeCompare = null
-        }
+        clearActiveCompare(event.sender, controller)
       }
     }),
   )
 
-  ipcMain.handle(IPC_CHANNELS.COMPARE_CANCEL, () =>
+  ipcMain.handle(IPC_CHANNELS.COMPARE_CANCEL, (event) =>
     wrapHandler(async () => {
+      const activeCompare = getActiveCompare(event.sender)
       if (activeCompare) {
         activeCompare.controller.abort()
       }

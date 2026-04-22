@@ -55,6 +55,7 @@ function resetCompareStore(): void {
 async function flushAsyncWork(): Promise<void> {
   await Promise.resolve()
   await Promise.resolve()
+  await Promise.resolve()
 }
 
 describe('compare-store', () => {
@@ -163,5 +164,147 @@ describe('compare-store', () => {
     expect(useCompareStore.getState().expandedDirs.has('src')).toBe(true)
     expect(listFiles).toHaveBeenCalledTimes(2)
     expect(useCompareStore.getState().entries).toHaveLength(2)
+  })
+
+  it('ignores stale lazy-load results after a new compare starts', async () => {
+    let resolveLeft: ((value: IpcResult<readonly FileEntry[]>) => void) | null = null
+    let resolveRight: ((value: IpcResult<readonly FileEntry[]>) => void) | null = null
+    type ListFiles = (
+      source: SourceConfig,
+      dirPath: string,
+    ) => Promise<IpcResult<readonly FileEntry[]>>
+
+    const listFiles = vi.fn<ListFiles>((source, dirPath) => new Promise((resolve) => {
+      if (source.type === 'local' && dirPath === '/left/src') {
+        resolveLeft = resolve
+        return
+      }
+      if (source.type === 'local' && dirPath === '/right/src') {
+        resolveRight = resolve
+        return
+      }
+      resolve({ success: false, error: `unexpected path: ${dirPath}` })
+    }))
+
+    vi.stubGlobal('window', {
+      api: { listFiles },
+    })
+
+    useCompareStore.setState({
+      leftSource,
+      rightSource,
+      entries: [
+        createCompareEntry('src', {
+          isDirectory: true,
+          state: 'equal',
+          left: createFileEntry('src', { path: 'src', isDirectory: true }),
+          right: createFileEntry('src', { path: 'src', isDirectory: true }),
+        }),
+      ],
+    })
+
+    const store = useCompareStore.getState()
+    store.startScanning('compare-1')
+    useCompareStore.setState({
+      leftSource,
+      rightSource,
+      entries: [
+        createCompareEntry('src', {
+          isDirectory: true,
+          state: 'equal',
+          left: createFileEntry('src', { path: 'src', isDirectory: true }),
+          right: createFileEntry('src', { path: 'src', isDirectory: true }),
+        }),
+      ],
+    })
+
+    store.expandDir('src')
+    expect(useCompareStore.getState().loadingDirs.has('src')).toBe(true)
+
+    store.startScanning('compare-2')
+    expect(useCompareStore.getState().loadingDirs.has('src')).toBe(false)
+    expect(useCompareStore.getState().entries).toHaveLength(0)
+
+    resolveLeft?.({
+      success: true,
+      data: [createFileEntry('stale-left.txt', { size: 10, mtime: 1000 })],
+    })
+    resolveRight?.({
+      success: true,
+      data: [createFileEntry('stale-left.txt', { size: 10, mtime: 1000 })],
+    })
+
+    await flushAsyncWork()
+
+    const currentState = useCompareStore.getState()
+    expect(currentState.activeCompareId).toBe('compare-2')
+    expect(currentState.entries).toEqual([])
+    expect(currentState.loadingDirs.has('src')).toBe(false)
+  })
+
+  it('refreshes a parent directory by replacing removed children and keeping unaffected descendants', async () => {
+    const listFiles = vi.fn<(
+      source: SourceConfig,
+      dirPath: string,
+    ) => Promise<IpcResult<readonly FileEntry[]>>>()
+
+    listFiles.mockImplementation(async (source, dirPath) => {
+      if (source.type === 'local' && dirPath === '/left/src') {
+        return {
+          success: true,
+          data: [
+            createFileEntry('keep-dir', { isDirectory: true }),
+            createFileEntry('renamed.txt', { size: 10, mtime: 1000 }),
+          ],
+        }
+      }
+      if (source.type === 'local' && dirPath === '/right/src') {
+        return {
+          success: true,
+          data: [
+            createFileEntry('keep-dir', { isDirectory: true }),
+            createFileEntry('renamed.txt', { size: 10, mtime: 1000 }),
+          ],
+        }
+      }
+      return { success: false, error: `unexpected path: ${dirPath}` }
+    })
+
+    vi.stubGlobal('window', {
+      api: { listFiles },
+    })
+
+    useCompareStore.setState({
+      leftSource,
+      rightSource,
+      entries: [
+        createCompareEntry('src', {
+          isDirectory: true,
+          state: 'equal',
+          left: createFileEntry('src', { path: 'src', isDirectory: true }),
+          right: createFileEntry('src', { path: 'src', isDirectory: true }),
+        }),
+        createCompareEntry('src/old.txt', { state: 'equal' }),
+        createCompareEntry('src/keep-dir', {
+          isDirectory: true,
+          state: 'equal',
+          left: createFileEntry('keep-dir', { path: 'src/keep-dir', isDirectory: true }),
+          right: createFileEntry('keep-dir', { path: 'src/keep-dir', isDirectory: true }),
+        }),
+        createCompareEntry('src/keep-dir/nested.txt', { state: 'different' }),
+      ],
+    })
+
+    await useCompareStore.getState().refreshDir('src')
+
+    const currentState = useCompareStore.getState()
+    expect(currentState.loadingDirs.has('src')).toBe(false)
+    expect(currentState.entries.map((entry) => entry.relativePath)).toEqual([
+      'src',
+      'src/keep-dir',
+      'src/keep-dir/nested.txt',
+      'src/renamed.txt',
+    ])
+    expect(listFiles).toHaveBeenCalledTimes(2)
   })
 })

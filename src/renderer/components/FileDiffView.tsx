@@ -43,6 +43,7 @@ interface FileDiffViewProps {
 
 export default function FileDiffView({ tab }: FileDiffViewProps) {
   const updateDiffTab = useAppStore((s) => s.updateDiffTab)
+  const hasDiffTabSession = useAppStore((s) => s.hasDiffTabSession)
   const leftRef = useRef<HTMLDivElement>(null)
   const rightRef = useRef<HTMLDivElement>(null)
   const syncing = useRef(false)
@@ -186,6 +187,9 @@ export default function FileDiffView({ tab }: FileDiffViewProps) {
 
       // Re-diff
       const result = await window.api.textDiff(newLeft, newRight)
+      if (!hasDiffTabSession(tab.id, tab.sessionId)) {
+        return
+      }
       if (result.success && result.data) {
         updateDiffTab(tab.id, {
           leftContent: newLeft,
@@ -194,7 +198,7 @@ export default function FileDiffView({ tab }: FileDiffViewProps) {
         })
       }
     },
-    [tab, updateDiffTab],
+    [tab, hasDiffTabSession, updateDiffTab],
   )
 
   const handleSave = useCallback(async (side: 'left' | 'right') => {
@@ -205,6 +209,9 @@ export default function FileDiffView({ tab }: FileDiffViewProps) {
     if (!source) return
 
     const result = await window.api.writeText(source, fullPath, content)
+    if (!hasDiffTabSession(tab.id, tab.sessionId)) {
+      return
+    }
     if (result.success) {
       updateDiffTab(tab.id, {
         ...(side === 'left'
@@ -212,7 +219,7 @@ export default function FileDiffView({ tab }: FileDiffViewProps) {
           : { originalRightContent: content }),
       })
     }
-  }, [tab, updateDiffTab])
+  }, [tab, hasDiffTabSession, updateDiffTab])
 
   if (tab.loading) {
     return (

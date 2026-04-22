@@ -258,7 +258,7 @@ describe('IPC compare handlers', () => {
     const runPromise = getHandler(IPC_CHANNELS.COMPARE_RUN)({ sender }, createRequest('compare-cancel'))
     await flushAsyncWork()
 
-    const cancelResponse = await getHandler(IPC_CHANNELS.COMPARE_CANCEL)({})
+    const cancelResponse = await getHandler(IPC_CHANNELS.COMPARE_CANCEL)({ sender })
     const runResponse = await runPromise
 
     expect(cancelResponse).toEqual({ success: true, data: undefined })
@@ -292,10 +292,12 @@ describe('IPC compare handlers', () => {
       return Promise.resolve(createResult([createCompareEntry('second.txt', 'equal')]))
     })
 
-    const firstPromise = getHandler(IPC_CHANNELS.COMPARE_RUN)({ sender: { send: vi.fn() } }, createRequest('compare-1'))
+    const sender = { send: vi.fn() }
+
+    const firstPromise = getHandler(IPC_CHANNELS.COMPARE_RUN)({ sender }, createRequest('compare-1'))
     await flushAsyncWork()
 
-    const secondResponse = await getHandler(IPC_CHANNELS.COMPARE_RUN)({ sender: { send: vi.fn() } }, createRequest('compare-2'))
+    const secondResponse = await getHandler(IPC_CHANNELS.COMPARE_RUN)({ sender }, createRequest('compare-2'))
     const firstResponse = await firstPromise
 
     expect(firstResponse).toEqual({ success: false, error: '对比已取消' })
@@ -311,5 +313,110 @@ describe('IPC compare handlers', () => {
     expect(firstRightSource.dispose).toHaveBeenCalledTimes(1)
     expect(secondLeftSource.dispose).toHaveBeenCalledTimes(1)
     expect(secondRightSource.dispose).toHaveBeenCalledTimes(1)
+  })
+
+  it('isolates active compares per sender so another window does not cancel them', async () => {
+    const firstLeftSource = createMockSource()
+    const firstRightSource = createMockSource()
+    const secondLeftSource = createMockSource()
+    const secondRightSource = createMockSource()
+
+    mocks.createFileSource
+      .mockResolvedValueOnce(firstLeftSource)
+      .mockResolvedValueOnce(firstRightSource)
+      .mockResolvedValueOnce(secondLeftSource)
+      .mockResolvedValueOnce(secondRightSource)
+
+    let resolveFirstCompare: ((value: CompareResult) => void) | null = null
+    mocks.compareDirectories
+      .mockImplementationOnce(() => new Promise((resolve) => {
+        resolveFirstCompare = resolve
+      }))
+      .mockResolvedValueOnce(createResult([createCompareEntry('second.txt', 'equal')]))
+
+    const senderOne = { send: vi.fn() }
+    const senderTwo = { send: vi.fn() }
+
+    const firstPromise = getHandler(IPC_CHANNELS.COMPARE_RUN)({ sender: senderOne }, createRequest('compare-1'))
+    await flushAsyncWork()
+
+    const secondResponse = await getHandler(IPC_CHANNELS.COMPARE_RUN)({ sender: senderTwo }, createRequest('compare-2'))
+
+    expect(secondResponse).toEqual({
+      success: true,
+      data: {
+        ...createResult([createCompareEntry('second.txt', 'equal')]),
+        leftSource: { type: 'local', path: '/left' },
+        rightSource: { type: 'local', path: '/right' },
+      },
+    })
+
+    resolveFirstCompare?.(createResult([createCompareEntry('first.txt', 'equal')]))
+    const firstResponse = await firstPromise
+
+    expect(firstResponse).toEqual({
+      success: true,
+      data: {
+        ...createResult([createCompareEntry('first.txt', 'equal')]),
+        leftSource: { type: 'local', path: '/left' },
+        rightSource: { type: 'local', path: '/right' },
+      },
+    })
+    expect(firstLeftSource.dispose).toHaveBeenCalledTimes(1)
+    expect(firstRightSource.dispose).toHaveBeenCalledTimes(1)
+    expect(secondLeftSource.dispose).toHaveBeenCalledTimes(1)
+    expect(secondRightSource.dispose).toHaveBeenCalledTimes(1)
+  })
+
+  it('cancels only the active compare for the requesting sender', async () => {
+    const firstLeftSource = createMockSource()
+    const firstRightSource = createMockSource()
+    const secondLeftSource = createMockSource()
+    const secondRightSource = createMockSource()
+
+    mocks.createFileSource
+      .mockResolvedValueOnce(firstLeftSource)
+      .mockResolvedValueOnce(firstRightSource)
+      .mockResolvedValueOnce(secondLeftSource)
+      .mockResolvedValueOnce(secondRightSource)
+
+    let firstAborted = false
+    let resolveSecondCompare: ((value: CompareResult) => void) | null = null
+    mocks.compareDirectories
+      .mockImplementationOnce(({ signal }) => new Promise((_, reject) => {
+        signal?.addEventListener('abort', () => {
+          firstAborted = true
+          reject(new Error('对比已取消'))
+        }, { once: true })
+      }))
+      .mockImplementationOnce(() => new Promise((resolve) => {
+        resolveSecondCompare = resolve
+      }))
+
+    const senderOne = { send: vi.fn() }
+    const senderTwo = { send: vi.fn() }
+
+    const firstPromise = getHandler(IPC_CHANNELS.COMPARE_RUN)({ sender: senderOne }, createRequest('compare-1'))
+    const secondPromise = getHandler(IPC_CHANNELS.COMPARE_RUN)({ sender: senderTwo }, createRequest('compare-2'))
+    await flushAsyncWork()
+
+    const cancelResponse = await getHandler(IPC_CHANNELS.COMPARE_CANCEL)({ sender: senderOne })
+    const firstResponse = await firstPromise
+
+    expect(cancelResponse).toEqual({ success: true, data: undefined })
+    expect(firstAborted).toBe(true)
+    expect(firstResponse).toEqual({ success: false, error: '对比已取消' })
+
+    resolveSecondCompare?.(createResult([createCompareEntry('second.txt', 'equal')]))
+    const secondResponse = await secondPromise
+
+    expect(secondResponse).toEqual({
+      success: true,
+      data: {
+        ...createResult([createCompareEntry('second.txt', 'equal')]),
+        leftSource: { type: 'local', path: '/left' },
+        rightSource: { type: 'local', path: '/right' },
+      },
+    })
   })
 })

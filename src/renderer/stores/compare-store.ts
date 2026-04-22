@@ -42,6 +42,7 @@ interface CompareStore {
   readonly viewMode: ViewMode
   readonly activeCompareId: string | null
   readonly syncTask: SyncTaskSnapshot | null
+  readonly compareVersion: number
 
   setLeftPath: (path: string) => void
   setRightPath: (path: string) => void
@@ -59,6 +60,7 @@ interface CompareStore {
   updateEntry: (compareId: string, entry: CompareEntry) => void
   finishCompare: (compareId: string, result: CompareResult) => void
   removeEntry: (relativePath: string) => void
+  refreshDir: (relativePath: string) => Promise<void>
   setError: (error: string | null, compareId?: string) => void
   setFilter: (filter: CompareState | 'all') => void
   setSources: (left: SourceConfig, right: SourceConfig) => void
@@ -110,6 +112,7 @@ const initialState = {
   extensionFilter: ['node_modules', '.git', 'dist'] as readonly string[],
   hideDot: true,
   hideDotFilter: 'all' as HideDotFilter,
+  compareVersion: 0,
   ...compareInitial,
 }
 
@@ -138,6 +141,35 @@ function upsertEntries(
   }
 
   return next
+}
+
+function isDirectChildPath(parentRelative: string, candidatePath: string): boolean {
+  if (parentRelative === '') {
+    return candidatePath !== '' && !candidatePath.includes('/')
+  }
+
+  if (!candidatePath.startsWith(`${parentRelative}/`)) return false
+  return !candidatePath.slice(parentRelative.length + 1).includes('/')
+}
+
+function replaceDirectoryChildren(
+  existing: readonly CompareEntry[],
+  parentRelative: string,
+  incomingChildren: readonly CompareEntry[],
+): CompareEntry[] {
+  const nextChildrenByPath = new Map(incomingChildren.map((entry) => [entry.relativePath, entry]))
+  const removedChildRoots = existing
+    .filter((entry) => isDirectChildPath(parentRelative, entry.relativePath))
+    .map((entry) => entry.relativePath)
+    .filter((relativePath) => !nextChildrenByPath.has(relativePath))
+
+  const preserved = existing.filter((entry) => {
+    return !removedChildRoots.some((removedPath) => (
+      entry.relativePath === removedPath || entry.relativePath.startsWith(`${removedPath}/`)
+    ))
+  })
+
+  return upsertEntries(preserved, incomingChildren)
 }
 
 /** Match two file lists into CompareEntry[] for a given parent relative path. */
@@ -201,6 +233,31 @@ function matchChildren(
   return entries
 }
 
+async function loadDirectoryChildren(
+  path: string,
+  dirEntry: CompareEntry | undefined,
+  leftSource: SourceConfig | null,
+  rightSource: SourceConfig | null,
+): Promise<readonly CompareEntry[]> {
+  if (!leftSource && !rightSource) return []
+
+  const leftAbs = leftSource ? resolveAbsPath(leftSource, path) : null
+  const rightAbs = rightSource ? resolveAbsPath(rightSource, path) : null
+
+  const fetchLeft = dirEntry?.state !== 'right_only' && leftSource && leftAbs
+  const fetchRight = dirEntry?.state !== 'left_only' && rightSource && rightAbs
+
+  const leftP = fetchLeft
+    ? window.api.listFiles(leftSource, leftAbs).then((r) => r.success && r.data ? r.data : [])
+    : Promise.resolve([] as readonly FileEntry[])
+  const rightP = fetchRight
+    ? window.api.listFiles(rightSource, rightAbs).then((r) => r.success && r.data ? r.data : [])
+    : Promise.resolve([] as readonly FileEntry[])
+
+  const [leftList, rightList] = await Promise.all([leftP, rightP])
+  return matchChildren(leftList, rightList, path)
+}
+
 export const useCompareStore = create<CompareStore>((set, get) => ({
   ...initialState,
 
@@ -215,7 +272,12 @@ export const useCompareStore = create<CompareStore>((set, get) => ({
   setHideDot: (hideDot) => set({ hideDot }),
   setHideDotFilter: (hideDotFilter) => set({ hideDotFilter }),
 
-  startScanning: (activeCompareId) => set({ ...compareInitial, activeCompareId, scanning: true }),
+  startScanning: (activeCompareId) => set((state) => ({
+    ...compareInitial,
+    activeCompareId,
+    scanning: true,
+    compareVersion: state.compareVersion + 1,
+  })),
 
   setScanEntries: (compareId, newEntries) => {
     if (get().activeCompareId !== compareId) return
@@ -247,6 +309,39 @@ export const useCompareStore = create<CompareStore>((set, get) => ({
       e.relativePath !== relativePath && !e.relativePath.startsWith(relativePath + '/'),
     )
     set({ entries })
+  },
+
+  refreshDir: async (path) => {
+    const state = get()
+    if (state.loadingDirs.has(path)) return
+
+    const dirEntry = path === ''
+      ? undefined
+      : state.entries.find((entry) => entry.relativePath === path && entry.isDirectory)
+
+    if (path !== '' && !dirEntry) return
+    if (!state.leftSource && !state.rightSource) return
+
+    const requestCompareVersion = state.compareVersion
+    const nextLoading = new Set(state.loadingDirs)
+    nextLoading.add(path)
+    set({ loadingDirs: nextLoading })
+
+    try {
+      const nextChildren = await loadDirectoryChildren(path, dirEntry, state.leftSource, state.rightSource)
+      if (requestCompareVersion !== get().compareVersion) return
+
+      set((current) => ({
+        entries: replaceDirectoryChildren(current.entries, path, nextChildren),
+      }))
+    } finally {
+      const current = get()
+      if (requestCompareVersion !== current.compareVersion) return
+
+      const doneLoading = new Set(current.loadingDirs)
+      doneLoading.delete(path)
+      set({ loadingDirs: doneLoading })
+    }
   },
 
   setError: (error, compareId) => {
@@ -288,56 +383,11 @@ export const useCompareStore = create<CompareStore>((set, get) => ({
 
     // Check if children already loaded
     const hasChildren = state.entries.some((e) => {
-      if (e.relativePath === path) return false
-      return e.relativePath.startsWith(path + '/')
-        && !e.relativePath.slice(path.length + 1).includes('/')
+      return isDirectChildPath(path, e.relativePath)
     })
     if (hasChildren) return
 
-    // Already loading this dir
-    if (state.loadingDirs.has(path)) return
-
-    // Find the dir entry to know which side(s) to load
-    const dirEntry = state.entries.find((e) => e.relativePath === path && e.isDirectory)
-    if (!dirEntry) return
-
-    const { leftSource, rightSource } = state
-    if (!leftSource && !rightSource) return
-
-    // Mark loading
-    const nextLoading = new Set(state.loadingDirs)
-    nextLoading.add(path)
-    set({ loadingDirs: nextLoading })
-
-    // Build absolute paths for this subdirectory
-    const leftAbs = leftSource ? resolveAbsPath(leftSource, path) : null
-    const rightAbs = rightSource ? resolveAbsPath(rightSource, path) : null
-
-    // Determine which sides to fetch
-    const fetchLeft = dirEntry.state !== 'right_only' && leftSource && leftAbs
-    const fetchRight = dirEntry.state !== 'left_only' && rightSource && rightAbs
-
-    const leftP = fetchLeft
-      ? window.api.listFiles(leftSource, leftAbs).then((r) => r.success && r.data ? r.data : [])
-      : Promise.resolve([] as readonly FileEntry[])
-    const rightP = fetchRight
-      ? window.api.listFiles(rightSource, rightAbs).then((r) => r.success && r.data ? r.data : [])
-      : Promise.resolve([] as readonly FileEntry[])
-
-    void (async () => {
-      try {
-        const [leftList, rightList] = await Promise.all([leftP, rightP])
-        const newEntries = matchChildren(leftList, rightList, path)
-        set((current) => ({
-          entries: upsertEntries(current.entries, newEntries),
-        }))
-      } finally {
-        const cur = get()
-        const doneLoading = new Set(cur.loadingDirs)
-        doneLoading.delete(path)
-        set({ loadingDirs: doneLoading })
-      }
-    })()
+    void get().refreshDir(path)
   },
 
   expandAll: () => {
@@ -351,9 +401,10 @@ export const useCompareStore = create<CompareStore>((set, get) => ({
   collapseAll: () => set({ expandedDirs: new Set() }),
 
   resetCompare: () => {
-    const syncTask = get().syncTask
+    const { compareVersion, syncTask } = get()
     set({
       ...compareInitial,
+      compareVersion: compareVersion + 1,
       syncTask,
       leftSource: syncTask?.leftSource ?? null,
       rightSource: syncTask?.rightSource ?? null,

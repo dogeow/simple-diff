@@ -8,6 +8,13 @@ import SplitTree from '../components/SplitTree'
 import FileDiffView from '../components/FileDiffView'
 import type { CompareEntry } from '../../../shared/types'
 
+function createDiffTabSessionId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID()
+  }
+  return Math.random().toString(36).slice(2)
+}
+
 export default function ComparePage() {
   const entries = useCompareStore((s) => s.entries)
   const scanning = useCompareStore((s) => s.scanning)
@@ -54,9 +61,12 @@ export default function ComparePage() {
         return
       }
 
+      const sessionId = createDiffTabSessionId()
+
       // Create loading tab
       const newTab: DiffTab = {
         id: tabId,
+        sessionId,
         relativePath: entry.relativePath,
         fileName: entry.name,
         leftSource: leftSource ?? null,
@@ -88,6 +98,10 @@ export default function ComparePage() {
 
       // Compute diff
       const diffRes = await window.api.textDiff(leftContent, rightContent)
+
+      if (!useAppStore.getState().hasDiffTabSession(tabId, sessionId)) {
+        return
+      }
 
       updateDiffTab(tabId, {
         leftContent,

@@ -107,7 +107,7 @@ function SideTable({
   topSpacerHeight,
   bottomSpacerHeight,
 }: SideTableProps) {
-  const removeEntry = useCompareStore((s) => s.removeEntry)
+  const refreshDir = useCompareStore((s) => s.refreshDir)
   const [ctxMenu, setCtxMenu] = useState<ContextMenuState | null>(null)
   const [renaming, setRenaming] = useState<string | null>(null)
   const [renameValue, setRenameValue] = useState('')
@@ -115,6 +115,11 @@ function SideTable({
 
   const buildFullPath = (relativePath: string) => {
     return joinSourcePath(isLocal ? 'local' : 'sftp', sourcePath, relativePath)
+  }
+
+  const getParentRelativePath = (relativePath: string): string => {
+    const segments = relativePath.split('/')
+    return segments.length > 1 ? segments.slice(0, -1).join('/') : ''
   }
 
   const handleContextMenu = useCallback((e: React.MouseEvent, node: TreeNode) => {
@@ -146,7 +151,7 @@ function SideTable({
           if (confirmed) {
             const result = await window.api.deleteFile(fullPath, node.isDirectory)
             if (result.success) {
-              removeEntry(node.relativePath)
+              await refreshDir(getParentRelativePath(node.relativePath))
             }
           }
         },
@@ -161,11 +166,11 @@ function SideTable({
       const fullPath = buildFullPath(node.relativePath)
       const result = await window.api.renameFile(fullPath, trimmed)
       if (result.success) {
-        removeEntry(node.relativePath)
+        await refreshDir(getParentRelativePath(node.relativePath))
       }
     }
     setRenaming(null)
-  }, [renameValue, isLocal, sourcePath, removeEntry])
+  }, [renameValue, refreshDir])
 
   return (
     <div>
