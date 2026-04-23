@@ -131,6 +131,15 @@ const api = {
   selectFile: (): Promise<IpcResult<string | null>> =>
     ipcRenderer.invoke(IPC_CHANNELS.DIALOG_SELECT_FILE),
 
+  // Dock / open-file
+  onOpenPaths: (callback: (paths: readonly string[]) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, paths: readonly string[]) => callback(paths)
+    ipcRenderer.on(IPC_CHANNELS.APP_OPEN_PATHS, listener)
+    return () => {
+      ipcRenderer.removeListener(IPC_CHANNELS.APP_OPEN_PATHS, listener)
+    }
+  },
+
   // Utilities
   getPathForFile: (file: File): string => webUtils.getPathForFile(file),
 } as const

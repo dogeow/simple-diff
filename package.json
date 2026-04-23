@@ -24,7 +24,6 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "electron": "^41.1.1",
     "electron-store": "^11.0.2",
     "node-ssh": "^13.2.1",
     "react": "^19.2.4",
@@ -40,6 +39,7 @@
     "@types/ssh2": "^1.15.5",
     "@vitejs/plugin-react": "^6.0.1",
     "concurrently": "^9.2.1",
+    "electron": "^41.3.0",
     "electron-builder": "^26.8.1",
     "jsdom": "^29.0.2",
     "tailwindcss": "^4.2.2",
@@ -47,5 +47,28 @@
     "vite": "^8.0.6",
     "vitest": "^4.1.4",
     "wait-on": "^9.0.4"
+  },
+  "build": {
+    "appId": "com.simplediff.app",
+    "productName": "Simple Diff",
+    "files": [
+      "dist/**/*"
+    ],
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "extendInfo": {
+        "CFBundleDocumentTypes": [
+          {
+            "CFBundleTypeName": "Folder",
+            "CFBundleTypeRole": "Viewer",
+            "LSHandlerRank": "Alternate",
+            "LSItemContentTypes": [
+              "public.folder",
+              "public.directory"
+            ]
+          }
+        ]
+      }
+    }
   }
 }

@@ -200,6 +200,7 @@ export const IPC_CHANNELS = {
   FILE_SHOW_IN_FOLDER: 'file:show-in-folder',
   FILE_RENAME: 'file:rename',
   FILE_DELETE: 'file:delete',
+  APP_OPEN_PATHS: 'app:open-paths',
 } as const
 
 // ─── IPC Result Envelope ─────────────────────────────────────

@@ -9,6 +9,7 @@ import { useAppStore } from './stores/app-store'
 import { useEffect, useRef } from 'react'
 import { sanitizePersistedCompareSessionSnapshot, useCompareStore } from './stores/compare-store'
 import { bindCompareEvents } from './utils/compare-events'
+import { useCompare } from './hooks/useCompare'
 
 export default function App() {
   const page = useAppStore((s) => s.page)
@@ -18,6 +19,7 @@ export default function App() {
   const setSyncTask = useCompareStore((s) => s.setSyncTask)
   const hydrateSourceInputs = useCompareStore((s) => s.hydrateSourceInputs)
   const restoredCompareTabsRef = useRef(false)
+  const { runCompare } = useCompare()
 
   useEffect(() => {
     if (restoredCompareTabsRef.current) return
@@ -59,6 +61,26 @@ export default function App() {
   useEffect(() => {
     return bindCompareEvents(window.api)
   }, [])
+
+  useEffect(() => {
+    if (typeof window.api.onOpenPaths !== 'function') return
+    return window.api.onOpenPaths((paths) => {
+      if (paths.length === 0) return
+      const compareState = useCompareStore.getState()
+      compareState.setLeftSourceType('local')
+      compareState.setLeftSSHConfigId('')
+      compareState.setLeftPath(paths[0])
+
+      if (paths.length >= 2) {
+        compareState.setRightSourceType('local')
+        compareState.setRightSSHConfigId('')
+        compareState.setRightPath(paths[1])
+        void runCompare()
+      } else {
+        setPage('home')
+      }
+    })
+  }, [runCompare, setPage])
 
   return (
     <Layout>
