@@ -133,17 +133,19 @@ export default function HomePage() {
                 <span className="text-neutral-200">
                   有一个同步任务{syncTask.status === 'running' ? '正在执行' : syncTask.status === 'completed' ? '已完成' : syncTask.status === 'failed' ? '已失败' : '待继续'}
                 </span>
-                <span className="text-xs text-neutral-500">
-                  {syncTask.completedItems}/{syncTask.totalItems} · {formatSyncProgress(syncTask.completedItems, syncTask.totalItems)}
-                </span>
+                <div className="flex min-w-0 items-center gap-2 text-xs text-neutral-500">
+                  <span className="shrink-0">
+                    {syncTask.completedItems}/{syncTask.totalItems} · {formatSyncProgress(syncTask.completedItems, syncTask.totalItems)}
+                  </span>
+                  {syncTask.currentPath && (
+                    <span className="min-w-0 truncate" title={syncTask.currentPath}>
+                      · {syncTask.currentPath}
+                    </span>
+                  )}
+                </div>
                 {syncTask.lastError && (
                   <span className="truncate text-xs text-red-400" title={syncTask.lastError}>
                     {syncTask.lastError}
-                  </span>
-                )}
-                {syncTask.currentPath && (
-                  <span className="truncate text-xs text-neutral-500" title={syncTask.currentPath}>
-                    {syncTask.currentPath}
                   </span>
                 )}
               </div>
