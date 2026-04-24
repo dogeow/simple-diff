@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { mergePathFilters } from '@shared/path-filter'
+import { formatPathFiltersForDisplay, mergeDisplayedPathFilters } from '@shared/path-filter'
 
 interface FilterModalProps {
   readonly extensionFilter: readonly string[]
@@ -8,7 +8,7 @@ interface FilterModalProps {
 
 export default function FilterModal({ extensionFilter, onChange }: FilterModalProps) {
   const [open, setOpen] = useState(false)
-  const [input, setInput] = useState(extensionFilter.join('\n'))
+  const [input, setInput] = useState(formatPathFiltersForDisplay(extensionFilter).join('\n'))
   const ref = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -24,7 +24,7 @@ export default function FilterModal({ extensionFilter, onChange }: FilterModalPr
   }, [open])
 
   const handleApply = () => {
-    const patterns = mergePathFilters(input.split('\n'))
+    const patterns = mergeDisplayedPathFilters(input.split('\n'), extensionFilter)
     void onChange(patterns)
     setOpen(false)
   }
@@ -41,7 +41,7 @@ export default function FilterModal({ extensionFilter, onChange }: FilterModalPr
     <div className="relative" ref={ref}>
       <button
         onClick={() => {
-          setInput(extensionFilter.join('\n'))
+          setInput(formatPathFiltersForDisplay(extensionFilter).join('\n'))
           setOpen(!open)
         }}
         className={`h-7 rounded px-2.5 text-[11px] font-medium leading-none transition-colors ${
@@ -56,7 +56,7 @@ export default function FilterModal({ extensionFilter, onChange }: FilterModalPr
       {open && (
         <div className="absolute top-full left-0 z-50 mt-1 w-48 rounded border border-neutral-600 bg-neutral-800 p-3 shadow-xl">
           <label className="mb-1.5 block text-xs text-neutral-400">
-            排除目录或路径（一行一个，右键忽略会写入 path:规则）
+            排除目录或路径（一行一个，右键忽略会写入精确路径规则）
           </label>
           <textarea
             value={input}

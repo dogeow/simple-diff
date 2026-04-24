@@ -323,4 +323,73 @@ describe('compareDirectories', () => {
       strategies: ['size'],
     })).rejects.toThrow('[left] 无法列出目录 .: ENOENT')
   })
+
+  it('reduces directory scan concurrency when either side uses sftp', async () => {
+    let activeLeftLists = 0
+    let maxActiveLeftLists = 0
+
+    const leftSource = createMockSource({
+      type: 'sftp',
+      listings: {
+        '/left': [
+          createFileEntry('app', { isDirectory: true, size: 0 }),
+          createFileEntry('bootstrap', { isDirectory: true, size: 0 }),
+          createFileEntry('config', { isDirectory: true, size: 0 }),
+          createFileEntry('routes', { isDirectory: true, size: 0 }),
+        ],
+        '/left/app': [],
+        '/left/bootstrap': [],
+        '/left/config': [],
+        '/left/routes': [],
+      },
+    })
+
+    leftSource.list.mockImplementation(async (dirPath: string) => {
+      activeLeftLists += 1
+      maxActiveLeftLists = Math.max(maxActiveLeftLists, activeLeftLists)
+      await new Promise((resolve) => setTimeout(resolve, dirPath === '/left' ? 0 : 10))
+
+      const listing = {
+        '/left': [
+          createFileEntry('app', { isDirectory: true, size: 0 }),
+          createFileEntry('bootstrap', { isDirectory: true, size: 0 }),
+          createFileEntry('config', { isDirectory: true, size: 0 }),
+          createFileEntry('routes', { isDirectory: true, size: 0 }),
+        ],
+        '/left/app': [],
+        '/left/bootstrap': [],
+        '/left/config': [],
+        '/left/routes': [],
+      }[dirPath] ?? []
+
+      activeLeftLists -= 1
+      return listing
+    })
+
+    const rightSource = createMockSource({
+      type: 'local',
+      listings: {
+        '/right': [
+          createFileEntry('app', { isDirectory: true, size: 0 }),
+          createFileEntry('bootstrap', { isDirectory: true, size: 0 }),
+          createFileEntry('config', { isDirectory: true, size: 0 }),
+          createFileEntry('routes', { isDirectory: true, size: 0 }),
+        ],
+        '/right/app': [],
+        '/right/bootstrap': [],
+        '/right/config': [],
+        '/right/routes': [],
+      },
+    })
+
+    await compareDirectories({
+      leftSource,
+      rightSource,
+      leftRoot: '/left',
+      rightRoot: '/right',
+      strategies: ['size'],
+    })
+
+    expect(maxActiveLeftLists).toBeLessThanOrEqual(2)
+  })
 })

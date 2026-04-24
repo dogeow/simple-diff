@@ -7,6 +7,7 @@ async function buildQuickSignature(
   size: number,
   filePath: string,
   hashRange: (path: string, start: number, endInclusive: number) => Promise<string>,
+  sequential = false,
 ): Promise<string> {
   if (size <= 0) return 'empty'
 
@@ -16,6 +17,12 @@ async function buildQuickSignature(
 
   const headEnd = WINDOW_SIZE - 1
   const tailStart = size - WINDOW_SIZE
+
+  if (sequential) {
+    const head = await hashRange(filePath, 0, headEnd)
+    const tail = await hashRange(filePath, tailStart, size - 1)
+    return `${head}:${tail}`
+  }
 
   const [head, tail] = await Promise.all([
     hashRange(filePath, 0, headEnd),
@@ -33,9 +40,21 @@ export class QuickHashStrategy implements CompareStrategy {
       return { type: 'quick_hash', leftHash: `size:${left.size}`, rightHash: `size:${right.size}` }
     }
 
+    const shouldReadSequentially = context.leftSource.type === 'sftp' || context.rightSource.type === 'sftp'
+
     const [leftHash, rightHash] = await Promise.all([
-      buildQuickSignature(left.size, context.leftPath, context.leftSource.hashFileRange.bind(context.leftSource)),
-      buildQuickSignature(right.size, context.rightPath, context.rightSource.hashFileRange.bind(context.rightSource)),
+      buildQuickSignature(
+        left.size,
+        context.leftPath,
+        context.leftSource.hashFileRange.bind(context.leftSource),
+        shouldReadSequentially,
+      ),
+      buildQuickSignature(
+        right.size,
+        context.rightPath,
+        context.rightSource.hashFileRange.bind(context.rightSource),
+        shouldReadSequentially,
+      ),
     ])
 
     if (leftHash !== rightHash) {

@@ -35,9 +35,28 @@ function formatHistorySourceLabel(
   return `${resolvedLabel}:${source.path}`
 }
 
+function buildHistorySourceFilterKey(
+  source: SourceConfig,
+  sshHostsById: ReadonlyMap<string, string>,
+): string {
+  if (source.type === 'local') {
+    return `local:${source.path}`
+  }
+
+  return `sftp:${sshHostsById.get(source.configId) ?? source.configId}:${source.path}`
+}
+
+function buildHistoryPairFilterKey(
+  entry: CompareHistoryEntry,
+  sshHostsById: ReadonlyMap<string, string>,
+): string {
+  return `${buildHistorySourceFilterKey(entry.leftSource, sshHostsById)}↔${buildHistorySourceFilterKey(entry.rightSource, sshHostsById)}`
+}
+
 export default function HistoryPage() {
   const [entries, setEntries] = useState<readonly CompareHistoryEntry[]>([])
   const [sshConfigs, setSSHConfigs] = useState<readonly SSHConfig[]>([])
+  const [pairFilter, setPairFilter] = useState('all')
   const [loading, setLoading] = useState(true)
   const setPage = useAppStore((s) => s.setPage)
   const store = useCompareStore()
@@ -46,6 +65,40 @@ export default function HistoryPage() {
     () => new Map(sshConfigs.map((config) => [config.id, config.label])),
     [sshConfigs],
   )
+  const sshHostsById = useMemo(
+    () => new Map(sshConfigs.map((config) => [config.id, config.host])),
+    [sshConfigs],
+  )
+  const pairOptions = useMemo(() => {
+    const optionMap = new Map<string, { value: string; label: string; count: number }>()
+
+    for (const entry of entries) {
+      const value = buildHistoryPairFilterKey(entry, sshHostsById)
+      const leftLabel = formatHistorySourceLabel(entry.leftSource, entry.leftLabel, sshLabelsById)
+      const rightLabel = formatHistorySourceLabel(entry.rightSource, entry.rightLabel, sshLabelsById)
+      const label = `${leftLabel} ↔ ${rightLabel}`
+      const existing = optionMap.get(value)
+
+      if (existing) {
+        optionMap.set(value, { ...existing, count: existing.count + 1 })
+        continue
+      }
+
+      optionMap.set(value, { value, label, count: 1 })
+    }
+
+    return [...optionMap.values()]
+  }, [entries, sshHostsById, sshLabelsById])
+  const filteredEntries = useMemo(() => {
+    if (pairFilter === 'all') return entries
+    return entries.filter((entry) => buildHistoryPairFilterKey(entry, sshHostsById) === pairFilter)
+  }, [entries, pairFilter, sshHostsById])
+
+  useEffect(() => {
+    if (pairFilter === 'all') return
+    if (pairOptions.some((option) => option.value === pairFilter)) return
+    setPairFilter('all')
+  }, [pairFilter, pairOptions])
 
   const load = async () => {
     setLoading(true)
@@ -134,8 +187,36 @@ export default function HistoryPage() {
           <div className="py-12 text-center text-neutral-500">暂无对比历史</div>
         )}
 
+        {!loading && entries.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2">
+            <label htmlFor="history-pair-filter" className="text-xs text-neutral-400">
+              对比组合
+            </label>
+            <select
+              id="history-pair-filter"
+              value={pairFilter}
+              onChange={(event) => setPairFilter(event.target.value)}
+              className="min-w-0 max-w-full rounded border border-neutral-600 bg-neutral-800 px-2 py-1.5 text-sm text-neutral-100 outline-none focus:border-blue-500"
+            >
+              <option value="all">全部历史</option>
+              {pairOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {`${option.label} (${option.count})`}
+                </option>
+              ))}
+            </select>
+            {pairFilter !== 'all' && (
+              <span className="text-xs text-neutral-500">当前 {filteredEntries.length} 条</span>
+            )}
+          </div>
+        )}
+
+        {!loading && entries.length > 0 && filteredEntries.length === 0 && (
+          <div className="py-12 text-center text-neutral-500">当前筛选下暂无对比历史</div>
+        )}
+
         <div className="flex flex-col gap-2">
-          {entries.map((entry) => {
+          {filteredEntries.map((entry) => {
             const leftLabel = formatHistorySourceLabel(entry.leftSource, entry.leftLabel, sshLabelsById)
             const rightLabel = formatHistorySourceLabel(entry.rightSource, entry.rightLabel, sshLabelsById)
 
@@ -150,10 +231,10 @@ export default function HistoryPage() {
                   </div>
                   <div className="mt-0.5 flex gap-3 text-xs text-neutral-400">
                     <span>{formatTime(entry.timestamp)}</span>
-                    <span className="text-green-400">同 {entry.stats.equal}</span>
-                    <span className="text-yellow-400">异 {entry.stats.different}</span>
-                    <span className="text-blue-400">左 {entry.stats.leftOnly}</span>
-                    <span className="text-purple-400">右 {entry.stats.rightOnly}</span>
+                    <span className="text-green-400">相同 {entry.stats.equal}</span>
+                    <span className="text-yellow-400">不同 {entry.stats.different}</span>
+                    <span className="text-blue-400">仅左 {entry.stats.leftOnly}</span>
+                    <span className="text-purple-400">仅右 {entry.stats.rightOnly}</span>
                   </div>
                 </div>
                 <div className="ml-3 flex gap-2">

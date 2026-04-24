@@ -18,7 +18,7 @@ export class LocalSource implements FileSource {
         return {
           name: entry.name,
           path: entry.name,
-          isDirectory: entry.isDirectory(),
+          isDirectory: stats.isDirectory(),
           size: stats.size,
           mtime: stats.mtimeMs,
         }
@@ -125,7 +125,7 @@ export class LocalSource implements FileSource {
         return {
           name: entry.name,
           path: relativePath,
-          isDirectory: entry.isDirectory(),
+          isDirectory: stats.isDirectory(),
           size: stats.size,
           mtime: stats.mtimeMs,
         }

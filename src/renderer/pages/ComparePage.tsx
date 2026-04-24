@@ -41,6 +41,13 @@ export default function ComparePage() {
 
   const activeTab = diffTabs.find((t) => t.id === activeDiffTabId) ?? null
   const emptyStateMessage = scanning ? '正在扫描目录，等待首批目录…' : '无匹配项'
+  const activeStatusLabel = scanning && comparing
+    ? '扫描并对比中…'
+    : scanning
+      ? '扫描中…'
+      : comparing
+        ? '对比中…'
+        : null
 
   const handleRerunCompare = useCallback(async () => {
     await runCompare({ reuseActiveSession: true })
@@ -209,21 +216,17 @@ export default function ComparePage() {
         />
 
         {/* Status indicator */}
-        <div className="ml-auto flex items-center gap-3 text-xs text-neutral-400">
-          {scanning && (
-            <span className="flex items-center gap-1.5 text-blue-400">
-              <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" />
-              扫描中…
-            </span>
-          )}
-          {comparing && (
-            <span className="flex items-center gap-1.5 text-blue-400">
-              <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" />
-              对比中…
-            </span>
-          )}
-          {done && <span className="text-green-400">✓ 完成 {formatDuration(duration)}</span>}
-        </div>
+        {(activeStatusLabel || done) && (
+          <div className="shrink-0 flex items-center gap-3 text-xs text-neutral-400">
+            {activeStatusLabel && (
+              <span className="flex items-center gap-1.5 text-blue-400">
+                <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                {activeStatusLabel}
+              </span>
+            )}
+            {!activeStatusLabel && done && <span className="text-green-400">✓ 完成 {formatDuration(duration)}</span>}
+          </div>
+        )}
       </div>
 
       {diffTabs.length > 0 && (

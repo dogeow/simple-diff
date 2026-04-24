@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { LogEntry } from '../../../shared/types'
+import type { LogEntry, LogLevel, LogScope } from '../../../shared/types'
 
 const MAX_LOGS = 500
 
@@ -27,3 +27,12 @@ export const useLogStore = create<LogStore>((set, get) => ({
 
   clear: () => set({ logs: [] }),
 }))
+
+export function addRendererLog(scope: LogScope, level: LogLevel, message: string): void {
+  useLogStore.getState().addLog({
+    timestamp: Date.now(),
+    scope,
+    level,
+    message: `[renderer] ${message}`,
+  })
+}

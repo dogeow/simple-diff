@@ -51,6 +51,8 @@ export class ConnectionManager {
       port: config.port,
       username: config.username,
       readyTimeout: 10000,
+      keepaliveInterval: 15000,
+      keepaliveCountMax: 3,
     }
 
     if (config.authType === 'password') {
@@ -95,6 +97,8 @@ export class ConnectionManager {
         port: config.port,
         username: config.username,
         readyTimeout: 10000,
+        keepaliveInterval: 15000,
+        keepaliveCountMax: 3,
       }
 
       if (config.authType === 'password') {
@@ -128,6 +132,19 @@ export class ConnectionManager {
   getConnection(configId: string): NodeSSH | undefined {
     const ssh = this.connections.get(configId)
     return ssh?.isConnected() ? ssh : undefined
+  }
+
+  /** Drop a cached connection without throwing; next connect() will reconnect. */
+  invalidate(configId: string): void {
+    const ssh = this.connections.get(configId)
+    if (!ssh) return
+    try {
+      ssh.dispose()
+    } catch {
+      // ignore
+    }
+    this.connections.delete(configId)
+    sshLogger.warn(`SSH 已主动断开缓存连接: ${configId}`)
   }
 
   async disposeAll(): Promise<void> {

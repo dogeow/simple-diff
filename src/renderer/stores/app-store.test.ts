@@ -195,7 +195,20 @@ describe('app-store', () => {
       compareTabs: [{
         id: 'compare-tab-1',
         title: 'left ↔ right',
-        snapshot: createCompareSnapshot({ activeCompareId: 'compare-1', scanning: true }),
+        snapshot: createCompareSnapshot({
+          activeCompareId: 'compare-1',
+          scanning: true,
+          done: false,
+          entries: [{
+            relativePath: 'bootstrap',
+            name: 'bootstrap',
+            isDirectory: true,
+            state: 'pending',
+            left: { name: 'bootstrap', path: 'bootstrap', isDirectory: true, size: 0, mtime: 1 },
+            right: { name: 'bootstrap', path: 'bootstrap', isDirectory: true, size: 0, mtime: 1 },
+            reasons: [],
+          }],
+        }),
         diffTabs: [createDiffTab({ id: 'stale.txt' })],
         activeDiffTabId: 'stale.txt',
       }],
@@ -208,6 +221,8 @@ describe('app-store', () => {
 
     expect(persisted.compareTabs[0]?.snapshot.scanning).toBe(false)
     expect(persisted.compareTabs[0]?.snapshot.activeCompareId).toBeNull()
+    expect(persisted.compareTabs[0]?.snapshot.entries).toEqual([])
+    expect(persisted.compareTabs[0]?.snapshot.duration).toBe(0)
     expect(persisted.compareTabs[0]?.diffTabs.map((tab) => tab.id)).toEqual(['kept.txt'])
     expect(persisted.compareTabs[0]?.activeDiffTabId).toBe('kept.txt')
   })

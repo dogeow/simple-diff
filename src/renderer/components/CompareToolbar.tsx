@@ -1,7 +1,8 @@
 import { useState, useRef, useEffect } from 'react'
-import type { CompareState, StrategyName, SyncTaskSnapshot } from '../../../shared/types'
+import type { CompareFilter, StrategyName, SyncTaskSnapshot } from '../../../shared/types'
 import type { CompareStats } from '../../../shared/types'
 import type { ViewMode, HideDotFilter } from '../stores/compare-store'
+import { formatSyncProgress } from '../utils/format-sync-progress'
 import FilterModal from './FilterModal'
 
 const STRATEGY_LABELS: Record<StrategyName, string> = {
@@ -11,8 +12,9 @@ const STRATEGY_LABELS: Record<StrategyName, string> = {
   hash: '内容哈希',
 }
 
-const FILTERS: { value: CompareState | 'all'; label: string }[] = [
+const FILTERS: { value: CompareFilter; label: string }[] = [
   { value: 'all', label: '全部' },
+  { value: 'paired', label: '双方' },
   { value: 'different', label: '不同' },
   { value: 'left_only', label: '仅左' },
   { value: 'right_only', label: '仅右' },
@@ -20,10 +22,11 @@ const FILTERS: { value: CompareState | 'all'; label: string }[] = [
 ]
 
 interface CompareToolbarProps {
-  readonly filter: CompareState | 'all'
-  readonly onFilterChange: (filter: CompareState | 'all') => void
+  readonly filter: CompareFilter
+  readonly onFilterChange: (filter: CompareFilter) => void
   readonly stats: CompareStats
   readonly pendingCount: number
+  readonly hiddenPendingCount: number
   readonly viewMode: ViewMode
   readonly setViewMode: (mode: ViewMode) => void
   readonly allExpanded: boolean
@@ -53,6 +56,7 @@ export default function CompareToolbar({
   onFilterChange,
   stats,
   pendingCount,
+  hiddenPendingCount,
   viewMode,
   setViewMode,
   allExpanded,
@@ -109,6 +113,7 @@ export default function CompareToolbar({
   )
 
   const canStartSync = compareDone && !compareLoading && pendingCount === 0 && stats.total > 0
+  const showHiddenPendingNotice = compareLoading && hiddenPendingCount > 0
 
   return (
     <div className="flex flex-col gap-1.5 px-1.5 py-1">
@@ -120,7 +125,7 @@ export default function CompareToolbar({
         >
           {allExpanded ? '收起' : '展开'}
         </button>
-        <div className="flex flex-wrap gap-1">
+        <div className="flex flex-wrap items-center gap-1">
           {FILTERS.map((f) => (
             <button
               key={f.value}
@@ -134,12 +139,17 @@ export default function CompareToolbar({
               {f.label}
             </button>
           ))}
+          {showHiddenPendingNotice && (
+            <span className="rounded border border-neutral-700 bg-neutral-800/70 px-2 py-1 text-xs text-neutral-400">
+              当前筛选隐藏了 {hiddenPendingCount} 个待比或对比中条目，切到“全部”可查看它们。
+            </span>
+          )}
         </div>
         <div className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-2">
           {syncTask && (
             <div className="flex min-w-0 max-w-full items-center gap-2 rounded border border-neutral-700 bg-neutral-800/70 px-2 py-1 text-xs text-neutral-300">
               <span className="shrink-0 tabular-nums">
-                同步 {syncTask.completedItems}/{syncTask.totalItems}
+                同步 {syncTask.completedItems}/{syncTask.totalItems} · {formatSyncProgress(syncTask.completedItems, syncTask.totalItems)}
               </span>
               <span className={`w-12 shrink-0 text-left ${syncTask.status === 'running' ? 'text-blue-400' : syncTask.status === 'completed' ? 'text-green-400' : 'text-yellow-400'}`}>
                 {syncTask.status === 'running'
@@ -172,11 +182,11 @@ export default function CompareToolbar({
           )}
           <div className="flex gap-2 text-xs text-neutral-400">
             <span>共 {stats.total}</span>
-            <span className="text-green-400">同 {stats.equal}</span>
-            <span className="text-yellow-400">异 {stats.different}</span>
-            <span className="text-blue-400">左 {stats.leftOnly}</span>
-            <span className="text-purple-400">右 {stats.rightOnly}</span>
-            {pendingCount > 0 && <span className="text-neutral-500">待 {pendingCount}</span>}
+            <span className="text-green-400">相同 {stats.equal}</span>
+            <span className="text-yellow-400">不同 {stats.different}</span>
+            <span className="text-blue-400">仅左 {stats.leftOnly}</span>
+            <span className="text-purple-400">仅右 {stats.rightOnly}</span>
+            {pendingCount > 0 && <span className="text-neutral-500">待比 {pendingCount}</span>}
           </div>
           <div className="flex flex-wrap gap-1">
             {!hasGlobalSyncTask && (
@@ -208,19 +218,6 @@ export default function CompareToolbar({
           同步错误: {syncTask.lastError}
         </div>
       )}
-
-      {compareLoading && filter !== 'all' && pendingCount > 0 && (
-        <div className="rounded border border-neutral-700 bg-neutral-800/70 px-2 py-1 text-xs text-neutral-400">
-          当前筛选隐藏了 {pendingCount} 个待比或对比中条目，切到“全部”可查看它们。
-        </div>
-      )}
-
-      {!compareLoading && !compareDone && stats.total > 0 && (
-        <div className="rounded border border-amber-800 bg-amber-900/20 px-2 py-1 text-xs text-amber-200">
-          当前结果未完成，需先重新对比后才能执行同步。
-        </div>
-      )}
-
       {/* Toolbar row 2: strategies + extension filter + hidden files */}
       <div className="flex flex-wrap items-center gap-2">
         <div className="flex flex-wrap items-center gap-1.5">

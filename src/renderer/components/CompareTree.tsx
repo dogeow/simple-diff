@@ -1,5 +1,5 @@
 import { useMemo, useCallback, useState } from 'react'
-import type { CompareEntry, CompareState } from '../../../shared/types'
+import type { CompareEntry, CompareFilter } from '../../../shared/types'
 import { useCompareNodeInteractions } from '../hooks/useCompareNodeInteractions'
 import { useVisibleCompareNodes } from '../hooks/useVisibleCompareNodes'
 import { useCompareStore, computeStats } from '../stores/compare-store'
@@ -11,12 +11,12 @@ import { useAppStore } from '../stores/app-store'
 import type { StrategyName } from '../../../shared/types'
 import { shouldShowSyncTaskInCompare } from '../utils/sync-task-visibility'
 import { createExactPathFilter } from '@shared/path-filter'
-import type { TreeNode } from '../utils/tree-utils'
+import { matchesCompareFilter, type TreeNode } from '../utils/tree-utils'
 
 interface CompareTreeProps {
   readonly entries: readonly CompareEntry[]
-  readonly filter: CompareState | 'all'
-  readonly onFilterChange: (filter: CompareState | 'all') => void
+  readonly filter: CompareFilter
+  readonly onFilterChange: (filter: CompareFilter) => void
   readonly onDoubleClickFile: (entry: CompareEntry) => void
   readonly toolbarOnly?: boolean
   readonly emptyStateMessage?: string
@@ -69,6 +69,10 @@ export default function CompareTree({ entries, filter, onFilterChange, onDoubleC
 
   const stats = useMemo(() => computeStats(entries), [entries])
   const pendingCount = useMemo(() => entries.filter((e) => e.state === 'pending' || e.state === 'comparing').length, [entries])
+  const hiddenPendingCount = useMemo(
+    () => entries.filter((entry) => (entry.state === 'pending' || entry.state === 'comparing') && !matchesCompareFilter(filter, entry)).length,
+    [entries, filter],
+  )
   const hasComparedResult = compareDone || pendingCount > 0 || entries.length > 0
   const visibleNodes = useVisibleCompareNodes({ entries, filter })
 
@@ -86,7 +90,7 @@ export default function CompareTree({ entries, filter, onFilterChange, onDoubleC
   const getContextActions = useCallback((node: TreeNode): readonly ContextMenuAction[] => {
     if (!node.entry) return []
     return [{
-      label: node.isDirectory ? '忽略此目录' : '忽略此文件',
+      label: `${node.isDirectory ? '忽略目录' : '忽略文件'}：『${node.name}』`,
       onClick: () => handleIgnoreNode(node),
     }]
   }, [handleIgnoreNode])
@@ -159,6 +163,7 @@ export default function CompareTree({ entries, filter, onFilterChange, onDoubleC
         onFilterChange={onFilterChange}
         stats={stats}
         pendingCount={pendingCount}
+        hiddenPendingCount={hiddenPendingCount}
         viewMode={viewMode}
         setViewMode={setViewMode}
         allExpanded={allExpanded}

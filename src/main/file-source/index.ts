@@ -25,7 +25,9 @@ export async function createFileSource(config: SourceConfig): Promise<FileSource
       sshLogger.info(`SFTP 正在连接: ${sshConfig.host}:${sshConfig.port}`)
       const ssh = await connectionManager.connect(sshConfig)
       sshLogger.info(`SFTP 连接就绪: ${sshConfig.host}`)
-      return new SFTPSource(ssh)
+      return new SFTPSource(ssh, {
+        onConnectionLost: () => connectionManager.invalidate(sshConfig.id),
+      })
     }
   }
 }

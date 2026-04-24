@@ -235,7 +235,6 @@ export default function TextComparePage() {
   return (
     <div className="flex h-full flex-col gap-2 p-3">
       <div className="flex shrink-0 flex-wrap items-center gap-2">
-        <span className="text-sm text-neutral-400">粘贴或拖入文本后自动对比</span>
         <button
           onClick={swap}
           className="rounded bg-neutral-700 px-3 py-1.5 text-sm text-neutral-200 hover:bg-neutral-600"

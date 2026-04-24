@@ -20,6 +20,7 @@ const STRATEGY_MAP: Record<StrategyName, () => CompareStrategy> = {
 }
 
 const DIRECTORY_SCAN_CONCURRENCY = 8
+const SFTP_DIRECTORY_SCAN_CONCURRENCY = 2
 const DIRECTORY_LOG_INTERVAL = 200
 
 interface PendingDirectoryScan {
@@ -34,6 +35,7 @@ export interface ComparatorOptions {
   readonly rightSource: FileSource
   readonly leftRoot: string
   readonly rightRoot: string
+  readonly compareId?: string
   readonly strategies: readonly StrategyName[]
   readonly extensionFilter?: readonly string[]
   readonly signal?: AbortSignal
@@ -123,6 +125,7 @@ export async function compareDirectories(options: ComparatorOptions): Promise<Co
     rightSource,
     leftRoot,
     rightRoot,
+    compareId,
     strategies,
     extensionFilter,
     onEntriesFound,
@@ -130,8 +133,10 @@ export async function compareDirectories(options: ComparatorOptions): Promise<Co
     signal,
   } = options
   const startTime = Date.now()
+  const logPrefix = compareId ? `[${compareId}] ` : ''
 
   const activeStrategies = strategies.map((name) => STRATEGY_MAP[name]())
+  const directoryScanConcurrency = resolveDirectoryScanConcurrency(leftSource, rightSource)
 
   const pathFilters = extensionFilter ?? []
 
@@ -146,12 +151,12 @@ export async function compareDirectories(options: ComparatorOptions): Promise<Co
   while (currentLevel.length > 0) {
     const nextLevel: PendingDirectoryScan[] = []
 
-    await mapConcurrent(currentLevel, DIRECTORY_SCAN_CONCURRENCY, async ({ rel, leftAbs, rightAbs, entry: directoryEntry }) => {
+    await mapConcurrent(currentLevel, directoryScanConcurrency, async ({ rel, leftAbs, rightAbs, entry: directoryEntry }) => {
       throwIfAborted(signal)
 
       scannedDirCount++
       if (scannedDirCount === 1 || scannedDirCount % DIRECTORY_LOG_INTERVAL === 0) {
-        compareLogger.info(`正在扫描目录，已处理 ${scannedDirCount} 个目录`)
+        compareLogger.info(`${logPrefix}正在扫描目录，已处理 ${scannedDirCount} 个目录`)
       }
 
       const dirLabel = rel || '.'
@@ -161,10 +166,21 @@ export async function compareDirectories(options: ComparatorOptions): Promise<Co
       }
 
       const failOnListError = rel === ''
-      const [leftList, rightList] = await Promise.all([
-        listSafe(leftSource, leftAbs, 'left', dirLabel, failOnListError),
-        listSafe(rightSource, rightAbs, 'right', dirLabel, failOnListError),
-      ])
+      const heartbeatStarted = Date.now()
+      const heartbeat = setInterval(() => {
+        const seconds = Math.round((Date.now() - heartbeatStarted) / 1000)
+        compareLogger.info(`${logPrefix}仍在等待目录列表: ${dirLabel}（已 ${seconds}s）`)
+      }, 5000)
+      let leftList: readonly FileEntry[] = []
+      let rightList: readonly FileEntry[] = []
+      try {
+        ;[leftList, rightList] = await Promise.all([
+          listSafe(leftSource, leftAbs, 'left', dirLabel, failOnListError),
+          listSafe(rightSource, rightAbs, 'right', dirLabel, failOnListError),
+        ])
+      } finally {
+        clearInterval(heartbeat)
+      }
 
       const levelEntries = matchLevel(leftList, rightList, rel, pathFilters)
 
@@ -178,7 +194,7 @@ export async function compareDirectories(options: ComparatorOptions): Promise<Co
 
       if (levelEntries.length === 0) return
 
-      compareLogger.info(`目录 ${dirLabel} ${summarizeEntries(levelEntries)}`)
+      compareLogger.info(`${logPrefix}目录 ${dirLabel} ${summarizeEntries(levelEntries)}`)
 
       throwIfAborted(signal)
       onEntriesFound?.(levelEntries)
@@ -216,7 +232,16 @@ export async function compareDirectories(options: ComparatorOptions): Promise<Co
             }
 
             for (const strategy of activeStrategies) {
-              const reason = await strategy.compare(entry.left, entry.right, compareContext)
+              let reason: DiffReason | null
+              try {
+                reason = await strategy.compare(entry.left, entry.right, compareContext)
+              } catch (error) {
+                const message = error instanceof Error ? error.message : String(error)
+                compareLogger.error(
+                  `${logPrefix}文件对比失败: path=${entry.relativePath} strategy=${strategy.name} left=${compareContext.leftPath} right=${compareContext.rightPath} error=${message}`,
+                )
+                throw new Error(`比较文件 ${entry.relativePath} 时，策略 ${strategy.name} 失败: ${message}`)
+              }
               if (reason) reasons.push(reason)
             }
           }
@@ -241,8 +266,16 @@ export async function compareDirectories(options: ComparatorOptions): Promise<Co
   }
 
   const duration = Date.now() - startTime
-  compareLogger.info(`对比完成，耗时 ${formatDuration(duration)} — 共 ${stats.total} 项`)
+  compareLogger.info(`${logPrefix}对比完成，耗时 ${formatDuration(duration)} — 共 ${stats.total} 项`)
   return { entries: allEntries, stats, duration }
+}
+
+function resolveDirectoryScanConcurrency(leftSource: FileSource, rightSource: FileSource): number {
+  if (leftSource.type === 'sftp' || rightSource.type === 'sftp') {
+    return SFTP_DIRECTORY_SCAN_CONCURRENCY
+  }
+
+  return DIRECTORY_SCAN_CONCURRENCY
 }
 
 async function mapConcurrent<T>(

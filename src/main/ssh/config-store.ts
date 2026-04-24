@@ -48,13 +48,16 @@ export function getConfigInternal(id: string): SSHConfigInternal | undefined {
 export function saveConfig(input: SSHConfigInput): SSHConfig {
   const configs = store.get('sshConfigs') ?? []
   const id = input.id ?? randomUUID()
+  const host = input.host.trim()
+  const label = input.label.trim() || host
+  const username = input.username.trim() || 'root'
 
   const record: SSHConfigInternal = {
     id,
-    label: input.label,
-    host: input.host,
+    label,
+    host,
     port: input.port,
-    username: input.username,
+    username,
     authType: input.authType,
     defaultPath: input.defaultPath,
     password: encrypt(input.password),

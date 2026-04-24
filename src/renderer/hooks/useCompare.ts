@@ -10,6 +10,7 @@ import {
 import { useAppStore, type CompareTab } from '../stores/app-store'
 import { useSettingsStore } from '../stores/settings-store'
 import type { SourceConfig } from '../../../shared/types'
+import { addRendererLog } from '../stores/log-store'
 
 function buildSourceConfig(type: 'local' | 'sftp', path: string, sshConfigId: string): SourceConfig {
   if (type === 'sftp') {
@@ -120,6 +121,7 @@ export function useCompare() {
     const right = buildSourceConfig(currentRightSourceType, currentRightPath, currentRightSSHConfigId)
 
     if (compareIdToCancel) {
+      addRendererLog('compare', 'info', `准备取消旧对比 compareId=${compareIdToCancel}`)
       await window.api.cancelCompare(compareIdToCancel)
     }
 
@@ -129,6 +131,12 @@ export function useCompare() {
     // Start scanning — navigate immediately
     store.startScanning(compareId, { preserveEntries: reuseActiveSession })
     store.setSources(left, right)
+
+    addRendererLog(
+      'compare',
+      'info',
+      `发起对比 compareId=${compareId} tabId=${compareTabId} left=${left.type}:${left.path} right=${right.type}:${right.path} strategies=${currentStrategies.join(',')}`,
+    )
 
     appStore.saveCompareTab({
       id: compareTabId,
@@ -143,6 +151,7 @@ export function useCompare() {
     }
 
     try {
+      addRendererLog('compare', 'info', `调用主进程 compare:run compareId=${compareId}`)
       const response = await window.api.runCompare({
         compareId,
         left,
@@ -152,23 +161,48 @@ export function useCompare() {
       })
 
       if (response.success && response.data) {
+        addRendererLog(
+          'compare',
+          'info',
+          `compare:run 返回成功 compareId=${compareId} total=${response.data.stats.total} duration=${response.data.duration}ms`,
+        )
         if (useCompareStore.getState().activeCompareId === compareId) {
           store.finishCompare(compareId, response.data)
+        } else {
+          addRendererLog(
+            'compare',
+            'info',
+            `compare:run 成功结果未写入当前活动 store，activeCompareId=${useCompareStore.getState().activeCompareId ?? '-'} compareId=${compareId}`,
+          )
         }
         useAppStore.getState().updateCompareTabSnapshot(compareTabId, (snapshot) =>
           applyFinishCompareToSnapshot(snapshot, compareId, response.data!),
         )
       } else if (response.error === '对比已取消') {
+        addRendererLog('compare', 'warn', `compare:run 被取消 compareId=${compareId}`)
         if (useCompareStore.getState().activeCompareId === compareId) {
           store.setError(null, compareId)
+        } else {
+          addRendererLog(
+            'compare',
+            'info',
+            `compare:run 取消结果未写入当前活动 store，activeCompareId=${useCompareStore.getState().activeCompareId ?? '-'} compareId=${compareId}`,
+          )
         }
         useAppStore.getState().updateCompareTabSnapshot(compareTabId, (snapshot) =>
           applyCompareErrorToSnapshot(snapshot, compareId, null),
         )
       } else {
         const message = response.error ?? '对比失败'
+        addRendererLog('compare', 'error', `compare:run 返回失败 compareId=${compareId} error=${message}`)
         if (useCompareStore.getState().activeCompareId === compareId) {
           store.setError(message, compareId)
+        } else {
+          addRendererLog(
+            'compare',
+            'info',
+            `compare:run 失败结果未写入当前活动 store，activeCompareId=${useCompareStore.getState().activeCompareId ?? '-'} compareId=${compareId}`,
+          )
         }
         useAppStore.getState().updateCompareTabSnapshot(compareTabId, (snapshot) =>
           applyCompareErrorToSnapshot(snapshot, compareId, message),
@@ -176,8 +210,15 @@ export function useCompare() {
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : '对比失败'
+      addRendererLog('compare', 'error', `compare:run 抛异常 compareId=${compareId} error=${message}`)
       if (useCompareStore.getState().activeCompareId === compareId) {
         store.setError(message, compareId)
+      } else {
+        addRendererLog(
+          'compare',
+          'info',
+          `compare:run 异常结果未写入当前活动 store，activeCompareId=${useCompareStore.getState().activeCompareId ?? '-'} compareId=${compareId}`,
+        )
       }
       useAppStore.getState().updateCompareTabSnapshot(compareTabId, (snapshot) =>
         applyCompareErrorToSnapshot(snapshot, compareId, message),

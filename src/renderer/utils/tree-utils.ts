@@ -1,4 +1,4 @@
-import type { CompareEntry, CompareState } from '../../../shared/types'
+import type { CompareEntry, CompareFilter, CompareState } from '../../../shared/types'
 import { matchesPathFilter } from '@shared/path-filter'
 
 export type TreeSide = 'left' | 'right'
@@ -210,23 +210,26 @@ function applyEffectiveDirectoryStates(entries: readonly CompareEntry[]): readon
   })
 }
 
-function matchesStateFilter(targetFilter: CompareState | 'all', state: CompareState): boolean {
+export function matchesCompareFilter(targetFilter: CompareFilter, entry: CompareEntry): boolean {
   if (targetFilter === 'all') return true
-  if (targetFilter === 'different') {
-    return state === 'different' || state === 'left_only' || state === 'right_only'
+  if (targetFilter === 'paired') {
+    return Boolean(entry.left && entry.right)
   }
-  return state === targetFilter
+  if (targetFilter === 'different') {
+    return entry.state === 'different' || entry.state === 'left_only' || entry.state === 'right_only'
+  }
+  return entry.state === targetFilter
 }
 
 function filterEntriesByState(
   entries: readonly CompareEntry[],
-  targetFilter: CompareState | 'all',
+  targetFilter: CompareFilter,
 ): readonly CompareEntry[] {
   if (targetFilter === 'all') return entries
 
   const neededDirs = new Set<string>()
   for (const entry of entries) {
-    if (!matchesStateFilter(targetFilter, entry.state)) continue
+    if (!matchesCompareFilter(targetFilter, entry)) continue
 
     const parts = entry.relativePath.split('/')
     for (let i = 1; i < parts.length; i++) {
@@ -237,12 +240,12 @@ function filterEntriesByState(
 
   return entries.filter((entry) => {
     if (entry.isDirectory) return neededDirs.has(entry.relativePath)
-    return matchesStateFilter(targetFilter, entry.state)
+    return matchesCompareFilter(targetFilter, entry)
   })
 }
 
 export interface PrepareCompareEntriesOptions {
-  readonly filter: CompareState | 'all'
+  readonly filter: CompareFilter
   readonly pathFilter: readonly string[]
   readonly hideDot: boolean
   readonly hideDotFilter: DotEntryFilter

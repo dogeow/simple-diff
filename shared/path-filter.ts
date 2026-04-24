@@ -25,6 +25,44 @@ export function createExactPathFilter(relativePath: string): string {
   return `${EXACT_PATH_PREFIX}${trimmed}`
 }
 
+export function formatPathFilterForDisplay(filter: string): string {
+  const normalized = normalizeFilterRule(filter)
+  if (!normalized) return ''
+
+  if (normalized.toLowerCase().startsWith(EXACT_PATH_PREFIX)) {
+    return normalizePathValue(normalized.slice(EXACT_PATH_PREFIX.length))
+  }
+
+  return normalized
+}
+
+export function formatPathFiltersForDisplay(filters: readonly string[]): readonly string[] {
+  return filters
+    .map((filter) => formatPathFilterForDisplay(filter))
+    .filter((filter) => filter.length > 0)
+}
+
+export function mergeDisplayedPathFilters(
+  displayedFilters: readonly string[],
+  previousFilters: readonly string[],
+): readonly string[] {
+  const exactFiltersByDisplay = new Map<string, string>()
+
+  for (const filter of previousFilters) {
+    const normalized = normalizeFilterRule(filter)
+    if (!normalized.toLowerCase().startsWith(EXACT_PATH_PREFIX)) continue
+
+    exactFiltersByDisplay.set(formatPathFilterForDisplay(normalized), normalized)
+  }
+
+  const mergedDisplayedFilters = mergePathFilters(displayedFilters)
+  const restoredFilters = mergedDisplayedFilters.map((filter) => {
+    return exactFiltersByDisplay.get(formatPathFilterForDisplay(filter)) ?? filter
+  })
+
+  return mergePathFilters(restoredFilters)
+}
+
 export function mergePathFilters(...filterGroups: ReadonlyArray<readonly string[] | undefined>): readonly string[] {
   const merged: string[] = []
   const seen = new Set<string>()

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { mergePathFilters } from '@shared/path-filter'
+import { formatPathFiltersForDisplay, mergeDisplayedPathFilters } from '@shared/path-filter'
 import { useCompare } from '../hooks/useCompare'
 import { useSettingsStore } from '../stores/settings-store'
 
@@ -7,14 +7,14 @@ export default function SettingsPage() {
   const globalPathFilters = useSettingsStore((s) => s.globalPathFilters)
   const setGlobalPathFilters = useSettingsStore((s) => s.setGlobalPathFilters)
   const { rerunActiveSessionIfRunning } = useCompare()
-  const [input, setInput] = useState(globalPathFilters.join('\n'))
+  const [input, setInput] = useState(formatPathFiltersForDisplay(globalPathFilters).join('\n'))
 
   useEffect(() => {
-    setInput(globalPathFilters.join('\n'))
+    setInput(formatPathFiltersForDisplay(globalPathFilters).join('\n'))
   }, [globalPathFilters])
 
   const handleSave = async () => {
-    setGlobalPathFilters(mergePathFilters(input.split('\n')))
+    setGlobalPathFilters(mergeDisplayedPathFilters(input.split('\n'), globalPathFilters))
     await rerunActiveSessionIfRunning()
   }
 

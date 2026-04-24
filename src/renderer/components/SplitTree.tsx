@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react'
 import { joinSourcePath } from '@shared/source-path'
-import type { CompareEntry, CompareState } from '../../../shared/types'
+import type { CompareEntry, CompareFilter } from '../../../shared/types'
 import { truncatePath, type TreeNode } from '../utils/tree-utils'
 import TreeEntryCell from './TreeEntryCell'
 import { formatSize, formatTime, rowBg, shouldShowDirectorySpinner } from './tree-row-utils'
@@ -14,7 +14,7 @@ import { createExactPathFilter } from '@shared/path-filter'
 
 interface SplitTreeProps {
   readonly entries: readonly CompareEntry[]
-  readonly filter: CompareState | 'all'
+  readonly filter: CompareFilter
   readonly onDoubleClickFile: (entry: CompareEntry) => void
   readonly emptyStateMessage?: string
   readonly onExtensionFilterChange?: (filter: readonly string[]) => void | Promise<void>
@@ -142,7 +142,7 @@ function SideTable({
     if (!node.entry) return []
     const fullPath = buildFullPath(node.relativePath)
     const ignoreAction: ContextMenuAction = {
-      label: node.isDirectory ? '忽略此目录' : '忽略此文件',
+      label: `${node.isDirectory ? '忽略目录' : '忽略文件'}：『${node.name}』`,
       onClick: () => {
         const rule = createExactPathFilter(node.relativePath)
         if (extensionFilter.includes(rule)) return

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { CompareEntry, FileEntry, SourceConfig } from '../../../shared/types'
 import Layout from '../components/Layout'
@@ -21,6 +21,16 @@ function createFileEntry(name: string, path: string): FileEntry {
   }
 }
 
+function createDirectoryEntry(name: string, path: string): FileEntry {
+  return {
+    name,
+    path,
+    isDirectory: true,
+    size: 0,
+    mtime: 1,
+  }
+}
+
 function createCompareEntry(relativePath: string): CompareEntry {
   return {
     relativePath,
@@ -29,7 +39,21 @@ function createCompareEntry(relativePath: string): CompareEntry {
     state: 'different',
     left: createFileEntry('app.ts', `/left/${relativePath}`),
     right: createFileEntry('app.ts', `/right/${relativePath}`),
-    reasons: ['size'],
+    reasons: [{ type: 'size', leftSize: 1, rightSize: 2 }],
+  }
+}
+
+function createCompareDirectory(relativePath: string, state: CompareEntry['state'] = 'equal'): CompareEntry {
+  const name = relativePath.split('/').at(-1) ?? relativePath
+
+  return {
+    relativePath,
+    name,
+    isDirectory: true,
+    state,
+    left: createDirectoryEntry(name, `/left/${relativePath}`),
+    right: createDirectoryEntry(name, `/right/${relativePath}`),
+    reasons: [],
   }
 }
 
@@ -192,5 +216,82 @@ describe('ComparePage renderer interactions', () => {
     expect(useCompareStore.getState().leftPath).toBe('/var/new-left')
     expect(useCompareStore.getState().done).toBe(false)
     expect(useCompareStore.getState().entries).toEqual([])
+  })
+
+  it('hides ignored exact-path entries from both split panes immediately', () => {
+    resetStores()
+    useCompareStore.setState({
+      entries: [
+        createCompareDirectory('config'),
+        createCompareEntry('config/app.php'),
+        createCompareEntry('readme.md'),
+      ],
+      extensionFilter: ['path:config'],
+      expandedDirs: new Set(['config']),
+    })
+
+    render(<ComparePage />)
+
+    expect(screen.queryByText('config')).toBeNull()
+    expect(screen.queryByText('app.php')).toBeNull()
+    expect(screen.getAllByText('readme.md')).toHaveLength(2)
+  })
+
+  it('shows exact path filters in the modal without the path prefix', async () => {
+    resetStores()
+    useCompareStore.setState({ extensionFilter: ['path:bootstrap', 'node_modules'] })
+
+    const user = userEvent.setup()
+    render(<ComparePage />)
+
+    await user.click(screen.getByRole('button', { name: '过滤 (2)' }))
+
+    expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).toBe('bootstrap\nnode_modules')
+  })
+
+  it('shows file and directory names in ignore context menus', async () => {
+    resetStores()
+    useCompareStore.setState({
+      viewMode: 'merged',
+      entries: [
+        createCompareDirectory('config'),
+        createCompareEntry('app.php'),
+      ],
+    })
+
+    render(<ComparePage />)
+
+    fireEvent.contextMenu(screen.getByText('config').closest('tr')!)
+    expect(await screen.findByRole('button', { name: '忽略目录：『config』' })).toBeTruthy()
+
+    fireEvent.contextMenu(screen.getByText('app.php').closest('tr')!)
+    expect(await screen.findByRole('button', { name: '忽略文件：『app.php』' })).toBeTruthy()
+  })
+
+  it('combines scanning and comparing into one header status and exposes the paired filter', () => {
+    resetStores()
+    useCompareStore.setState({ scanning: true, comparing: true, done: false })
+
+    render(<ComparePage />)
+
+    expect(screen.getByText('扫描并对比中…')).toBeTruthy()
+    expect(screen.queryByText('扫描中…')).toBeNull()
+    expect(screen.queryByText('对比中…')).toBeNull()
+    expect(screen.getByRole('button', { name: '双方' })).toBeTruthy()
+    expect(screen.getByText('不同 1')).toBeTruthy()
+  })
+
+  it('does not show the incomplete compare warning banner', () => {
+    resetStores()
+    useCompareStore.setState({
+      entries: [createCompareDirectory('bootstrap', 'pending')],
+      scanning: false,
+      comparing: false,
+      done: false,
+    })
+
+    render(<ComparePage />)
+
+    expect(screen.queryByText('当前结果未完成，需先重新对比后才能执行同步。')).toBeNull()
   })
 })

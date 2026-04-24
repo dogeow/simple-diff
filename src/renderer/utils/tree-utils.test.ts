@@ -143,6 +143,24 @@ describe('prepareCompareEntries', () => {
     ])
   })
 
+  it('supports filtering to entries that exist on both sides', () => {
+    const entries = [
+      createEntry('same.txt', 'equal'),
+      createEntry('changed.txt', 'different'),
+      createEntry('left-only.txt', 'left_only', { right: undefined }),
+      createEntry('right-only.txt', 'right_only', { left: undefined }),
+    ]
+
+    const result = prepareCompareEntries(entries, {
+      filter: 'paired',
+      pathFilter: [],
+      hideDot: false,
+      hideDotFilter: 'all',
+    })
+
+    expect(result.map((entry) => entry.relativePath)).toEqual(['same.txt', 'changed.txt'])
+  })
+
   it('treats common directories with one-sided descendants as different', () => {
     const entries = [
       createEntry('src', 'equal', { isDirectory: true }),

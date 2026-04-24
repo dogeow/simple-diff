@@ -111,37 +111,57 @@ function registerCompareHandlers(): void {
       const controller = new AbortController()
       setActiveCompare(event.sender, { compareId: request.compareId, controller })
 
-      compareLogger.info(`开始对比: 左=${request.left.type === 'sftp' ? 'SFTP' : '本地'}(${request.left.path}) 右=${request.right.type === 'sftp' ? 'SFTP' : '本地'}(${request.right.path})`)
+      let scanBatchCount = 0
+      let sentEntryUpdateCount = 0
 
-      compareLogger.info('正在创建左侧数据源...')
+      compareLogger.info(`[${request.compareId}] 开始对比: 左=${request.left.type === 'sftp' ? 'SFTP' : '本地'}(${request.left.path}) 右=${request.right.type === 'sftp' ? 'SFTP' : '本地'}(${request.right.path})`)
+
+      compareLogger.info(`[${request.compareId}] 正在创建左侧数据源...`)
       const leftSource = await createFileSource(request.left)
-      compareLogger.info('左侧数据源就绪')
+      compareLogger.info(`[${request.compareId}] 左侧数据源就绪`)
 
-      compareLogger.info('正在创建右侧数据源...')
+      compareLogger.info(`[${request.compareId}] 正在创建右侧数据源...`)
       const rightSource = await createFileSource(request.right)
-      compareLogger.info('右侧数据源就绪')
+      compareLogger.info(`[${request.compareId}] 右侧数据源就绪`)
 
       try {
-        compareLogger.info('开始逐层对比目录...')
+        compareLogger.info(`[${request.compareId}] 开始逐层对比目录...`)
         const result = await compareDirectories({
           leftSource,
           rightSource,
           leftRoot: request.left.path,
           rightRoot: request.right.path,
+          compareId: request.compareId,
           strategies: request.strategies,
           extensionFilter: request.extensionFilter,
           signal: controller.signal,
           onEntriesFound: (entries) => {
             if (controller.signal.aborted) return
-            safeSendToWebContents(event.sender, IPC_CHANNELS.COMPARE_SCAN_COMPLETE, request.compareId, entries)
+            scanBatchCount += 1
+            compareLogger.info(
+              `[${request.compareId}] 发送扫描批次 #${scanBatchCount}: entries=${entries.length} sample=${entries.slice(0, 3).map((entry) => entry.relativePath).join('、') || '.'}`,
+            )
+            const sent = safeSendToWebContents(event.sender, IPC_CHANNELS.COMPARE_SCAN_COMPLETE, request.compareId, entries)
+            if (!sent) {
+              compareLogger.warn(`[${request.compareId}] 发送扫描批次失败: 渲染进程不可用`)
+            }
           },
           onEntryUpdate: (entry) => {
             if (controller.signal.aborted) return
-            safeSendToWebContents(event.sender, IPC_CHANNELS.COMPARE_ENTRY_UPDATE, request.compareId, entry)
+            sentEntryUpdateCount += 1
+            if (sentEntryUpdateCount <= 10 || sentEntryUpdateCount % 200 === 0) {
+              compareLogger.info(
+                `[${request.compareId}] 发送条目更新 #${sentEntryUpdateCount}: path=${entry.relativePath || '.'} state=${entry.state}`,
+              )
+            }
+            const sent = safeSendToWebContents(event.sender, IPC_CHANNELS.COMPARE_ENTRY_UPDATE, request.compareId, entry)
+            if (!sent) {
+              compareLogger.warn(`[${request.compareId}] 发送条目更新失败: path=${entry.relativePath || '.'} 渲染进程不可用`)
+            }
           },
         })
 
-        compareLogger.info(`对比完成，耗时 ${formatDuration(result.duration)} — 相同:${result.stats.equal} 不同:${result.stats.different} 仅左:${result.stats.leftOnly} 仅右:${result.stats.rightOnly}`)
+        compareLogger.info(`[${request.compareId}] 对比完成，耗时 ${formatDuration(result.duration)} — 相同:${result.stats.equal} 不同:${result.stats.different} 仅左:${result.stats.leftOnly} 仅右:${result.stats.rightOnly}`)
 
         // Attach source info for history
         const enriched = { ...result, leftSource: request.left, rightSource: request.right }
@@ -149,10 +169,13 @@ function registerCompareHandlers(): void {
         return enriched
       } catch (error) {
         if (controller.signal.aborted) {
-          compareLogger.info('对比已取消')
+          compareLogger.info(`[${request.compareId}] 对比已取消`)
+        } else {
+          compareLogger.error(`[${request.compareId}] 对比异常: ${error instanceof Error ? error.message : error}`)
         }
         throw error
       } finally {
+        compareLogger.info(`[${request.compareId}] 释放对比资源，已发送扫描批次=${scanBatchCount} 条目更新=${sentEntryUpdateCount}`)
         await leftSource.dispose()
         await rightSource.dispose()
         clearActiveCompare(event.sender, request.compareId, controller)

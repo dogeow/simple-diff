@@ -84,6 +84,17 @@ function createCompareDirEntry(relativePath: string): CompareEntry {
   }
 }
 
+function createCompareFileEntry(relativePath: string): CompareEntry {
+  return {
+    relativePath,
+    name: relativePath.split('/').at(-1) ?? relativePath,
+    isDirectory: false,
+    state: 'left_only',
+    left: { name: relativePath, path: relativePath, isDirectory: false, size: 3, mtime: 1 },
+    reasons: [],
+  }
+}
+
 async function waitFor(condition: () => boolean, timeoutMs = 250): Promise<void> {
   const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
@@ -100,7 +111,7 @@ describe('SyncManager', () => {
     mocks.resetStore()
   })
 
-  it('expands missing directories and syncs nested files', async () => {
+  it('hydrates directory work upfront so total items stay fixed during sync', async () => {
     const leftSourceConfig: SourceConfig = { type: 'local', path: '/left' }
     const rightSourceConfig: SourceConfig = { type: 'local', path: '/right' }
 
@@ -124,18 +135,24 @@ describe('SyncManager', () => {
 
     const targetFs = createFileSourceMock()
 
-    mocks.createFileSource
-      .mockResolvedValueOnce(sourceFs)
-      .mockResolvedValueOnce(targetFs)
+    mocks.createFileSource.mockImplementation(async (config: SourceConfig) => (
+      config.path === '/left' ? sourceFs : targetFs
+    ))
 
     const { SyncManager } = await import('./sync-manager')
     const manager = new SyncManager()
 
-    await manager.start({
+    const snapshot = await manager.start({
       leftSource: leftSourceConfig,
       rightSource: rightSourceConfig,
       direction: 'left_to_right',
       entries: [createCompareDirEntry('books')],
+    })
+
+    expect(snapshot).toMatchObject({
+      status: 'running',
+      completedItems: 0,
+      totalItems: 4,
     })
 
     await waitFor(() => manager.getSnapshot()?.status === 'completed')
@@ -150,6 +167,108 @@ describe('SyncManager', () => {
       status: 'completed',
       completedItems: 4,
       totalItems: 4,
+    })
+  })
+
+  it('rehydrates paused directory tasks before resume so totals do not keep growing', async () => {
+    const leftSourceConfig: SourceConfig = { type: 'local', path: '/left' }
+    const rightSourceConfig: SourceConfig = { type: 'local', path: '/right' }
+
+    const sourceFs = createFileSourceMock({
+      list: vi.fn(async (dirPath: string) => {
+        if (dirPath === '/left/books') {
+          return [
+            createFileEntry('nested', true),
+            createFileEntry('top.txt', false),
+          ]
+        }
+        if (dirPath === '/left/books/nested') {
+          return [
+            createFileEntry('child.txt', false),
+          ]
+        }
+        return []
+      }),
+      readFileBuffer: vi.fn(async (filePath: string) => Buffer.from(`content:${filePath}`)),
+    })
+
+    const targetFs = createFileSourceMock()
+
+    mocks.createFileSource.mockImplementation(async (config: SourceConfig) => (
+      config.path === '/left' ? sourceFs : targetFs
+    ))
+
+    mocks.setSyncTask({
+      id: 'persisted-sync',
+      leftSource: leftSourceConfig,
+      rightSource: rightSourceConfig,
+      direction: 'left_to_right',
+      status: 'paused',
+      pendingItems: [{ relativePath: 'books', kind: 'directory' }],
+      pendingDirs: ['books'],
+      totalItems: 1,
+      completedItems: 0,
+      currentPath: null,
+      lastCompletedPath: null,
+      lastError: null,
+      createdAt: 1,
+      updatedAt: 1,
+    })
+
+    const { SyncManager } = await import('./sync-manager')
+    const manager = new SyncManager()
+
+    const snapshot = await manager.resume()
+
+    expect(snapshot).toMatchObject({
+      status: 'running',
+      completedItems: 0,
+      totalItems: 4,
+    })
+
+    await waitFor(() => manager.getSnapshot()?.status === 'completed')
+
+    expect(manager.getSnapshot()).toMatchObject({
+      status: 'completed',
+      completedItems: 4,
+      totalItems: 4,
+    })
+  })
+
+  it('does not persist every item while syncing large queues', async () => {
+    const leftSourceConfig: SourceConfig = { type: 'local', path: '/left' }
+    const rightSourceConfig: SourceConfig = { type: 'local', path: '/right' }
+    const entries = Array.from({ length: 100 }, (_unused, index) =>
+      createCompareFileEntry(`file-${index}.txt`),
+    )
+
+    const sourceFs = createFileSourceMock({
+      readFileBuffer: vi.fn(async (filePath: string) => Buffer.from(`content:${filePath}`)),
+    })
+    const targetFs = createFileSourceMock()
+
+    mocks.createFileSource.mockImplementation(async (config: SourceConfig) => (
+      config.path === '/left' ? sourceFs : targetFs
+    ))
+
+    const { SyncManager } = await import('./sync-manager')
+    const manager = new SyncManager()
+
+    await manager.start({
+      leftSource: leftSourceConfig,
+      rightSource: rightSourceConfig,
+      direction: 'left_to_right',
+      entries,
+    })
+
+    await waitFor(() => manager.getSnapshot()?.status === 'completed')
+
+    expect(targetFs.writeFileBuffer).toHaveBeenCalledTimes(entries.length)
+    expect(mocks.setSyncTask.mock.calls.length).toBeLessThan(10)
+    expect(manager.getSnapshot()).toMatchObject({
+      status: 'completed',
+      completedItems: entries.length,
+      totalItems: entries.length,
     })
   })
 })

@@ -6,6 +6,7 @@ import { useCompare } from '../hooks/useCompare'
 import { useAppStore } from '../stores/app-store'
 import { useSettingsStore } from '../stores/settings-store'
 import { openCompareTab, openSyncTaskView } from '../utils/compare-session-navigation'
+import { formatSyncProgress } from '../utils/format-sync-progress'
 import type { StrategyName } from '../../../shared/types'
 
 const STRATEGY_OPTIONS: { value: StrategyName; label: string }[] = [
@@ -130,11 +131,16 @@ export default function HomePage() {
             <div className="flex items-start justify-between gap-4 rounded border border-neutral-700 bg-neutral-800/70 px-4 py-3 text-sm">
               <div className="min-w-0 flex flex-1 flex-col gap-1">
                 <span className="text-neutral-200">
-                  有一个同步任务{syncTask.status === 'running' ? '正在执行' : syncTask.status === 'completed' ? '已完成' : '待继续'}
+                  有一个同步任务{syncTask.status === 'running' ? '正在执行' : syncTask.status === 'completed' ? '已完成' : syncTask.status === 'failed' ? '已失败' : '待继续'}
                 </span>
                 <span className="text-xs text-neutral-500">
-                  {syncTask.completedItems}/{syncTask.totalItems}
+                  {syncTask.completedItems}/{syncTask.totalItems} · {formatSyncProgress(syncTask.completedItems, syncTask.totalItems)}
                 </span>
+                {syncTask.lastError && (
+                  <span className="truncate text-xs text-red-400" title={syncTask.lastError}>
+                    {syncTask.lastError}
+                  </span>
+                )}
                 {syncTask.currentPath && (
                   <span className="truncate text-xs text-neutral-500" title={syncTask.currentPath}>
                     {syncTask.currentPath}

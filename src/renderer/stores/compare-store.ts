@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { joinSourcePath } from '@shared/source-path'
 import type {
+  CompareFilter,
   CompareEntry,
   CompareResult,
   CompareState,
@@ -34,7 +35,7 @@ export interface CompareSessionSnapshot {
   readonly leftSource: SourceConfig | null
   readonly rightSource: SourceConfig | null
   readonly loadingDirs: readonly string[]
-  readonly filter: CompareState | 'all'
+  readonly filter: CompareFilter
   readonly expandedDirs: readonly string[]
   readonly viewMode: ViewMode
   readonly activeCompareId: string | null
@@ -63,7 +64,7 @@ interface CompareStore {
   readonly rightSource: SourceConfig | null
   readonly loadingDirs: ReadonlySet<string>
 
-  readonly filter: CompareState | 'all'
+  readonly filter: CompareFilter
   readonly expandedDirs: ReadonlySet<string>
   readonly viewMode: ViewMode
   readonly activeCompareId: string | null
@@ -88,7 +89,7 @@ interface CompareStore {
   removeEntry: (relativePath: string) => void
   refreshDir: (relativePath: string) => Promise<void>
   setError: (error: string | null, compareId?: string) => void
-  setFilter: (filter: CompareState | 'all') => void
+  setFilter: (filter: CompareFilter) => void
   hydrateSourceInputs: (left: SourceConfig, right: SourceConfig) => void
   setSources: (left: SourceConfig, right: SourceConfig) => void
   setViewMode: (mode: ViewMode) => void
@@ -116,12 +117,36 @@ export function hasCompareSessionContent(snapshot: CompareSessionSnapshot): bool
 }
 
 export function sanitizePersistedCompareSessionSnapshot(snapshot: CompareSessionSnapshot): CompareSessionSnapshot {
-  return {
+  const sanitizedSnapshot = {
     ...snapshot,
     scanning: false,
     comparing: false,
     loadingDirs: [],
     activeCompareId: null,
+  }
+
+  return clearInactiveIncompleteSnapshot(sanitizedSnapshot)
+}
+
+function hasUnresolvedCompareEntries(entries: readonly CompareEntry[]): boolean {
+  return entries.some((entry) => entry.state === 'pending' || entry.state === 'comparing')
+}
+
+function clearInactiveIncompleteSnapshot(snapshot: CompareSessionSnapshot): CompareSessionSnapshot {
+  if (snapshot.done || snapshot.scanning || snapshot.comparing || snapshot.activeCompareId) {
+    return snapshot
+  }
+
+  if (!hasUnresolvedCompareEntries(snapshot.entries)) {
+    return snapshot
+  }
+
+  return {
+    ...snapshot,
+    entries: [],
+    duration: 0,
+    loadingDirs: [],
+    expandedDirs: [],
   }
 }
 
@@ -639,31 +664,32 @@ export const useCompareStore = create<CompareStore>((set, get) => ({
 
   restoreSnapshot: (snapshot) => {
     const { compareVersion } = get()
+    const restoredSnapshot = clearInactiveIncompleteSnapshot(snapshot)
 
     set({
-      leftPath: snapshot.leftPath,
-      rightPath: snapshot.rightPath,
-      leftSourceType: snapshot.leftSourceType,
-      rightSourceType: snapshot.rightSourceType,
-      leftSSHConfigId: snapshot.leftSSHConfigId,
-      rightSSHConfigId: snapshot.rightSSHConfigId,
-      strategies: [...snapshot.strategies],
-      extensionFilter: [...snapshot.extensionFilter],
-      hideDot: snapshot.hideDot,
-      hideDotFilter: snapshot.hideDotFilter,
-      entries: cloneEntries(snapshot.entries),
-      scanning: snapshot.scanning,
-      comparing: snapshot.comparing,
-      done: snapshot.done,
-      error: snapshot.error,
-      duration: snapshot.duration,
-      leftSource: snapshot.leftSource,
-      rightSource: snapshot.rightSource,
-      loadingDirs: new Set(snapshot.loadingDirs),
-      filter: snapshot.filter,
-      expandedDirs: new Set(snapshot.expandedDirs),
-      viewMode: snapshot.viewMode,
-      activeCompareId: snapshot.activeCompareId,
+      leftPath: restoredSnapshot.leftPath,
+      rightPath: restoredSnapshot.rightPath,
+      leftSourceType: restoredSnapshot.leftSourceType,
+      rightSourceType: restoredSnapshot.rightSourceType,
+      leftSSHConfigId: restoredSnapshot.leftSSHConfigId,
+      rightSSHConfigId: restoredSnapshot.rightSSHConfigId,
+      strategies: [...restoredSnapshot.strategies],
+      extensionFilter: [...restoredSnapshot.extensionFilter],
+      hideDot: restoredSnapshot.hideDot,
+      hideDotFilter: restoredSnapshot.hideDotFilter,
+      entries: cloneEntries(restoredSnapshot.entries),
+      scanning: restoredSnapshot.scanning,
+      comparing: restoredSnapshot.comparing,
+      done: restoredSnapshot.done,
+      error: restoredSnapshot.error,
+      duration: restoredSnapshot.duration,
+      leftSource: restoredSnapshot.leftSource,
+      rightSource: restoredSnapshot.rightSource,
+      loadingDirs: new Set(restoredSnapshot.loadingDirs),
+      filter: restoredSnapshot.filter,
+      expandedDirs: new Set(restoredSnapshot.expandedDirs),
+      viewMode: restoredSnapshot.viewMode,
+      activeCompareId: restoredSnapshot.activeCompareId,
       compareVersion: compareVersion + 1,
     })
   },

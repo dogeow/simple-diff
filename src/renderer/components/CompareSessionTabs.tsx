@@ -18,7 +18,7 @@ export default function CompareSessionTabs({
   onCloseCompareTab,
 }: CompareSessionTabsProps) {
   return (
-    <div className="flex min-w-0 items-center gap-1.5">
+    <div className="flex min-w-0 flex-1 items-center gap-1.5">
       <button
         onClick={onSelectNewCompare}
         className={`shrink-0 rounded px-3 py-1 text-xs font-medium transition-colors ${
@@ -30,7 +30,7 @@ export default function CompareSessionTabs({
         新建对比
       </button>
 
-      <div className="flex min-w-0 items-center gap-1 overflow-x-auto">
+      <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
         {compareTabs.map((tab) => {
           const isActive = !newCompareActive && activeCompareTabId === tab.id
 

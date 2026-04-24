@@ -205,6 +205,51 @@ describe('compare-store', () => {
     expect(currentState.activeCompareId).toBe('compare-saved')
   })
 
+  it('clears stale unresolved entries when restoring an inactive unfinished snapshot', () => {
+    const store = useCompareStore.getState()
+
+    store.restoreSnapshot({
+      leftPath: '/saved/left',
+      rightPath: '/saved/right',
+      leftSourceType: 'local',
+      rightSourceType: 'local',
+      leftSSHConfigId: '',
+      rightSSHConfigId: '',
+      strategies: ['size', 'mtime'],
+      extensionFilter: ['path:bootstrap'],
+      hideDot: true,
+      hideDotFilter: 'all',
+      entries: [
+        createCompareEntry('bootstrap', {
+          isDirectory: true,
+          state: 'pending',
+          left: createFileEntry('bootstrap', { path: 'bootstrap', isDirectory: true }),
+          right: createFileEntry('bootstrap', { path: 'bootstrap', isDirectory: true }),
+        }),
+        createCompareEntry('deploy.php', { state: 'different' }),
+      ],
+      scanning: false,
+      comparing: false,
+      done: false,
+      error: null,
+      duration: 123,
+      leftSource,
+      rightSource,
+      loadingDirs: [],
+      filter: 'all',
+      expandedDirs: ['bootstrap'],
+      viewMode: 'split',
+      activeCompareId: null,
+    })
+
+    const currentState = useCompareStore.getState()
+    expect(currentState.entries).toEqual([])
+    expect(currentState.duration).toBe(0)
+    expect(currentState.expandedDirs.size).toBe(0)
+    expect(currentState.done).toBe(false)
+    expect(currentState.extensionFilter).toEqual(['path:bootstrap'])
+  })
+
   it('treats home-page draft inputs as non-session state', () => {
     useCompareStore.setState({
       leftPath: '/draft/left',

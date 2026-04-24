@@ -1,5 +1,6 @@
-import type { CompareEntry, CompareState } from '../../../shared/types'
+import type { CompareEntry, CompareFilter } from '../../../shared/types'
 import StatusBadge from './StatusBadge'
+import { matchesCompareFilter } from '../utils/tree-utils'
 
 function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
@@ -22,12 +23,13 @@ function formatDate(ms: number): string {
 
 interface CompareTableProps {
   readonly entries: readonly CompareEntry[]
-  readonly filter: CompareState | 'all'
-  readonly onFilterChange: (filter: CompareState | 'all') => void
+  readonly filter: CompareFilter
+  readonly onFilterChange: (filter: CompareFilter) => void
 }
 
-const FILTERS: { value: CompareState | 'all'; label: string }[] = [
+const FILTERS: { value: CompareFilter; label: string }[] = [
   { value: 'all', label: '全部' },
+  { value: 'paired', label: '双方' },
   { value: 'different', label: '不同' },
   { value: 'left_only', label: '仅左' },
   { value: 'right_only', label: '仅右' },
@@ -35,7 +37,7 @@ const FILTERS: { value: CompareState | 'all'; label: string }[] = [
 ]
 
 export default function CompareTable({ entries, filter, onFilterChange }: CompareTableProps) {
-  const filtered = filter === 'all' ? entries : entries.filter((e) => e.state === filter)
+  const filtered = entries.filter((entry) => matchesCompareFilter(filter, entry))
 
   return (
     <div className="flex flex-col gap-3">

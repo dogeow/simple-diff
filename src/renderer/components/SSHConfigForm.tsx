@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useId, useState } from 'react'
 import type { SSHConfig, SSHConfigInput, SSHAuthType } from '../../../shared/types'
 
 interface SSHConfigFormProps {
@@ -8,10 +8,13 @@ interface SSHConfigFormProps {
 }
 
 export default function SSHConfigForm({ initial, onSave, onCancel }: SSHConfigFormProps) {
+  const portId = useId()
+  const authTypeId = useId()
+  const privateKeyPathId = useId()
   const [label, setLabel] = useState(initial?.label ?? '')
   const [host, setHost] = useState(initial?.host ?? '')
   const [port, setPort] = useState(initial?.port ?? 22)
-  const [username, setUsername] = useState(initial?.username ?? '')
+  const [username, setUsername] = useState(initial?.username || 'root')
   const [authType, setAuthType] = useState<SSHAuthType>(initial?.authType ?? 'password')
   const [password, setPassword] = useState('')
   const [privateKeyPath, setPrivateKeyPath] = useState('')
@@ -29,8 +32,12 @@ export default function SSHConfigForm({ initial, onSave, onCancel }: SSHConfigFo
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!label || !host || !username) {
-      setError('请填写标签、主机和用户名')
+    const trimmedHost = host.trim()
+    const resolvedLabel = label.trim() || trimmedHost
+    const resolvedUsername = username.trim() || 'root'
+
+    if (!trimmedHost) {
+      setError('请填写主机')
       return
     }
 
@@ -40,10 +47,10 @@ export default function SSHConfigForm({ initial, onSave, onCancel }: SSHConfigFo
     try {
       await onSave({
         id: initial?.id,
-        label,
-        host,
+        label: resolvedLabel,
+        host: trimmedHost,
         port,
-        username,
+        username: resolvedUsername,
         authType,
         defaultPath: defaultPath || undefined,
         password: authType === 'password' ? password : undefined,
@@ -63,8 +70,9 @@ export default function SSHConfigForm({ initial, onSave, onCancel }: SSHConfigFo
         <Field label="标签" value={label} onChange={setLabel} placeholder="My Server" />
         <Field label="主机" value={host} onChange={setHost} placeholder="192.168.1.100" />
         <div className="flex flex-col gap-1">
-          <label className="text-xs text-neutral-400">端口</label>
+          <label htmlFor={portId} className="text-xs text-neutral-400">端口</label>
           <input
+            id={portId}
             type="number"
             value={port}
             onChange={(e) => setPort(Number(e.target.value))}
@@ -75,8 +83,9 @@ export default function SSHConfigForm({ initial, onSave, onCancel }: SSHConfigFo
       </div>
 
       <div className="flex flex-col gap-1">
-        <label className="text-xs text-neutral-400">认证方式</label>
+        <label htmlFor={authTypeId} className="text-xs text-neutral-400">认证方式</label>
         <select
+          id={authTypeId}
           value={authType}
           onChange={(e) => setAuthType(e.target.value as SSHAuthType)}
           className="rounded border border-neutral-600 bg-neutral-800 px-2 py-1.5 text-sm text-neutral-100 outline-none focus:border-blue-500"
@@ -93,9 +102,10 @@ export default function SSHConfigForm({ initial, onSave, onCancel }: SSHConfigFo
       {authType === 'privateKey' && (
         <>
           <div className="flex flex-col gap-1">
-            <label className="text-xs text-neutral-400">私钥路径</label>
+            <label htmlFor={privateKeyPathId} className="text-xs text-neutral-400">私钥路径</label>
             <div className="flex gap-2">
               <input
+                id={privateKeyPathId}
                 type="text"
                 value={privateKeyPath}
                 onChange={(e) => setPrivateKeyPath(e.target.value)}
@@ -156,10 +166,13 @@ function Field({
   placeholder?: string
   type?: string
 }) {
+  const inputId = useId()
+
   return (
     <div className="flex flex-col gap-1">
-      <label className="text-xs text-neutral-400">{label}</label>
+      <label htmlFor={inputId} className="text-xs text-neutral-400">{label}</label>
       <input
+        id={inputId}
         type={type}
         value={value}
         onChange={(e) => onChange(e.target.value)}

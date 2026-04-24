@@ -18,6 +18,10 @@ const syncLogger = logger.child('sync')
 
 type Listener = (task: SyncTaskSnapshot | null) => void
 
+const SYNC_PROGRESS_NOTIFY_INTERVAL_MS = 250
+const SYNC_TASK_PERSIST_INTERVAL_MS = 5000
+const SYNC_LOG_INTERVAL_MS = 2000
+
 function now(): number {
   return Date.now()
 }
@@ -52,6 +56,13 @@ export class SyncManager {
   private task = getSyncTask()
   private listeners = new Set<Listener>()
   private loopPromise: Promise<void> | null = null
+  private activeSyncQueue: readonly SyncItem[] | null = null
+  private activeSyncIndex = 0
+  private progressTimer: ReturnType<typeof setTimeout> | null = null
+  private progressDirty = false
+  private lastProgressNotifyAt = 0
+  private lastTaskPersistAt = 0
+  private lastProgressLogAt = 0
 
   constructor() {
     if (this.task?.status === 'running') {
@@ -62,6 +73,7 @@ export class SyncManager {
         updatedAt: now(),
       }
       setSyncTask(this.task)
+      this.lastTaskPersistAt = now()
     }
   }
 
@@ -82,7 +94,7 @@ export class SyncManager {
     const seeded = seedSyncQueues(request.entries, request.direction)
     const timestamp = now()
 
-    this.task = {
+    const nextTask: PersistedSyncTask = {
       id: randomUUID(),
       leftSource: request.leftSource,
       rightSource: request.rightSource,
@@ -98,7 +110,20 @@ export class SyncManager {
       createdAt: timestamp,
       updatedAt: timestamp,
     }
-    this.persistAndNotify()
+
+    this.task = nextTask
+    this.commitTaskChange()
+
+    if (nextTask.status === 'running') {
+      try {
+        const hydratedTask = await this.hydrateTaskItems(nextTask)
+        this.task = this.mergeHydratedTask(nextTask.id, hydratedTask)
+      } catch (error) {
+        this.failTaskHydration(error)
+        throw error
+      }
+      this.commitTaskChange()
+    }
 
     syncLogger.info(`开始同步: ${request.direction === 'left_to_right' ? '左 -> 右' : '右 -> 左'}`)
 
@@ -118,7 +143,7 @@ export class SyncManager {
         currentPath: null,
         updatedAt: now(),
       }
-      this.persistAndNotify()
+      this.commitTaskChange()
     }
     return this.getSnapshot()
   }
@@ -126,14 +151,25 @@ export class SyncManager {
   async resume(): Promise<SyncTaskSnapshot | null> {
     if (!this.task) return null
     if (this.task.status === 'completed') return this.getSnapshot()
+    if (this.task.status === 'running') return this.getSnapshot()
 
-    this.task = {
+    const nextTask: PersistedSyncTask = {
       ...this.task,
       status: 'running',
       lastError: null,
       updatedAt: now(),
     }
-    this.persistAndNotify()
+    this.task = nextTask
+    this.commitTaskChange()
+
+    try {
+      const hydratedTask = await this.hydrateTaskItems(nextTask)
+      this.task = this.mergeHydratedTask(nextTask.id, hydratedTask)
+    } catch (error) {
+      this.failTaskHydration(error)
+      throw error
+    }
+    this.commitTaskChange()
     this.ensureLoop()
     return this.getSnapshot()
   }
@@ -143,7 +179,7 @@ export class SyncManager {
       throw new Error('同步进行中，无法清除任务')
     }
     this.task = null
-    this.persistAndNotify()
+    this.commitTaskChange()
   }
 
   private ensureLoop(): void {
@@ -160,25 +196,27 @@ export class SyncManager {
     const { source, target } = sourceRootForDirection(task.direction, task.leftSource, task.rightSource)
     const sourceFileSource = await createFileSource(source)
     const targetFileSource = await createFileSource(target)
+    this.activeSyncQueue = task.pendingItems
+    this.activeSyncIndex = 0
 
     try {
       while (this.task && this.task.status === 'running') {
         const currentTask = this.task
+        const item = this.activeSyncQueue[this.activeSyncIndex]
 
-        if (currentTask.pendingItems.length > 0) {
-          const [item, ...remainingItems] = currentTask.pendingItems
+        if (item) {
           this.task = {
             ...currentTask,
-            pendingItems: remainingItems,
             currentPath: item.relativePath,
             updatedAt: now(),
           }
-          this.persistAndNotify()
+          this.publishProgress()
 
           await this.executeItem(item, source, target, sourceFileSource, targetFileSource)
 
           const nextTask = this.task
           if (!nextTask) break
+          this.activeSyncIndex += 1
           this.task = {
             ...nextTask,
             completedItems: nextTask.completedItems + 1,
@@ -186,36 +224,29 @@ export class SyncManager {
             lastCompletedPath: item.relativePath,
             updatedAt: now(),
           }
-          this.persistAndNotify()
-          continue
-        }
-
-        if (currentTask.pendingDirs.length > 0) {
-          const [dirPath, ...remainingDirs] = currentTask.pendingDirs
-          this.task = {
-            ...currentTask,
-            pendingDirs: remainingDirs,
-            currentPath: dirPath,
-            updatedAt: now(),
+          this.maybeLogSyncProgress(item)
+          if (this.task.status === 'running') {
+            this.publishProgress()
+          } else {
+            this.commitTaskChange()
           }
-          this.persistAndNotify()
-
-          await this.expandDirectory(dirPath, source, sourceFileSource)
           continue
         }
 
         break
       }
 
-      if (this.task && this.task.pendingItems.length === 0 && this.task.pendingDirs.length === 0) {
+      const queueDrained = !this.activeSyncQueue || this.activeSyncIndex >= this.activeSyncQueue.length
+      if (this.task && queueDrained && this.task.pendingDirs.length === 0) {
         this.task = {
           ...this.task,
           status: 'completed',
+          pendingItems: [],
           currentPath: null,
           updatedAt: now(),
         }
         syncLogger.info('同步完成')
-        this.persistAndNotify()
+        this.commitTaskChange()
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : '同步失败'
@@ -228,40 +259,91 @@ export class SyncManager {
           lastError: message,
           updatedAt: now(),
         }
-        this.persistAndNotify()
+        this.commitTaskChange()
       }
     } finally {
       await sourceFileSource.dispose()
       await targetFileSource.dispose()
+      this.activeSyncQueue = null
+      this.activeSyncIndex = 0
     }
   }
 
-  private async expandDirectory(
-    dirPath: string,
+  private async hydrateTaskItems(task: PersistedSyncTask): Promise<PersistedSyncTask> {
+    if (task.pendingDirs.length === 0) return task
+
+    const { source } = sourceRootForDirection(task.direction, task.leftSource, task.rightSource)
+    const sourceFileSource = await createFileSource(source)
+
+    try {
+      const pendingItems = await this.collectPendingItems(task.pendingItems, source, sourceFileSource)
+
+      return {
+        ...task,
+        pendingItems,
+        pendingDirs: [],
+        totalItems: task.completedItems + pendingItems.length,
+        updatedAt: now(),
+      }
+    } finally {
+      await sourceFileSource.dispose()
+    }
+  }
+
+  private async collectPendingItems(
+    items: readonly SyncItem[],
     source: SourceConfig,
     sourceFileSource: Awaited<ReturnType<typeof createFileSource>>,
-  ): Promise<void> {
-    syncLogger.info(`正在扫描同步目录: ${dirPath}`)
-    const fullPath = joinSourcePath(source, source.path, dirPath)
-    const children = await sourceFileSource.list(fullPath)
-    const expanded = expandDirectoryEntries(
-      dirPath,
-      children.map((child) => ({ name: child.name, isDirectory: child.isDirectory })),
-      source.type,
-    )
+  ): Promise<readonly SyncItem[]> {
+    const collected: SyncItem[] = []
 
-    const task = this.task
-    if (!task) return
+    for (const item of items) {
+      collected.push(item)
 
+      if (item.kind !== 'directory') continue
+
+      this.maybeLogHydrationProgress(item.relativePath)
+      const fullPath = joinSourcePath(source, source.path, item.relativePath)
+      const children = await sourceFileSource.list(fullPath)
+      const expanded = expandDirectoryEntries(
+        item.relativePath,
+        children.map((child) => ({ name: child.name, isDirectory: child.isDirectory })),
+        source.type,
+      )
+      const nestedItems = await this.collectPendingItems(expanded.pendingItems, source, sourceFileSource)
+      collected.push(...nestedItems)
+    }
+
+    return collected
+  }
+
+  private failTaskHydration(error: unknown): void {
+    if (!this.task) return
+
+    const message = error instanceof Error ? error.message : '同步失败'
+    syncLogger.error(`同步预处理失败: ${message}`)
     this.task = {
-      ...task,
-      pendingItems: [...expanded.pendingItems, ...task.pendingItems],
-      pendingDirs: [...expanded.pendingDirs, ...task.pendingDirs.filter((pendingDir) => pendingDir !== dirPath)],
-      totalItems: task.totalItems + expanded.totalItems,
+      ...this.task,
+      status: this.task.status === 'paused' ? 'paused' : 'failed',
       currentPath: null,
+      lastError: message,
       updatedAt: now(),
     }
-    this.persistAndNotify()
+    this.commitTaskChange()
+  }
+
+  private mergeHydratedTask(taskId: string, hydratedTask: PersistedSyncTask): PersistedSyncTask {
+    if (!this.task || this.task.id !== taskId) {
+      return hydratedTask
+    }
+
+    return {
+      ...this.task,
+      pendingItems: hydratedTask.pendingItems,
+      pendingDirs: hydratedTask.pendingDirs,
+      totalItems: hydratedTask.totalItems,
+      updatedAt: hydratedTask.updatedAt,
+    }
   }
 
   private async executeItem(
@@ -276,23 +358,102 @@ export class SyncManager {
 
     if (item.kind === 'directory') {
       await targetFileSource.ensureDir(targetPath)
-      syncLogger.info(`同步目录: ${item.relativePath}`)
-      await this.expandDirectory(item.relativePath, source, sourceFileSource)
       return
     }
 
     await targetFileSource.ensureDir(getParentDir(target, targetPath))
     const content = await sourceFileSource.readFileBuffer(sourcePath)
     await targetFileSource.writeFileBuffer(targetPath, content)
-    syncLogger.info(`同步文件: ${item.relativePath}`)
   }
 
-  private persistAndNotify(): void {
-    setSyncTask(this.task)
+  private maybeLogHydrationProgress(relativePath: string): void {
+    const timestamp = now()
+    if (timestamp - this.lastProgressLogAt < SYNC_LOG_INTERVAL_MS) return
+
+    this.lastProgressLogAt = timestamp
+    syncLogger.info(`正在预计算同步目录: ${relativePath}`)
+  }
+
+  private maybeLogSyncProgress(item: SyncItem): void {
+    if (!this.task) return
+
+    const timestamp = now()
+    const isComplete = this.task.completedItems >= this.task.totalItems
+    if (!isComplete && timestamp - this.lastProgressLogAt < SYNC_LOG_INTERVAL_MS) return
+
+    this.lastProgressLogAt = timestamp
+    const itemLabel = item.kind === 'directory' ? '目录' : '文件'
+    syncLogger.info(`同步进度: ${this.task.completedItems}/${this.task.totalItems}，最近完成${itemLabel}: ${item.relativePath}`)
+  }
+
+  private getPersistableTask(): PersistedSyncTask | null {
+    if (!this.task) return null
+    if (!this.activeSyncQueue) return this.task
+
+    return {
+      ...this.task,
+      pendingItems: this.activeSyncQueue.slice(this.activeSyncIndex),
+    }
+  }
+
+  private commitTaskChange(): void {
+    this.flushProgress({ persist: true, notify: true, clearTimer: true })
+  }
+
+  private publishProgress(): void {
+    this.progressDirty = true
+
+    const timestamp = now()
+    const notifyDelay = SYNC_PROGRESS_NOTIFY_INTERVAL_MS - (timestamp - this.lastProgressNotifyAt)
+    if (notifyDelay <= 0) {
+      this.flushProgress({
+        persist: timestamp - this.lastTaskPersistAt >= SYNC_TASK_PERSIST_INTERVAL_MS,
+        notify: true,
+        clearTimer: true,
+      })
+      return
+    }
+
+    if (this.progressTimer) return
+
+    this.progressTimer = setTimeout(() => {
+      this.progressTimer = null
+      if (!this.progressDirty) return
+
+      const nextTimestamp = now()
+      this.flushProgress({
+        persist: nextTimestamp - this.lastTaskPersistAt >= SYNC_TASK_PERSIST_INTERVAL_MS,
+        notify: true,
+        clearTimer: false,
+      })
+    }, notifyDelay)
+  }
+
+  private flushProgress(options: {
+    readonly persist: boolean
+    readonly notify: boolean
+    readonly clearTimer: boolean
+  }): void {
+    if (options.clearTimer && this.progressTimer) {
+      clearTimeout(this.progressTimer)
+      this.progressTimer = null
+    }
+
+    const timestamp = now()
+    if (options.persist) {
+      this.task = this.getPersistableTask()
+      setSyncTask(this.task)
+      this.lastTaskPersistAt = timestamp
+    }
+
+    if (!options.notify) return
+
     const snapshot = this.task ? toSnapshot(this.task) : null
     for (const listener of this.listeners) {
       listener(snapshot)
     }
+    this.lastProgressNotifyAt = timestamp
+    this.progressDirty = false
   }
 }
 

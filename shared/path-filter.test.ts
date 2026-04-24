@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { createExactPathFilter, matchesPathFilter, mergePathFilters } from './path-filter'
+import {
+  createExactPathFilter,
+  formatPathFiltersForDisplay,
+  matchesPathFilter,
+  mergeDisplayedPathFilters,
+  mergePathFilters,
+} from './path-filter'
 
 describe('matchesPathFilter', () => {
   it('matches path segments for plain filter values', () => {
@@ -29,5 +35,21 @@ describe('matchesPathFilter', () => {
       [' node_modules ', 'path:/Config', 'dist'],
       ['NODE_MODULES', 'path:/Config', 'path:/config', ''],
     )).toEqual(['node_modules', 'path:Config', 'dist', 'path:config'])
+  })
+
+  it('formats exact path rules for display without the path prefix', () => {
+    expect(formatPathFiltersForDisplay([
+      ' node_modules ',
+      'path:/config',
+      'path:/src/generated',
+      '',
+    ])).toEqual(['node_modules', 'config', 'src/generated'])
+  })
+
+  it('restores unchanged displayed exact path rules back to exact filters', () => {
+    expect(mergeDisplayedPathFilters(
+      ['config', 'src/generated', 'node_modules'],
+      ['path:config', 'path:src/generated', 'node_modules'],
+    )).toEqual(['path:config', 'path:src/generated', 'node_modules'])
   })
 })
