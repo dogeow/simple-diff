@@ -112,6 +112,7 @@ export class LocalSource implements FileSource {
     try {
       entries = await readdir(currentPath, { withFileTypes: true, encoding: 'utf8' })
     } catch (err) {
+      const rel = relative(rootPath, currentPath) || '.'
       logger.warn(`[本地] 无法读取目录: ${rel} - ${err instanceof Error ? err.message : err}`)
       return // skip unreadable directories
     }
