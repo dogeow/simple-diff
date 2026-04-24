@@ -47,7 +47,7 @@ function resetCompareStore(): void {
     rightSSHConfigId: '',
     strategies: ['size', 'mtime'],
     extensionFilter: ['node_modules', '.git', 'dist'],
-    hideDot: true,
+    hideDot: false,
     hideDotFilter: 'all',
   })
 }
@@ -122,6 +122,10 @@ describe('compare-store', () => {
     expect(state.rightPath).toBe('/local/right')
   })
 
+  it('does not hide dot entries by default', () => {
+    expect(useCompareStore.getState().hideDot).toBe(false)
+  })
+
   it('hydrates source inputs without replacing the active compare sources', () => {
     const store = useCompareStore.getState()
 
@@ -162,6 +166,7 @@ describe('compare-store', () => {
       entries: [createCompareEntry('config/app.php', { state: 'different' })],
       scanning: false,
       comparing: false,
+      paused: false,
       done: true,
       error: null,
       duration: 99,
@@ -230,6 +235,7 @@ describe('compare-store', () => {
       ],
       scanning: false,
       comparing: false,
+      paused: false,
       done: false,
       error: null,
       duration: 123,

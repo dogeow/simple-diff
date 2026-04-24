@@ -38,7 +38,7 @@ export default function CompareTree({ entries, filter, onFilterChange, onDoubleC
   const setStrategies = useCompareStore((s) => s.setStrategies)
   const clearDiffTabs = useAppStore((s) => s.clearDiffTabs)
   const setActiveDiffTab = useAppStore((s) => s.setActiveDiffTab)
-  const { loading, runCompare } = useCompare()
+  const { loading, paused, pauseCompare, resumeCompare, restartCompare } = useCompare()
 
   const allDirCount = useMemo(() => entries.filter((e) => e.isDirectory).length, [entries])
   const allExpanded = allDirCount > 0 && expandedDirs.size >= allDirCount
@@ -108,7 +108,7 @@ export default function CompareTree({ entries, filter, onFilterChange, onDoubleC
     setStrategies(nextStrategies)
   }, [setStrategies, strategies])
 
-  const handleRerunCompare = useCallback(async () => {
+  const handleRestartCompare = useCallback(async () => {
     if (onRerunCompare) {
       await onRerunCompare()
       return
@@ -116,8 +116,18 @@ export default function CompareTree({ entries, filter, onFilterChange, onDoubleC
 
     clearDiffTabs()
     setActiveDiffTab(null)
-    await runCompare()
-  }, [clearDiffTabs, onRerunCompare, runCompare, setActiveDiffTab])
+    await restartCompare()
+  }, [clearDiffTabs, onRerunCompare, restartCompare, setActiveDiffTab])
+
+  const handlePauseCompare = useCallback(async () => {
+    await pauseCompare()
+  }, [pauseCompare])
+
+  const handleResumeCompare = useCallback(async () => {
+    clearDiffTabs()
+    setActiveDiffTab(null)
+    await resumeCompare()
+  }, [clearDiffTabs, resumeCompare, setActiveDiffTab])
 
   const handleExtensionFilterChange = useCallback(async (nextFilters: readonly string[]) => {
     if (onExtensionFilterChange) {
@@ -177,9 +187,12 @@ export default function CompareTree({ entries, filter, onFilterChange, onDoubleC
         hideDotFilter={hideDotFilter}
         setHideDotFilter={setHideDotFilter}
         compareLoading={loading}
+        comparePaused={paused}
         compareDone={compareDone}
         hasComparedResult={hasComparedResult}
-        onRerunCompare={handleRerunCompare}
+        onPauseCompare={handlePauseCompare}
+        onResumeCompare={handleResumeCompare}
+        onRestartCompare={handleRestartCompare}
         hasGlobalSyncTask={syncTask !== null}
         syncTask={visibleSyncTask}
         onStartSync={handleStartSync}

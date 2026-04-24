@@ -29,6 +29,7 @@ export interface CompareSessionSnapshot {
   readonly entries: readonly CompareEntry[]
   readonly scanning: boolean
   readonly comparing: boolean
+  readonly paused: boolean
   readonly done: boolean
   readonly error: string | null
   readonly duration: number
@@ -57,6 +58,7 @@ interface CompareStore {
   readonly entries: readonly CompareEntry[]
   readonly scanning: boolean
   readonly comparing: boolean
+  readonly paused: boolean
   readonly done: boolean
   readonly error: string | null
   readonly duration: number
@@ -86,6 +88,7 @@ interface CompareStore {
   setScanEntries: (compareId: string, entries: readonly CompareEntry[]) => void
   updateEntry: (compareId: string, entry: CompareEntry) => void
   finishCompare: (compareId: string, result: CompareResult) => void
+  pauseCompare: (compareId?: string) => void
   removeEntry: (relativePath: string) => void
   refreshDir: (relativePath: string) => Promise<void>
   setError: (error: string | null, compareId?: string) => void
@@ -111,6 +114,7 @@ export function hasCompareSessionContent(snapshot: CompareSessionSnapshot): bool
     || snapshot.entries.length > 0
     || snapshot.scanning
     || snapshot.comparing
+    || snapshot.paused
     || snapshot.done
     || snapshot.error,
   )
@@ -133,7 +137,7 @@ function hasUnresolvedCompareEntries(entries: readonly CompareEntry[]): boolean 
 }
 
 function clearInactiveIncompleteSnapshot(snapshot: CompareSessionSnapshot): CompareSessionSnapshot {
-  if (snapshot.done || snapshot.scanning || snapshot.comparing || snapshot.activeCompareId) {
+  if (snapshot.done || snapshot.scanning || snapshot.comparing || snapshot.paused || snapshot.activeCompareId) {
     return snapshot
   }
 
@@ -162,6 +166,7 @@ export function applyScanEntriesToSnapshot(
     entries: upsertEntries(snapshot.entries, entries),
     scanning: true,
     comparing: true,
+    paused: false,
     done: false,
     error: null,
   }
@@ -179,8 +184,40 @@ export function applyEntryUpdateToSnapshot(
     entries: upsertEntries(snapshot.entries, [entry]),
     scanning: true,
     comparing: true,
+    paused: false,
     done: false,
     error: null,
+  }
+}
+
+export function applyPauseCompareToSnapshot(
+  snapshot: CompareSessionSnapshot,
+  compareId: string,
+): CompareSessionSnapshot {
+  if (snapshot.activeCompareId !== compareId) return snapshot
+
+  return {
+    ...snapshot,
+    scanning: false,
+    comparing: false,
+    paused: true,
+    done: false,
+    error: null,
+    loadingDirs: [],
+    activeCompareId: null,
+  }
+}
+
+export function applyPausedCompareErrorToSnapshot(
+  snapshot: CompareSessionSnapshot,
+  error: string | null,
+): CompareSessionSnapshot {
+  if (!snapshot.paused || snapshot.activeCompareId !== null) return snapshot
+
+  return {
+    ...snapshot,
+    paused: false,
+    error,
   }
 }
 
@@ -196,6 +233,7 @@ export function applyFinishCompareToSnapshot(
     entries: upsertEntries([], result.entries),
     scanning: false,
     comparing: false,
+    paused: false,
     done: true,
     error: null,
     duration: result.duration,
@@ -215,6 +253,7 @@ export function applyCompareErrorToSnapshot(
     ...snapshot,
     scanning: false,
     comparing: false,
+    paused: false,
     error,
     loadingDirs: [],
     activeCompareId: null,
@@ -236,6 +275,7 @@ const compareInitial = {
   entries: [] as readonly CompareEntry[],
   scanning: false,
   comparing: false,
+  paused: false,
   done: false,
   error: null as string | null,
   duration: 0,
@@ -258,7 +298,7 @@ const initialState = {
   rightSSHConfigId: '',
   strategies: ['size', 'mtime'] as readonly StrategyName[],
   extensionFilter: ['node_modules', '.git', 'dist'] as readonly string[],
-  hideDot: true,
+  hideDot: false,
   hideDotFilter: 'all' as HideDotFilter,
   compareVersion: 0,
   ...compareInitial,
@@ -359,6 +399,7 @@ function createCompareSessionSnapshot(state: CompareStore): CompareSessionSnapsh
     entries: cloneEntries(state.entries),
     scanning: state.scanning,
     comparing: state.comparing,
+    paused: state.paused,
     done: state.done,
     error: state.error,
     duration: state.duration,
@@ -482,6 +523,7 @@ export const useCompareStore = create<CompareStore>((set, get) => ({
     rightSource: options?.preserveEntries ? state.rightSource : compareInitial.rightSource,
     activeCompareId,
     scanning: true,
+    paused: false,
     compareVersion: state.compareVersion + 1,
   })),
 
@@ -491,12 +533,13 @@ export const useCompareStore = create<CompareStore>((set, get) => ({
       entries: upsertEntries(state.entries, newEntries),
       scanning: true,
       comparing: true,
+      paused: false,
     }))
   },
 
   updateEntry: (compareId, entry) => {
     if (get().activeCompareId !== compareId) return
-    set((state) => ({ entries: upsertEntries(state.entries, [entry]) }))
+    set((state) => ({ entries: upsertEntries(state.entries, [entry]), paused: false }))
   },
 
   finishCompare: (compareId, result) => {
@@ -505,9 +548,23 @@ export const useCompareStore = create<CompareStore>((set, get) => ({
       entries: upsertEntries([], result.entries),
       scanning: false,
       comparing: false,
+      paused: false,
       done: true,
       error: null,
       duration: result.duration,
+      loadingDirs: new Set(),
+      activeCompareId: null,
+    })
+  },
+
+  pauseCompare: (compareId) => {
+    if (compareId && get().activeCompareId !== compareId) return
+    set({
+      scanning: false,
+      comparing: false,
+      paused: true,
+      done: false,
+      error: null,
       loadingDirs: new Set(),
       activeCompareId: null,
     })
@@ -555,7 +612,7 @@ export const useCompareStore = create<CompareStore>((set, get) => ({
 
   setError: (error, compareId) => {
     if (compareId && get().activeCompareId !== compareId) return
-    set({ error, scanning: false, comparing: false, loadingDirs: new Set(), activeCompareId: null })
+    set({ error, scanning: false, comparing: false, paused: false, loadingDirs: new Set(), activeCompareId: null })
   },
   setFilter: (filter) => set({ filter }),
 
@@ -680,6 +737,7 @@ export const useCompareStore = create<CompareStore>((set, get) => ({
       entries: cloneEntries(restoredSnapshot.entries),
       scanning: restoredSnapshot.scanning,
       comparing: restoredSnapshot.comparing,
+      paused: restoredSnapshot.paused,
       done: restoredSnapshot.done,
       error: restoredSnapshot.error,
       duration: restoredSnapshot.duration,

@@ -1,4 +1,35 @@
-import type { CompareState } from '../../../shared/types'
+import type { CompareEntry, CompareState } from '../../../shared/types'
+
+const UNRESOLVED_COMPARE_STATES = new Set<CompareState>(['pending', 'comparing'])
+
+function addAncestorPaths(paths: Set<string>, relativePath: string): void {
+  const segments = relativePath.split('/')
+  for (let index = 1; index < segments.length; index += 1) {
+    paths.add(segments.slice(0, index).join('/'))
+  }
+}
+
+export function collectBusyDirectoryPaths(
+  entries: readonly Pick<CompareEntry, 'relativePath' | 'isDirectory' | 'state'>[],
+  loadingDirs: ReadonlySet<string>,
+): ReadonlySet<string> {
+  const busyPaths = new Set<string>(loadingDirs)
+
+  for (const path of loadingDirs) {
+    addAncestorPaths(busyPaths, path)
+  }
+
+  for (const entry of entries) {
+    if (!UNRESOLVED_COMPARE_STATES.has(entry.state)) continue
+
+    if (entry.isDirectory) {
+      busyPaths.add(entry.relativePath)
+    }
+    addAncestorPaths(busyPaths, entry.relativePath)
+  }
+
+  return busyPaths
+}
 
 export function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`

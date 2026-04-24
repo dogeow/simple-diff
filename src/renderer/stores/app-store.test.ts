@@ -47,6 +47,7 @@ function createCompareSnapshot(overrides: Partial<CompareSessionSnapshot> = {}):
     entries: [],
     scanning: false,
     comparing: false,
+    paused: false,
     done: true,
     error: null,
     duration: 123,

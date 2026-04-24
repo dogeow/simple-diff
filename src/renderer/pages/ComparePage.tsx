@@ -23,6 +23,7 @@ export default function ComparePage() {
   const entries = useCompareStore((s) => s.entries)
   const scanning = useCompareStore((s) => s.scanning)
   const comparing = useCompareStore((s) => s.comparing)
+  const paused = useCompareStore((s) => s.paused)
   const done = useCompareStore((s) => s.done)
   const duration = useCompareStore((s) => s.duration)
   const leftSource = useCompareStore((s) => s.leftSource)
@@ -37,7 +38,7 @@ export default function ComparePage() {
   const compareTabs = useAppStore((s) => s.compareTabs)
   const activeCompareTabId = useAppStore((s) => s.activeCompareTabId)
   const { addDiffTab, closeDiffTab, setActiveDiffTab, updateDiffTab, replaceDiffTabs, saveCompareTab, closeCompareTab, setActiveCompareTab, clearDiffTabs } = useAppStore()
-  const { runCompare } = useCompare()
+  const { restartCompare } = useCompare()
 
   const activeTab = diffTabs.find((t) => t.id === activeDiffTabId) ?? null
   const emptyStateMessage = scanning ? '正在扫描目录，等待首批目录…' : '无匹配项'
@@ -47,11 +48,13 @@ export default function ComparePage() {
       ? '扫描中…'
       : comparing
         ? '对比中…'
+        : paused
+          ? '已暂停'
         : null
 
   const handleRerunCompare = useCallback(async () => {
-    await runCompare({ reuseActiveSession: true })
-  }, [runCompare])
+    await restartCompare()
+  }, [restartCompare])
 
   const handleExtensionFilterChange = useCallback(async (nextFilters: readonly string[]) => {
     useCompareStore.getState().setExtensionFilter(nextFilters)
@@ -218,12 +221,13 @@ export default function ComparePage() {
         {/* Status indicator */}
         {(activeStatusLabel || done) && (
           <div className="shrink-0 flex items-center gap-3 text-xs text-neutral-400">
-            {activeStatusLabel && (
+            {activeStatusLabel && !paused && (
               <span className="flex items-center gap-1.5 text-blue-400">
                 <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" />
                 {activeStatusLabel}
               </span>
             )}
+            {activeStatusLabel && paused && <span className="text-amber-400">Ⅱ {activeStatusLabel}</span>}
             {!activeStatusLabel && done && <span className="text-green-400">✓ 完成 {formatDuration(duration)}</span>}
           </div>
         )}

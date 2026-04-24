@@ -40,9 +40,12 @@ interface CompareToolbarProps {
   readonly hideDotFilter: HideDotFilter
   readonly setHideDotFilter: (v: HideDotFilter) => void
   readonly compareLoading: boolean
+  readonly comparePaused: boolean
   readonly compareDone: boolean
   readonly hasComparedResult: boolean
-  readonly onRerunCompare: () => void
+  readonly onPauseCompare: () => void | Promise<void>
+  readonly onResumeCompare: () => void | Promise<void>
+  readonly onRestartCompare: () => void | Promise<void>
   readonly hasGlobalSyncTask: boolean
   readonly syncTask: SyncTaskSnapshot | null
   readonly onStartSync: (direction: 'left_to_right' | 'right_to_left') => void
@@ -70,9 +73,12 @@ export default function CompareToolbar({
   hideDotFilter,
   setHideDotFilter,
   compareLoading,
+  comparePaused,
   compareDone,
   hasComparedResult,
-  onRerunCompare,
+  onPauseCompare,
+  onResumeCompare,
+  onRestartCompare,
   hasGlobalSyncTask,
   syncTask,
   onStartSync,
@@ -95,9 +101,7 @@ export default function CompareToolbar({
   }, [dotDropOpen])
 
   const compactButtonBaseClass = 'h-7 rounded px-2 text-[11px] font-medium leading-none transition-colors'
-  const compareActionLabel = compareLoading
-    ? (hasComparedResult ? '重新对比中…' : '首次对比中…')
-    : (hasComparedResult ? '重新对比' : '首次对比')
+  const compareActionLabel = hasComparedResult ? '重启对比' : '首次对比'
 
   const viewModeBtn = (mode: ViewMode, label: string) => (
     <button
@@ -246,13 +250,48 @@ export default function CompareToolbar({
 
         <FilterModal extensionFilter={extensionFilter} onChange={setExtensionFilter} />
 
-        <button
-          onClick={onRerunCompare}
-          disabled={compareLoading || strategies.length === 0}
-          className="h-7 rounded bg-blue-600 px-2.5 text-[11px] font-medium leading-none text-white transition-colors hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {compareActionLabel}
-        </button>
+        {compareLoading ? (
+          <>
+            <button
+              onClick={onPauseCompare}
+              className="h-7 rounded bg-amber-600 px-2.5 text-[11px] font-medium leading-none text-white transition-colors hover:bg-amber-500"
+            >
+              暂停对比
+            </button>
+            <button
+              onClick={onRestartCompare}
+              disabled={strategies.length === 0}
+              className="h-7 rounded bg-blue-600 px-2.5 text-[11px] font-medium leading-none text-white transition-colors hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              重启对比
+            </button>
+          </>
+        ) : comparePaused ? (
+          <>
+            <button
+              onClick={onResumeCompare}
+              disabled={strategies.length === 0}
+              className="h-7 rounded bg-emerald-600 px-2.5 text-[11px] font-medium leading-none text-white transition-colors hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              继续对比
+            </button>
+            <button
+              onClick={onRestartCompare}
+              disabled={strategies.length === 0}
+              className="h-7 rounded bg-blue-600 px-2.5 text-[11px] font-medium leading-none text-white transition-colors hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              重启对比
+            </button>
+          </>
+        ) : (
+          <button
+            onClick={onRestartCompare}
+            disabled={strategies.length === 0}
+            className="h-7 rounded bg-blue-600 px-2.5 text-[11px] font-medium leading-none text-white transition-colors hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {compareActionLabel}
+          </button>
+        )}
 
         <div className="relative flex items-center" ref={dotDropRef}>
           <button

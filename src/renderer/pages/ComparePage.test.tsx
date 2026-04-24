@@ -75,6 +75,7 @@ function createSnapshot(overrides: Partial<CompareSessionSnapshot> = {}): Compar
     entries: [createCompareEntry('src/app.ts')],
     scanning: false,
     comparing: false,
+    paused: false,
     done: true,
     error: null,
     duration: 123,
@@ -109,11 +110,12 @@ function resetStores(compareTabs: readonly CompareTab[] = []): void {
     rightSSHConfigId: '',
     strategies: ['size', 'mtime'],
     extensionFilter: ['node_modules'],
-    hideDot: true,
+    hideDot: false,
     hideDotFilter: 'all',
     entries: [createCompareEntry('src/app.ts')],
     scanning: false,
     comparing: false,
+    paused: false,
     done: true,
     error: null,
     duration: 123,
@@ -132,10 +134,27 @@ function resetStores(compareTabs: readonly CompareTab[] = []): void {
   useSettingsStore.setState({ globalPathFilters: [] })
 }
 
-function installApiMock() {
+function installApiMock(overrides: Partial<Window['api']> = {}) {
   const api = {
     onLog: vi.fn(() => () => undefined),
+    runCompare: vi.fn(async () => ({
+      success: true,
+      data: {
+        entries: [createCompareEntry('src/app.ts')],
+        stats: { total: 1, equal: 0, different: 1, leftOnly: 0, rightOnly: 0 },
+        duration: 123,
+      },
+    })),
     cancelCompare: vi.fn(async () => ({ success: true })),
+    clearSync: vi.fn(async () => ({ success: true })),
+    getSyncStatus: vi.fn(async () => ({ success: true, data: null })),
+    onEntryUpdate: vi.fn(() => () => undefined),
+    onScanComplete: vi.fn(() => () => undefined),
+    onSyncProgress: vi.fn(() => () => undefined),
+    pauseSync: vi.fn(async () => ({ success: true, data: null })),
+    resumeSync: vi.fn(async () => ({ success: true, data: null })),
+    startSync: vi.fn(async () => ({ success: true, data: null })),
+    ...overrides,
   } as unknown as Window['api']
 
   window.api = api
@@ -201,7 +220,7 @@ describe('ComparePage renderer interactions', () => {
     const user = userEvent.setup()
     render(<ComparePage />)
 
-    expect(screen.getByRole('button', { name: '重新对比' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: '重启对比' })).toBeTruthy()
 
     await user.click(screen.getByTitle('/var/old-left'))
 
@@ -293,5 +312,154 @@ describe('ComparePage renderer interactions', () => {
     render(<ComparePage />)
 
     expect(screen.queryByText('当前结果未完成，需先重新对比后才能执行同步。')).toBeNull()
+  })
+
+  it('shows dot files by default instead of hiding them', () => {
+    resetStores()
+    useCompareStore.setState({
+      entries: [createCompareEntry('.env')],
+      hideDot: false,
+    })
+
+    render(<ComparePage />)
+
+    expect(screen.getAllByText('.env')).toHaveLength(2)
+  })
+
+  it('pauses an active compare from the toolbar', async () => {
+    const api = installApiMock()
+    resetStores([
+      {
+        id: 'compare-tab-1',
+        title: '进行中对比',
+        snapshot: createSnapshot({
+          entries: [createCompareEntry('src/app.ts')],
+          scanning: true,
+          comparing: true,
+          paused: false,
+          done: false,
+          activeCompareId: 'compare-1',
+        }),
+        diffTabs: [],
+        activeDiffTabId: null,
+      },
+    ])
+    useCompareStore.setState({
+      entries: [createCompareEntry('src/app.ts')],
+      scanning: true,
+      comparing: true,
+      paused: false,
+      done: false,
+      activeCompareId: 'compare-1',
+    })
+
+    const user = userEvent.setup()
+    render(<ComparePage />)
+
+    await user.click(screen.getByRole('button', { name: '暂停对比' }))
+
+    await waitFor(() => {
+      expect(api.cancelCompare).toHaveBeenCalledWith('compare-1')
+    })
+
+    await waitFor(() => {
+      const state = useCompareStore.getState()
+      expect(state.paused).toBe(true)
+      expect(state.scanning).toBe(false)
+      expect(state.comparing).toBe(false)
+    })
+
+    expect(screen.getByRole('button', { name: '继续对比' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: '重启对比' })).toBeTruthy()
+  })
+
+  it('continues a paused compare while preserving existing entries', async () => {
+    const api = installApiMock({
+      runCompare: vi.fn(() => new Promise(() => undefined)),
+    })
+    resetStores([
+      {
+        id: 'compare-tab-1',
+        title: '已暂停对比',
+        snapshot: createSnapshot({
+          entries: [createCompareEntry('src/app.ts')],
+          scanning: false,
+          comparing: false,
+          paused: true,
+          done: false,
+          activeCompareId: null,
+        }),
+        diffTabs: [],
+        activeDiffTabId: null,
+      },
+    ])
+    useCompareStore.setState({
+      entries: [createCompareEntry('src/app.ts')],
+      scanning: false,
+      comparing: false,
+      paused: true,
+      done: false,
+      activeCompareId: null,
+    })
+
+    const user = userEvent.setup()
+    render(<ComparePage />)
+
+    await user.click(screen.getByRole('button', { name: '继续对比' }))
+
+    await waitFor(() => {
+      expect(api.runCompare).toHaveBeenCalledTimes(1)
+    })
+
+    await waitFor(() => {
+      const state = useCompareStore.getState()
+      expect(state.scanning).toBe(true)
+      expect(state.paused).toBe(false)
+      expect(state.entries.map((entry) => entry.relativePath)).toEqual(['src/app.ts'])
+    })
+  })
+
+  it('restarts compare from the toolbar and clears previous entries', async () => {
+    const api = installApiMock({
+      runCompare: vi.fn(() => new Promise(() => undefined)),
+    })
+    resetStores([
+      {
+        id: 'compare-tab-1',
+        title: '完成对比',
+        snapshot: createSnapshot({
+          entries: [createCompareEntry('src/app.ts')],
+          done: true,
+          paused: false,
+          activeCompareId: null,
+        }),
+        diffTabs: [],
+        activeDiffTabId: null,
+      },
+    ])
+    useCompareStore.setState({
+      entries: [createCompareEntry('src/app.ts')],
+      scanning: false,
+      comparing: false,
+      paused: false,
+      done: true,
+      activeCompareId: null,
+    })
+
+    const user = userEvent.setup()
+    render(<ComparePage />)
+
+    await user.click(screen.getByRole('button', { name: '重启对比' }))
+
+    await waitFor(() => {
+      expect(api.runCompare).toHaveBeenCalledTimes(1)
+    })
+
+    await waitFor(() => {
+      const state = useCompareStore.getState()
+      expect(state.scanning).toBe(true)
+      expect(state.entries).toEqual([])
+      expect(state.paused).toBe(false)
+    })
   })
 })
