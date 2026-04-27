@@ -19,6 +19,7 @@ const FILTERS: { value: CompareFilter; label: string }[] = [
   { value: 'left_only', label: '仅左' },
   { value: 'right_only', label: '仅右' },
   { value: 'equal', label: '相同' },
+  { value: 'unresolved', label: '对比中' },
 ]
 
 interface CompareToolbarProps {
@@ -26,7 +27,6 @@ interface CompareToolbarProps {
   readonly onFilterChange: (filter: CompareFilter) => void
   readonly stats: CompareStats
   readonly pendingCount: number
-  readonly hiddenPendingCount: number
   readonly viewMode: ViewMode
   readonly setViewMode: (mode: ViewMode) => void
   readonly allExpanded: boolean
@@ -59,7 +59,6 @@ export default function CompareToolbar({
   onFilterChange,
   stats,
   pendingCount,
-  hiddenPendingCount,
   viewMode,
   setViewMode,
   allExpanded,
@@ -117,7 +116,6 @@ export default function CompareToolbar({
   )
 
   const canStartSync = compareDone && !compareLoading && pendingCount === 0 && stats.total > 0
-  const showHiddenPendingNotice = compareLoading && hiddenPendingCount > 0
 
   return (
     <div className="flex flex-col gap-1.5 px-1.5 py-1">
@@ -143,11 +141,6 @@ export default function CompareToolbar({
               {f.label}
             </button>
           ))}
-          {showHiddenPendingNotice && (
-            <span className="rounded border border-neutral-700 bg-neutral-800/70 px-2 py-1 text-xs text-neutral-400">
-              当前筛选隐藏了 {hiddenPendingCount} 个待比或对比中条目，切到“全部”可查看它们。
-            </span>
-          )}
         </div>
         <div className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-2">
           {syncTask && (

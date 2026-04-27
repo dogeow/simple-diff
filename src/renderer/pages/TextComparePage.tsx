@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useShallow } from 'zustand/react/shallow'
 import { useTextDiffStore } from '../stores/text-diff-store'
 import TextInputPanel from '../components/TextInputPanel'
 import { buildInlineSegments } from '../utils/inline-diff'
@@ -26,7 +27,23 @@ export default function TextComparePage() {
     setComputing,
     setError,
     toggleCharLevel,
-  } = useTextDiffStore()
+  } = useTextDiffStore(useShallow((state) => ({
+    leftText: state.leftText,
+    rightText: state.rightText,
+    leftLabel: state.leftLabel,
+    rightLabel: state.rightLabel,
+    result: state.result,
+    error: state.error,
+    charLevel: state.charLevel,
+    setLeftText: state.setLeftText,
+    setRightText: state.setRightText,
+    swap: state.swap,
+    clear: state.clear,
+    setResult: state.setResult,
+    setComputing: state.setComputing,
+    setError: state.setError,
+    toggleCharLevel: state.toggleCharLevel,
+  })))
 
   const compareRequestIdRef = useRef(0)
   const leftTextAreaRef = useRef<HTMLTextAreaElement | null>(null)

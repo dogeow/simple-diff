@@ -59,7 +59,12 @@ export default function HistoryPage() {
   const [pairFilter, setPairFilter] = useState('all')
   const [loading, setLoading] = useState(true)
   const setPage = useAppStore((s) => s.setPage)
-  const store = useCompareStore()
+  const setLeftSourceType = useCompareStore((s) => s.setLeftSourceType)
+  const setLeftPath = useCompareStore((s) => s.setLeftPath)
+  const setLeftSSHConfigId = useCompareStore((s) => s.setLeftSSHConfigId)
+  const setRightSourceType = useCompareStore((s) => s.setRightSourceType)
+  const setRightPath = useCompareStore((s) => s.setRightPath)
+  const setRightSSHConfigId = useCompareStore((s) => s.setRightSSHConfigId)
 
   const sshLabelsById = useMemo(
     () => new Map(sshConfigs.map((config) => [config.id, config.label])),
@@ -141,21 +146,21 @@ export default function HistoryPage() {
     const right = entry.rightSource
 
     if (left.type === 'local') {
-      store.setLeftSourceType('local')
-      store.setLeftPath(left.path)
+      setLeftSourceType('local')
+      setLeftPath(left.path)
     } else {
-      store.setLeftSourceType('sftp')
-      store.setLeftSSHConfigId(left.configId)
-      store.setLeftPath(left.path)
+      setLeftSourceType('sftp')
+      setLeftSSHConfigId(left.configId)
+      setLeftPath(left.path)
     }
 
     if (right.type === 'local') {
-      store.setRightSourceType('local')
-      store.setRightPath(right.path)
+      setRightSourceType('local')
+      setRightPath(right.path)
     } else {
-      store.setRightSourceType('sftp')
-      store.setRightSSHConfigId(right.configId)
-      store.setRightPath(right.path)
+      setRightSourceType('sftp')
+      setRightSSHConfigId(right.configId)
+      setRightPath(right.path)
     }
 
     setPage('home')

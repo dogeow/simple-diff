@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { CompareSessionSnapshot } from '../stores/compare-store'
 import type { CompareTab } from '../stores/app-store'
-import { resolveReusableCompareId } from './useCompare'
+import { createRunningCompareTabSnapshot, resolveReusableCompareId } from './useCompare'
 
 function createSnapshot(overrides: Partial<CompareSessionSnapshot> = {}): CompareSessionSnapshot {
   return {
@@ -63,5 +63,47 @@ describe('resolveReusableCompareId', () => {
       createSnapshot({ done: true }),
       createCompareTab(createSnapshot({ activeCompareId: null, done: true })),
     )).toBeNull()
+  })
+})
+
+describe('createRunningCompareTabSnapshot', () => {
+  it('drops live entries for an active running compare tab snapshot', () => {
+    expect(createRunningCompareTabSnapshot(createSnapshot({
+      activeCompareId: 'compare-1',
+      scanning: true,
+      entries: [{
+        relativePath: 'docs',
+        name: 'docs',
+        isDirectory: true,
+        state: 'pending',
+        left: null,
+        right: null,
+        reasons: [],
+      }],
+      loadingDirs: ['docs'],
+    }))).toEqual(createSnapshot({
+      activeCompareId: 'compare-1',
+      scanning: true,
+      entries: [],
+      loadingDirs: [],
+    }))
+  })
+
+  it('keeps finished snapshots intact', () => {
+    const snapshot = createSnapshot({
+      done: true,
+      activeCompareId: null,
+      entries: [{
+        relativePath: 'docs',
+        name: 'docs',
+        isDirectory: true,
+        state: 'equal',
+        left: null,
+        right: null,
+        reasons: [],
+      }],
+    })
+
+    expect(createRunningCompareTabSnapshot(snapshot)).toEqual(snapshot)
   })
 })

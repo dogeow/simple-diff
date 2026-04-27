@@ -47,7 +47,7 @@ export default function FileContextMenu({ x, y, actions, onClose }: FileContextM
   return (
     <div
       ref={ref}
-      className="fixed z-[100] min-w-[140px] rounded border border-neutral-600 bg-neutral-800 py-1 shadow-xl"
+      className="fixed z-[100] min-w-[160px] rounded border border-neutral-600 bg-neutral-800 py-1 shadow-xl"
       style={{ left: pos.x, top: pos.y }}
     >
       {actions.map((action) => (
@@ -57,7 +57,7 @@ export default function FileContextMenu({ x, y, actions, onClose }: FileContextM
             action.onClick()
             onClose()
           }}
-          className={`w-full px-3 py-1.5 text-left text-xs hover:bg-neutral-700 ${
+          className={`w-full whitespace-nowrap px-3 py-1.5 text-left text-xs hover:bg-neutral-700 ${
             action.danger ? 'text-red-400' : 'text-neutral-200'
           }`}
         >

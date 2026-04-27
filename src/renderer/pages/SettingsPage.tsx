@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react'
 import { formatPathFiltersForDisplay, mergeDisplayedPathFilters } from '@shared/path-filter'
-import { useCompare } from '../hooks/useCompare'
+import { useCompareActions } from '../hooks/useCompare'
 import { useSettingsStore } from '../stores/settings-store'
 
 export default function SettingsPage() {
   const globalPathFilters = useSettingsStore((s) => s.globalPathFilters)
   const setGlobalPathFilters = useSettingsStore((s) => s.setGlobalPathFilters)
-  const { rerunActiveSessionIfRunning } = useCompare()
+  const { rerunActiveSessionIfRunning } = useCompareActions()
   const [input, setInput] = useState(formatPathFiltersForDisplay(globalPathFilters).join('\n'))
 
   useEffect(() => {

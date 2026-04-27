@@ -1,8 +1,9 @@
 import SourceSelector from '../components/SourceSelector'
 import FilterModal from '../components/FilterModal'
 import CompareSessionTabs from '../components/CompareSessionTabs'
+import { useShallow } from 'zustand/react/shallow'
 import { useCompareStore } from '../stores/compare-store'
-import { useCompare } from '../hooks/useCompare'
+import { useCompareActions } from '../hooks/useCompare'
 import { useAppStore } from '../stores/app-store'
 import { useSettingsStore } from '../stores/settings-store'
 import { openCompareTab, openSyncTaskView } from '../utils/compare-session-navigation'
@@ -17,12 +18,53 @@ const STRATEGY_OPTIONS: { value: StrategyName; label: string }[] = [
 ]
 
 export default function HomePage() {
-  const store = useCompareStore()
-  const syncTask = useCompareStore((s) => s.syncTask)
-  const { loading, error, runCompare, rerunActiveSessionIfRunning } = useCompare()
-  const setPage = useAppStore((s) => s.setPage)
-  const compareTabs = useAppStore((s) => s.compareTabs)
-  const activeCompareTabId = useAppStore((s) => s.activeCompareTabId)
+  const {
+    syncTask,
+    leftSourceType,
+    rightSourceType,
+    leftPath,
+    rightPath,
+    leftSSHConfigId,
+    rightSSHConfigId,
+    strategies,
+    extensionFilter,
+    error,
+    loading,
+    setLeftSourceType,
+    setRightSourceType,
+    setLeftPath,
+    setRightPath,
+    setLeftSSHConfigId,
+    setRightSSHConfigId,
+    setStrategies,
+    setExtensionFilter,
+  } = useCompareStore(useShallow((s) => ({
+    syncTask: s.syncTask,
+    leftSourceType: s.leftSourceType,
+    rightSourceType: s.rightSourceType,
+    leftPath: s.leftPath,
+    rightPath: s.rightPath,
+    leftSSHConfigId: s.leftSSHConfigId,
+    rightSSHConfigId: s.rightSSHConfigId,
+    strategies: s.strategies,
+    extensionFilter: s.extensionFilter,
+    error: s.error,
+    loading: s.scanning || s.comparing,
+    setLeftSourceType: s.setLeftSourceType,
+    setRightSourceType: s.setRightSourceType,
+    setLeftPath: s.setLeftPath,
+    setRightPath: s.setRightPath,
+    setLeftSSHConfigId: s.setLeftSSHConfigId,
+    setRightSSHConfigId: s.setRightSSHConfigId,
+    setStrategies: s.setStrategies,
+    setExtensionFilter: s.setExtensionFilter,
+  })))
+  const { runCompare, rerunActiveSessionIfRunning } = useCompareActions()
+  const { setPage, compareTabs, activeCompareTabId } = useAppStore(useShallow((s) => ({
+    setPage: s.setPage,
+    compareTabs: s.compareTabs,
+    activeCompareTabId: s.activeCompareTabId,
+  })))
   const globalPathFilters = useSettingsStore((s) => s.globalPathFilters)
 
   const handleCompare = () => {
@@ -30,7 +72,7 @@ export default function HomePage() {
   }
 
   const handleSessionFilterChange = async (patterns: readonly string[]) => {
-    store.setExtensionFilter(patterns)
+    setExtensionFilter(patterns)
     await rerunActiveSessionIfRunning()
   }
 
@@ -39,14 +81,14 @@ export default function HomePage() {
   }
 
   const toggleStrategy = (name: StrategyName) => {
-    const current = [...store.strategies]
+    const current = [...strategies]
     const idx = current.indexOf(name)
     if (idx >= 0) {
       current.splice(idx, 1)
     } else {
       current.push(name)
     }
-    store.setStrategies(current)
+    setStrategies(current)
   }
 
   return (
@@ -68,21 +110,21 @@ export default function HomePage() {
           <div className="flex flex-col gap-4">
             <SourceSelector
               label="左侧"
-              sourceType={store.leftSourceType}
-              path={store.leftPath}
-              sshConfigId={store.leftSSHConfigId}
-              onSourceTypeChange={store.setLeftSourceType}
-              onPathChange={store.setLeftPath}
-              onSSHConfigIdChange={store.setLeftSSHConfigId}
+              sourceType={leftSourceType}
+              path={leftPath}
+              sshConfigId={leftSSHConfigId}
+              onSourceTypeChange={setLeftSourceType}
+              onPathChange={setLeftPath}
+              onSSHConfigIdChange={setLeftSSHConfigId}
             />
             <SourceSelector
               label="右侧"
-              sourceType={store.rightSourceType}
-              path={store.rightPath}
-              sshConfigId={store.rightSSHConfigId}
-              onSourceTypeChange={store.setRightSourceType}
-              onPathChange={store.setRightPath}
-              onSSHConfigIdChange={store.setRightSSHConfigId}
+              sourceType={rightSourceType}
+              path={rightPath}
+              sshConfigId={rightSSHConfigId}
+              onSourceTypeChange={setRightSourceType}
+              onPathChange={setRightPath}
+              onSSHConfigIdChange={setRightSSHConfigId}
             />
           </div>
 
@@ -94,7 +136,7 @@ export default function HomePage() {
                   <label key={opt.value} className="flex items-center gap-1.5 text-sm">
                     <input
                       type="checkbox"
-                      checked={store.strategies.includes(opt.value)}
+                      checked={strategies.includes(opt.value)}
                       onChange={() => toggleStrategy(opt.value)}
                       className="accent-blue-500"
                     />
@@ -105,17 +147,17 @@ export default function HomePage() {
             </div>
 
             <FilterModal
-              extensionFilter={store.extensionFilter}
+              extensionFilter={extensionFilter}
               onChange={handleSessionFilterChange}
             />
             <span className="text-xs text-neutral-500">
-              当前会话 {store.extensionFilter.length} 条，全局 {globalPathFilters.length} 条
+              当前会话 {extensionFilter.length} 条，全局 {globalPathFilters.length} 条
             </span>
           </div>
 
           <button
             onClick={handleCompare}
-            disabled={loading || !store.leftPath || !store.rightPath || store.strategies.length === 0}
+            disabled={loading || !leftPath || !rightPath || strategies.length === 0}
             className="rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {compareTabs.length > 0 ? '开始新的对比' : '开始对比'}

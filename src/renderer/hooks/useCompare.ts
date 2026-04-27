@@ -69,16 +69,19 @@ export function resolveReusableCompareId(
   return null
 }
 
-export function useCompare() {
-  const store = useCompareStore()
-  const setPage = useAppStore((s) => s.setPage)
-  const paused = useCompareStore((state) => state.paused)
-  const {
-    leftPath, rightPath, strategies, extensionFilter,
-    leftSourceType, rightSourceType, leftSSHConfigId, rightSSHConfigId,
-    scanning, comparing, done, error, entries,
-  } = store
+export function createRunningCompareTabSnapshot(snapshot: CompareSessionSnapshot): CompareSessionSnapshot {
+  if (!snapshot.activeCompareId || (!snapshot.scanning && !snapshot.comparing)) {
+    return snapshot
+  }
 
+  return {
+    ...snapshot,
+    entries: [],
+    loadingDirs: [],
+  }
+}
+
+export function useCompareActions() {
   const runCompare = useCallback(async (options?: RunCompareOptions) => {
     const compareState = useCompareStore.getState()
     const {
@@ -93,7 +96,7 @@ export function useCompare() {
     } = compareState
 
     if (!currentLeftPath || !currentRightPath) {
-      store.setError('请选择左右两侧目录')
+      compareState.setError('请选择左右两侧目录')
       return
     }
 
@@ -136,8 +139,8 @@ export function useCompare() {
     appStore.setActiveCompareTab(compareTabId)
 
     // Start scanning — navigate immediately
-    store.startScanning(compareId, { preserveEntries })
-    store.setSources(left, right)
+    compareState.startScanning(compareId, { preserveEntries })
+    compareState.setSources(left, right)
 
     addRendererLog(
       'compare',
@@ -148,13 +151,13 @@ export function useCompare() {
     appStore.saveCompareTab({
       id: compareTabId,
       title: formatCompareTabTitle(left.path, right.path),
-      snapshot: useCompareStore.getState().createSnapshot(),
+      snapshot: createRunningCompareTabSnapshot(useCompareStore.getState().createSnapshot()),
       diffTabs: [],
       activeDiffTabId: null,
     })
 
     if (options?.navigateToCompare !== false) {
-      setPage('compare')
+      useAppStore.getState().setPage('compare')
     }
 
     try {
@@ -175,7 +178,7 @@ export function useCompare() {
           `compare:run 返回成功 compareId=${compareId} total=${response.data.stats.total} duration=${response.data.duration}ms`,
         )
         if (useCompareStore.getState().activeCompareId === compareId) {
-          store.finishCompare(compareId, response.data)
+          useCompareStore.getState().finishCompare(compareId, response.data)
         } else {
           addRendererLog(
             'compare',
@@ -191,9 +194,9 @@ export function useCompare() {
         addRendererLog('compare', 'warn', `compare:run 被取消 compareId=${compareId}`)
         if (useCompareStore.getState().activeCompareId === compareId) {
           if (pauseRequested) {
-            store.pauseCompare(compareId)
+            useCompareStore.getState().pauseCompare(compareId)
           } else {
-            store.setError(null, compareId)
+            useCompareStore.getState().setError(null, compareId)
           }
         } else {
           addRendererLog(
@@ -212,9 +215,9 @@ export function useCompare() {
         const message = response.error ?? '对比失败'
         addRendererLog('compare', 'error', `compare:run 返回失败 compareId=${compareId} error=${message}`)
         if (useCompareStore.getState().activeCompareId === compareId) {
-          store.setError(message, compareId)
+          useCompareStore.getState().setError(message, compareId)
         } else if (pauseRequested && useAppStore.getState().activeCompareTabId === compareTabId && useCompareStore.getState().paused) {
-          store.setError(message)
+          useCompareStore.getState().setError(message)
         } else {
           addRendererLog(
             'compare',
@@ -233,9 +236,9 @@ export function useCompare() {
       const message = error instanceof Error ? error.message : '对比失败'
       addRendererLog('compare', 'error', `compare:run 抛异常 compareId=${compareId} error=${message}`)
       if (useCompareStore.getState().activeCompareId === compareId) {
-        store.setError(message, compareId)
+        useCompareStore.getState().setError(message, compareId)
       } else if (pauseRequested && useAppStore.getState().activeCompareTabId === compareTabId && useCompareStore.getState().paused) {
-        store.setError(message)
+        useCompareStore.getState().setError(message)
       } else {
         addRendererLog(
           'compare',
@@ -249,7 +252,7 @@ export function useCompare() {
           : applyCompareErrorToSnapshot(snapshot, compareId, message),
       )
     }
-  }, [store, setPage])
+  }, [])
 
   const rerunActiveSessionIfRunning = useCallback(async () => {
     const appStore = useAppStore.getState()
@@ -316,19 +319,7 @@ export function useCompare() {
     })
   }, [runCompare])
 
-  const loading = scanning || comparing
-
   return {
-    leftPath,
-    rightPath,
-    strategies,
-    loading,
-    scanning,
-    comparing,
-    paused,
-    done,
-    error,
-    entries,
     runCompare,
     rerunActiveSessionIfRunning,
     pauseCompare,

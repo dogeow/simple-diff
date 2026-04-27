@@ -12,6 +12,16 @@ export class LocalSource implements FileSource {
   async list(dirPath: string): Promise<readonly FileEntry[]> {
     const entries = await readdir(dirPath, { withFileTypes: true })
     const results = await mapConcurrent(entries, 64, async (entry) => {
+      if (entry.isDirectory()) {
+        return {
+          name: entry.name,
+          path: entry.name,
+          isDirectory: true,
+          size: 0,
+          mtime: 0,
+        }
+      }
+
       const fullPath = join(dirPath, entry.name)
       try {
         const stats = await fsStat(fullPath)
@@ -120,6 +130,16 @@ export class LocalSource implements FileSource {
     const children = await mapConcurrent(entries, 64, async (entry) => {
       const fullPath = join(currentPath, entry.name)
       const relativePath = relative(rootPath, fullPath)
+
+      if (entry.isDirectory()) {
+        return {
+          name: entry.name,
+          path: relativePath,
+          isDirectory: true,
+          size: 0,
+          mtime: 0,
+        }
+      }
 
       try {
         const stats = await fsStat(fullPath)

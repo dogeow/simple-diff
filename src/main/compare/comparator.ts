@@ -220,8 +220,6 @@ export async function compareDirectories(options: ComparatorOptions): Promise<Co
         }
 
         if (entry.state === 'pending') {
-          onEntryUpdate?.({ ...entry, state: 'comparing' })
-
           const reasons: DiffReason[] = []
           if (entry.left && entry.right) {
             const compareContext: CompareContext = {

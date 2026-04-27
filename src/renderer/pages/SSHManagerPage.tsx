@@ -1,10 +1,15 @@
 import { useState, useEffect } from 'react'
+import { useShallow } from 'zustand/react/shallow'
 import type { SSHConfig, SSHConfigInput } from '../../../shared/types'
 import { useSSHStore } from '../stores/ssh-store'
 import SSHConfigForm from '../components/SSHConfigForm'
 
 export default function SSHManagerPage() {
-  const { configs, loading, loadConfigs } = useSSHStore()
+  const { configs, loading, loadConfigs } = useSSHStore(useShallow((state) => ({
+    configs: state.configs,
+    loading: state.loading,
+    loadConfigs: state.loadConfigs,
+  })))
   const [editing, setEditing] = useState<SSHConfig | null>(null)
   const [creating, setCreating] = useState(false)
   const [testing, setTesting] = useState<string | null>(null)

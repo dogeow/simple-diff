@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react'
 import { joinSourcePath } from '@shared/source-path'
-import type { CompareEntry, CompareFilter } from '../../../shared/types'
+import { useShallow } from 'zustand/react/shallow'
+import type { CompareEntry, CompareFilter, SyncDirection } from '../../../shared/types'
 import { truncatePath, type TreeNode } from '../utils/tree-utils'
 import TreeEntryCell from './TreeEntryCell'
 import { formatSize, formatTime, rowBg, shouldShowDirectorySpinner } from './tree-row-utils'
@@ -24,6 +25,27 @@ interface SplitTreeProps {
 type Side = 'left' | 'right'
 const ROW_HEIGHT = 40
 const OVERSCAN_ROWS = 12
+
+function canSyncEntryInDirection(entry: CompareEntry, direction: SyncDirection): boolean {
+  if (entry.isDirectory) {
+    return direction === 'left_to_right' ? entry.state === 'left_only' : entry.state === 'right_only'
+  }
+
+  if (entry.state === 'different') return true
+  return direction === 'left_to_right' ? entry.state === 'left_only' : entry.state === 'right_only'
+}
+
+function collectNodeSyncEntries(
+  entries: readonly CompareEntry[],
+  relativePath: string,
+  direction: SyncDirection,
+): readonly CompareEntry[] {
+  const prefix = relativePath === '' ? '' : `${relativePath}/`
+  return entries.filter((entry) => {
+    const inSubtree = entry.relativePath === relativePath || entry.relativePath.startsWith(prefix)
+    return inSubtree && canSyncEntryInDirection(entry, direction)
+  })
+}
 
 // ─── Path Header ─────────────────────────────────────────────
 
@@ -91,6 +113,7 @@ interface ContextMenuState {
 
 interface SideTableProps {
   readonly visibleNodes: readonly TreeNode[]
+  readonly entries: readonly CompareEntry[]
   readonly side: Side
   readonly sourcePath: string
   readonly isLocal: boolean
@@ -105,6 +128,7 @@ interface SideTableProps {
 
 function SideTable({
   visibleNodes,
+  entries,
   side,
   sourcePath,
   isLocal,
@@ -116,9 +140,25 @@ function SideTable({
   emptyStateMessage,
   onExtensionFilterChange,
 }: SideTableProps) {
-  const refreshDir = useCompareStore((s) => s.refreshDir)
-  const extensionFilter = useCompareStore((s) => s.extensionFilter)
-  const setExtensionFilter = useCompareStore((s) => s.setExtensionFilter)
+  const {
+    refreshDir,
+    leftSource,
+    rightSource,
+    compareDone,
+    syncTask,
+    setSyncTask,
+    extensionFilter,
+    setExtensionFilter,
+  } = useCompareStore(useShallow((s) => ({
+    refreshDir: s.refreshDir,
+    leftSource: s.leftSource,
+    rightSource: s.rightSource,
+    compareDone: s.done,
+    syncTask: s.syncTask,
+    setSyncTask: s.setSyncTask,
+    extensionFilter: s.extensionFilter,
+    setExtensionFilter: s.setExtensionFilter,
+  })))
   const [ctxMenu, setCtxMenu] = useState<ContextMenuState | null>(null)
   const [renaming, setRenaming] = useState<string | null>(null)
   const [renameValue, setRenameValue] = useState('')
@@ -133,6 +173,24 @@ function SideTable({
     return segments.length > 1 ? segments.slice(0, -1).join('/') : ''
   }
 
+  const handleCopyDirectory = useCallback(async (node: TreeNode, direction: SyncDirection) => {
+    if (!node.entry || !node.isDirectory || !leftSource || !rightSource || !compareDone || syncTask) return
+
+    const syncEntries = collectNodeSyncEntries(entries, node.relativePath, direction)
+    if (syncEntries.length === 0) return
+
+    const response = await window.api.startSync({
+      leftSource,
+      rightSource,
+      direction,
+      entries: syncEntries,
+    })
+
+    if (response.success) {
+      setSyncTask(response.data ?? null)
+    }
+  }, [compareDone, entries, leftSource, rightSource, setSyncTask, syncTask])
+
   const handleContextMenu = useCallback((e: React.MouseEvent, node: TreeNode) => {
     e.preventDefault()
     setCtxMenu({ x: e.clientX, y: e.clientY, node })
@@ -140,6 +198,9 @@ function SideTable({
 
   const getContextActions = (node: TreeNode): readonly ContextMenuAction[] => {
     if (!node.entry) return []
+    const fileInfo = side === 'left' ? node.entry.left : node.entry.right
+    if (!fileInfo) return []
+
     const fullPath = buildFullPath(node.relativePath)
     const ignoreAction: ContextMenuAction = {
       label: `${node.isDirectory ? '忽略目录' : '忽略文件'}：『${node.name}』`,
@@ -155,11 +216,26 @@ function SideTable({
       },
     }
 
+    const copyDirection = side === 'left' ? 'left_to_right' : 'right_to_left'
+    const copyLabel = side === 'left' ? '复制到右边' : '复制到左边'
+    const syncEntries = node.isDirectory
+      ? collectNodeSyncEntries(entries, node.relativePath, copyDirection)
+      : []
+    const copyAction = node.isDirectory && compareDone && !syncTask && syncEntries.length > 0
+      ? [{
+          label: copyLabel,
+          onClick: () => {
+            void handleCopyDirectory(node, copyDirection)
+          },
+        } satisfies ContextMenuAction]
+      : []
+
     if (!isLocal) {
-      return [ignoreAction]
+      return [...copyAction, ignoreAction]
     }
 
     const actions: ContextMenuAction[] = [
+      ...copyAction,
       {
         label: '在 Finder 中显示',
         onClick: () => window.api.showInFolder(fullPath),
@@ -203,13 +279,13 @@ function SideTable({
 
   return (
     <div>
-      <table className="w-full text-left text-sm">
+      <table className="min-w-full text-left text-sm">
         <thead className="sticky top-0 z-10 border-b border-neutral-700 bg-neutral-800 text-xs text-neutral-400">
           <tr>
-            <th className="px-3 py-1.5">名称</th>
-            <th className="w-14 px-2 py-1.5 text-center">状态</th>
-            <th className="w-20 px-2 py-1.5 text-right">大小</th>
-            <th className="w-28 px-2 py-1.5 text-right">修改时间</th>
+            <th className="px-3 py-1.5 whitespace-nowrap">名称</th>
+            <th className="w-20 px-2 py-1.5 text-center whitespace-nowrap">状态</th>
+            <th className="w-24 px-2 py-1.5 text-right whitespace-nowrap">大小</th>
+            <th className="w-40 px-2 py-1.5 text-right whitespace-nowrap">修改时间</th>
           </tr>
         </thead>
         <tbody>
@@ -284,23 +360,27 @@ function SideRow({ node, side, expanded, loading, onToggle, onDoubleClick, onCon
   if (!entry) return null
 
   const fileInfo = side === 'left' ? entry.left : entry.right
+  const missingOnSide = !fileInfo
   const showSpinner = shouldShowDirectorySpinner(entry.isDirectory, loading, entry.state)
 
   return (
     <tr
-      className={`h-10 border-b border-neutral-800 hover:bg-neutral-800/50 cursor-pointer select-none ${rowBg(entry.state)}`}
-      onDoubleClick={onDoubleClick}
-      onContextMenu={onContextMenu}
+      className={`h-10 border-b border-neutral-800 select-none ${rowBg(entry.state)} ${missingOnSide ? '' : 'cursor-pointer hover:bg-neutral-800/50'}`}
+      onDoubleClick={missingOnSide ? undefined : onDoubleClick}
+      onContextMenu={missingOnSide ? undefined : onContextMenu}
     >
-      <td className="px-3 py-1">
-        <TreeEntryCell
-          node={node}
-          expanded={expanded}
-          loading={showSpinner}
-          onToggle={onToggle}
-          indentSize={16}
-        >
-          {renaming ? (
+      <td className="px-3 py-1 whitespace-nowrap">
+        {missingOnSide ? (
+          <div className="h-4" />
+        ) : (
+          <TreeEntryCell
+            node={node}
+            expanded={expanded}
+            loading={showSpinner}
+            onToggle={onToggle}
+            indentSize={16}
+          >
+            {renaming ? (
             <input
               type="text"
               value={renameValue}
@@ -315,19 +395,20 @@ function SideRow({ node, side, expanded, loading, onToggle, onDoubleClick, onCon
               onClick={(e) => e.stopPropagation()}
               onDoubleClick={(e) => e.stopPropagation()}
             />
-          ) : (
-            <span className="font-mono text-xs truncate">{node.name}</span>
-          )}
-        </TreeEntryCell>
+            ) : (
+              <span className="font-mono text-xs whitespace-nowrap">{node.name}</span>
+            )}
+          </TreeEntryCell>
+        )}
       </td>
-      <td className="px-2 py-1 text-center">
-        <StatusBadge state={entry.state} />
+      <td className="px-2 py-1 text-center whitespace-nowrap">
+        {!missingOnSide && <StatusBadge state={entry.state} />}
       </td>
-      <td className="px-2 py-1 text-right text-xs text-neutral-400">
-        {fileInfo && !entry.isDirectory ? formatSize(fileInfo.size) : '—'}
+      <td className="px-2 py-1 text-right text-xs text-neutral-400 whitespace-nowrap tabular-nums">
+        {missingOnSide ? '' : fileInfo && !entry.isDirectory ? formatSize(fileInfo.size) : '—'}
       </td>
-      <td className="px-2 py-1 text-right text-xs text-neutral-500">
-        {fileInfo && !entry.isDirectory ? formatTime(fileInfo.mtime) : '—'}
+      <td className="px-2 py-1 text-right text-xs text-neutral-500 whitespace-nowrap tabular-nums">
+        {missingOnSide ? '' : fileInfo && !entry.isDirectory ? formatTime(fileInfo.mtime) : '—'}
       </td>
     </tr>
   )
@@ -343,8 +424,10 @@ export default function SplitTree({ entries, filter, onDoubleClickFile, emptySta
   const [viewportHeight, setViewportHeight] = useState(0)
   const visibleNodes = useVisibleCompareNodes({ entries, filter })
   const nodeInteractions = useCompareNodeInteractions(onDoubleClickFile)
-  const leftSource = useCompareStore((s) => s.leftSource)
-  const rightSource = useCompareStore((s) => s.rightSource)
+  const { leftSource, rightSource } = useCompareStore(useShallow((s) => ({
+    leftSource: s.leftSource,
+    rightSource: s.rightSource,
+  })))
 
   useEffect(() => {
     const element = leftRef.current
@@ -369,6 +452,7 @@ export default function SplitTree({ entries, filter, onDoubleClickFile, emptySta
     if (from && to) {
       setScrollTop(from.scrollTop)
       to.scrollTop = from.scrollTop
+      to.scrollLeft = from.scrollLeft
     }
     requestAnimationFrame(() => { syncing.current = false })
   }, [])
@@ -405,6 +489,7 @@ export default function SplitTree({ entries, filter, onDoubleClickFile, emptySta
         <div ref={leftRef} className="flex-1 overflow-auto" onScroll={() => handleScroll('left')}>
           <SideTable
             visibleNodes={visibleNodes}
+            entries={entries}
             side="left"
             sourcePath={leftSource?.path ?? ''}
             isLocal={leftSource?.type === 'local'}
@@ -421,6 +506,7 @@ export default function SplitTree({ entries, filter, onDoubleClickFile, emptySta
         <div ref={rightRef} className="flex-1 overflow-auto" onScroll={() => handleScroll('right')}>
           <SideTable
             visibleNodes={visibleNodes}
+            entries={entries}
             side="right"
             sourcePath={rightSource?.path ?? ''}
             isLocal={rightSource?.type === 'local'}

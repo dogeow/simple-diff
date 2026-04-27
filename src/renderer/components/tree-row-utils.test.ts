@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { CompareEntry, CompareState } from '../../../shared/types'
-import { collectBusyDirectoryPaths, shouldShowDirectorySpinner } from './tree-row-utils'
+import { collectBusyDirectoryPaths, hasLoadingDescendantDirectory, shouldShowDirectorySpinner } from './tree-row-utils'
 
 function createEntry(
   relativePath: string,
@@ -61,8 +61,22 @@ describe('shouldShowDirectorySpinner', () => {
     expect(shouldShowDirectorySpinner(true, false, 'comparing')).toBe(true)
   })
 
+  it('shows a spinner when a directory is still pending', () => {
+    expect(shouldShowDirectorySpinner(true, false, 'pending')).toBe(true)
+  })
+
   it('does not show a spinner for non-directory compare states', () => {
     expect(shouldShowDirectorySpinner(true, false, 'equal')).toBe(false)
     expect(shouldShowDirectorySpinner(false, false, 'comparing')).toBe(false)
+  })
+})
+
+describe('hasLoadingDescendantDirectory', () => {
+  it('matches both the loading directory itself and its visible ancestors', () => {
+    const loadingDirs = new Set(['src/nested'])
+
+    expect(hasLoadingDescendantDirectory('src', loadingDirs)).toBe(true)
+    expect(hasLoadingDescendantDirectory('src/nested', loadingDirs)).toBe(true)
+    expect(hasLoadingDescendantDirectory('docs', loadingDirs)).toBe(false)
   })
 })

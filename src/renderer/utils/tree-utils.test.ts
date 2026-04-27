@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { CompareEntry, CompareState } from '../../../shared/types'
-import { buildTree, getVisibleNodes, prepareCompareEntries } from './tree-utils'
+import { buildTree, buildVisibleNodes, getVisibleNodes, prepareCompareEntries } from './tree-utils'
 
 function createEntry(
   relativePath: string,
@@ -161,6 +161,52 @@ describe('prepareCompareEntries', () => {
     expect(result.map((entry) => entry.relativePath)).toEqual(['same.txt', 'changed.txt'])
   })
 
+  it('hides entries from "equal" filter when any ancestor directory is still resolving', () => {
+    const entries = [
+      createEntry('done', 'equal', { isDirectory: true }),
+      createEntry('done/file.txt', 'equal'),
+      createEntry('busy', 'equal', { isDirectory: true }),
+      createEntry('busy/known-equal.txt', 'equal'),
+      createEntry('busy/still-pending.txt', 'pending'),
+      createEntry('busy/still-comparing.txt', 'comparing'),
+    ]
+
+    const result = prepareCompareEntries(entries, {
+      filter: 'equal',
+      pathFilter: [],
+      hideDot: false,
+      hideDotFilter: 'all',
+    })
+
+    expect(result.map((entry) => entry.relativePath)).toEqual([
+      'done',
+      'done/file.txt',
+    ])
+  })
+
+  it('shows pending and comparing entries (with their ancestors) under "unresolved" filter', () => {
+    const entries = [
+      createEntry('done.txt', 'equal'),
+      createEntry('busy', 'comparing', { isDirectory: true }),
+      createEntry('busy/queued.bin', 'pending'),
+      createEntry('busy/in-flight.bin', 'comparing'),
+      createEntry('busy/already-equal.bin', 'equal'),
+    ]
+
+    const result = prepareCompareEntries(entries, {
+      filter: 'unresolved',
+      pathFilter: [],
+      hideDot: false,
+      hideDotFilter: 'all',
+    })
+
+    expect(result.map((entry) => entry.relativePath)).toEqual([
+      'busy',
+      'busy/queued.bin',
+      'busy/in-flight.bin',
+    ])
+  })
+
   it('treats common directories with one-sided descendants as different', () => {
     const entries = [
       createEntry('src', 'equal', { isDirectory: true }),
@@ -180,6 +226,22 @@ describe('prepareCompareEntries', () => {
       ['src/generated', 'different'],
       ['src/generated/only-on-right.ts', 'right_only'],
     ])
+  })
+
+  it('reuses the input array when effective directory states do not change', () => {
+    const entries = [
+      createEntry('src', 'different', { isDirectory: true }),
+      createEntry('src/app.ts', 'different'),
+    ]
+
+    const result = prepareCompareEntries(entries, {
+      filter: 'all',
+      pathFilter: [],
+      hideDot: false,
+      hideDotFilter: 'all',
+    })
+
+    expect(result).toBe(entries)
   })
 })
 
@@ -207,5 +269,34 @@ describe('visible tree flow', () => {
       'src/components',
       'src/components/Button.tsx',
     ])
+  })
+
+  it('builds visible nodes directly without constructing a nested tree', () => {
+    const entries = [
+      createEntry('src', 'equal', { isDirectory: true }),
+      createEntry('src/components', 'equal', { isDirectory: true }),
+      createEntry('src/components/Button.tsx', 'different'),
+      createEntry('src/index.ts', 'equal'),
+      createEntry('docs', 'equal', { isDirectory: true }),
+      createEntry('docs/readme.md', 'equal'),
+    ]
+
+    const prepared = prepareCompareEntries(entries, {
+      filter: 'all',
+      pathFilter: [],
+      hideDot: false,
+      hideDotFilter: 'all',
+    })
+
+    const expandedDirs = new Set(['src'])
+    const directVisibleNodes = buildVisibleNodes(prepared, expandedDirs)
+    const treeVisibleNodes = getVisibleNodes(buildTree(prepared), expandedDirs)
+
+    expect(directVisibleNodes.map((node) => node.relativePath)).toEqual(
+      treeVisibleNodes.map((node) => node.relativePath),
+    )
+    expect(directVisibleNodes.map((node) => node.depth)).toEqual(
+      treeVisibleNodes.map((node) => node.depth),
+    )
   })
 })

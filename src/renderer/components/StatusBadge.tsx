@@ -16,7 +16,7 @@ interface StatusBadgeProps {
 export default function StatusBadge({ state }: StatusBadgeProps) {
   const style = STATE_STYLES[state]
   return (
-    <span className={`inline-flex items-center gap-1 rounded px-2 py-0.5 text-xs font-medium ${style.bg} ${style.text}`}>
+    <span className={`inline-flex items-center gap-1 whitespace-nowrap rounded px-2 py-0.5 text-xs font-medium ${style.bg} ${style.text}`}>
       {style.label}
     </span>
   )

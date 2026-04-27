@@ -57,21 +57,27 @@ function resetAppStore(): void {
   })
 }
 
+async function flushCompareEvents(): Promise<void> {
+  await vi.advanceTimersByTimeAsync(20)
+}
+
 describe('bindCompareEvents', () => {
   beforeEach(() => {
+    vi.useFakeTimers()
     resetCompareStore()
     resetAppStore()
   })
 
   afterEach(() => {
+    vi.useRealTimers()
     vi.restoreAllMocks()
     resetCompareStore()
     resetAppStore()
   })
 
-  it('forwards scan and entry updates into the active compare store', () => {
+  it('forwards scan and entry updates into the active compare store', async () => {
     let scanHandler: ((compareId: string, entries: readonly CompareEntry[]) => void) | null = null
-    let entryHandler: ((compareId: string, entry: CompareEntry) => void) | null = null
+    let entryHandler: ((compareId: string, entries: readonly CompareEntry[]) => void) | null = null
     const unsubscribeScan = vi.fn()
     const unsubscribeEntry = vi.fn()
 
@@ -88,8 +94,10 @@ describe('bindCompareEvents', () => {
 
     useCompareStore.getState().startScanning('compare-1')
 
-    scanHandler?.('compare-1', [createCompareEntry('docs', { isDirectory: true })])
-    entryHandler?.('compare-1', createCompareEntry('docs', { isDirectory: true, state: 'equal' }))
+    scanHandler!('compare-1', [createCompareEntry('docs', { isDirectory: true })])
+    entryHandler!('compare-1', [createCompareEntry('docs', { isDirectory: true, state: 'equal' })])
+
+    await flushCompareEvents()
 
     const state = useCompareStore.getState()
     expect(state.entries).toHaveLength(1)
@@ -101,7 +109,67 @@ describe('bindCompareEvents', () => {
     expect(unsubscribeEntry).toHaveBeenCalledTimes(1)
   })
 
-  it('keeps stale compare events out of the current session', () => {
+  it('does not mirror live active compare entries into app store snapshots', async () => {
+    let scanHandler: ((compareId: string, entries: readonly CompareEntry[]) => void) | null = null
+    let entryHandler: ((compareId: string, entries: readonly CompareEntry[]) => void) | null = null
+
+    useAppStore.getState().saveCompareTab({
+      id: 'compare-tab-1',
+      title: 'docs',
+      snapshot: {
+        leftPath: '/left',
+        rightPath: '/right',
+        leftSourceType: 'local',
+        rightSourceType: 'local',
+        leftSSHConfigId: '',
+        rightSSHConfigId: '',
+        strategies: ['size', 'mtime'],
+        extensionFilter: [],
+        hideDot: true,
+        hideDotFilter: 'all',
+        entries: [],
+        scanning: true,
+        comparing: true,
+        paused: false,
+        done: false,
+        error: null,
+        duration: 0,
+        leftSource: { type: 'local', path: '/left' },
+        rightSource: { type: 'local', path: '/right' },
+        loadingDirs: [],
+        filter: 'all',
+        expandedDirs: [],
+        viewMode: 'split',
+        activeCompareId: 'compare-1',
+      },
+      diffTabs: [],
+      activeDiffTabId: null,
+    })
+
+    bindCompareEvents({
+      onScanComplete: (callback) => {
+        scanHandler = callback
+        return () => {}
+      },
+      onEntryUpdate: (callback) => {
+        entryHandler = callback
+        return () => {}
+      },
+    })
+
+    useCompareStore.getState().startScanning('compare-1')
+
+    scanHandler!('compare-1', [createCompareEntry('docs', { isDirectory: true })])
+    entryHandler!('compare-1', [createCompareEntry('docs', { isDirectory: true, state: 'equal' })])
+
+    await flushCompareEvents()
+
+    expect(useCompareStore.getState().entries).toHaveLength(1)
+    const compareTab = useAppStore.getState().compareTabs[0]
+    expect(compareTab?.snapshot.entries).toEqual([])
+  })
+
+  it('keeps stale compare events out of the current session', async () => {
     let scanHandler: ((compareId: string, entries: readonly CompareEntry[]) => void) | null = null
 
     bindCompareEvents({
@@ -113,14 +181,16 @@ describe('bindCompareEvents', () => {
     })
 
     useCompareStore.getState().startScanning('compare-1')
-    scanHandler?.('compare-2', [createCompareEntry('stale.txt')])
+    scanHandler!('compare-2', [createCompareEntry('stale.txt')])
+
+    await flushCompareEvents()
 
     expect(useCompareStore.getState().entries).toEqual([])
   })
 
-  it('updates background compare tab snapshots by compare id', () => {
+  it('updates background compare tab snapshots by compare id', async () => {
     let scanHandler: ((compareId: string, entries: readonly CompareEntry[]) => void) | null = null
-    let entryHandler: ((compareId: string, entry: CompareEntry) => void) | null = null
+    let entryHandler: ((compareId: string, entries: readonly CompareEntry[]) => void) | null = null
 
     useAppStore.getState().saveCompareTab({
       id: 'compare-tab-1',
@@ -166,8 +236,10 @@ describe('bindCompareEvents', () => {
       },
     })
 
-    scanHandler?.('compare-bg', [createCompareEntry('docs', { isDirectory: true })])
-    entryHandler?.('compare-bg', createCompareEntry('docs', { isDirectory: true, state: 'equal' }))
+    scanHandler!('compare-bg', [createCompareEntry('docs', { isDirectory: true })])
+    entryHandler!('compare-bg', [createCompareEntry('docs', { isDirectory: true, state: 'equal' })])
+
+    await flushCompareEvents()
 
     const compareTab = useAppStore.getState().compareTabs[0]
     expect(compareTab?.snapshot.entries).toHaveLength(1)
@@ -175,7 +247,43 @@ describe('bindCompareEvents', () => {
     expect(compareTab?.snapshot.comparing).toBe(true)
   })
 
-  it('keeps stale events out of background compare tabs after compare id rollover', () => {
+  it('coalesces multiple same-frame events into one store flush', async () => {
+    let scanHandler: ((compareId: string, entries: readonly CompareEntry[]) => void) | null = null
+    let entryHandler: ((compareId: string, entries: readonly CompareEntry[]) => void) | null = null
+
+    bindCompareEvents({
+      onScanComplete: (callback) => {
+        scanHandler = callback
+        return () => {}
+      },
+      onEntryUpdate: (callback) => {
+        entryHandler = callback
+        return () => {}
+      },
+    })
+
+    useCompareStore.getState().startScanning('compare-1')
+
+    const setScanEntriesSpy = vi.spyOn(useCompareStore.getState(), 'setScanEntries')
+    const updateEntriesSpy = vi.spyOn(useCompareStore.getState(), 'updateEntries')
+
+    scanHandler!('compare-1', [createCompareEntry('docs', { isDirectory: true })])
+    scanHandler!('compare-1', [createCompareEntry('docs/readme.md')])
+    entryHandler!('compare-1', [createCompareEntry('docs', { isDirectory: true, state: 'equal' })])
+    entryHandler!('compare-1', [createCompareEntry('docs/readme.md', { state: 'different' })])
+
+    expect(setScanEntriesSpy).not.toHaveBeenCalled()
+    expect(updateEntriesSpy).not.toHaveBeenCalled()
+
+    await flushCompareEvents()
+
+    expect(setScanEntriesSpy).toHaveBeenCalledTimes(1)
+    expect(updateEntriesSpy).toHaveBeenCalledTimes(1)
+    expect(useCompareStore.getState().entries.map((entry) => entry.relativePath)).toEqual(['docs', 'docs/readme.md'])
+    expect(useCompareStore.getState().entries.map((entry) => entry.state)).toEqual(['equal', 'different'])
+  })
+
+  it('keeps stale events out of background compare tabs after compare id rollover', async () => {
     let scanHandler: ((compareId: string, entries: readonly CompareEntry[]) => void) | null = null
 
     useAppStore.getState().saveCompareTab({
@@ -219,7 +327,9 @@ describe('bindCompareEvents', () => {
       onEntryUpdate: () => () => {},
     })
 
-    scanHandler?.('compare-old', [createCompareEntry('stale.txt')])
+    scanHandler!('compare-old', [createCompareEntry('stale.txt')])
+
+    await flushCompareEvents()
 
     const compareTab = useAppStore.getState().compareTabs[0]
     expect(compareTab?.snapshot.entries.map((entry) => entry.relativePath)).toEqual(['fresh.txt'])

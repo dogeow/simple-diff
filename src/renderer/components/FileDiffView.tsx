@@ -1,4 +1,4 @@
-import { useMemo, useCallback, useEffect, useRef } from 'react'
+import { useMemo, useCallback, useEffect, useRef, useState } from 'react'
 import type { DiffTab } from '../stores/app-store'
 import { useAppStore } from '../stores/app-store'
 import type { DiffLine } from '../../../shared/types'
@@ -6,10 +6,14 @@ import { computeTextDiff } from '../../../shared/text-diff'
 import { truncatePath } from '../utils/tree-utils'
 import ScrollGutter, { type GutterMarker } from './ScrollGutter'
 import { applyDiffRange, canApplyLine, groupIntoHunks, type Hunk } from './file-diff-utils'
+import { buildHunkMetrics, getVisibleHunkWindow } from './file-diff-window'
 
 interface FileDiffViewProps {
   readonly tab: DiffTab
 }
+
+const DIFF_ROW_HEIGHT = 21
+const DIFF_OVERSCAN_ROWS = 16
 
 export default function FileDiffView({ tab }: FileDiffViewProps) {
   const updateDiffTab = useAppStore((s) => s.updateDiffTab)
@@ -17,7 +21,8 @@ export default function FileDiffView({ tab }: FileDiffViewProps) {
   const leftRef = useRef<HTMLDivElement>(null)
   const rightRef = useRef<HTMLDivElement>(null)
   const syncing = useRef(false)
-  const diffHunkRefs = useRef<Record<number, HTMLDivElement | null>>({})
+  const [scrollTop, setScrollTop] = useState(0)
+  const [viewportHeight, setViewportHeight] = useState(0)
 
   const handleScroll = useCallback((source: 'left' | 'right') => {
     if (syncing.current) return
@@ -25,67 +30,89 @@ export default function FileDiffView({ tab }: FileDiffViewProps) {
     const from = source === 'left' ? leftRef.current : rightRef.current
     const to = source === 'left' ? rightRef.current : leftRef.current
     if (from && to) {
+      setScrollTop(from.scrollTop)
       to.scrollTop = from.scrollTop
     }
     requestAnimationFrame(() => { syncing.current = false })
+  }, [])
+
+  useEffect(() => {
+    const element = leftRef.current
+    if (!element) {
+      return
+    }
+
+    const updateViewport = () => {
+      setViewportHeight(element.clientHeight)
+      setScrollTop(element.scrollTop)
+    }
+
+    updateViewport()
+
+    if (typeof ResizeObserver === 'undefined') {
+      return
+    }
+
+    const observer = new ResizeObserver(updateViewport)
+    observer.observe(element)
+    return () => observer.disconnect()
   }, [])
 
   const hunks = useMemo(() => {
     if (!tab.diffResult) return []
     return groupIntoHunks(tab.diffResult.leftLines, tab.diffResult.rightLines)
   }, [tab.diffResult])
+  const hunkMetrics = useMemo(() => buildHunkMetrics(hunks, DIFF_ROW_HEIGHT), [hunks])
+  const visibleHunkWindow = useMemo(() => getVisibleHunkWindow({
+    metrics: hunkMetrics,
+    scrollTop,
+    viewportHeight,
+    overscanHeight: DIFF_ROW_HEIGHT * DIFF_OVERSCAN_ROWS,
+  }), [hunkMetrics, scrollTop, viewportHeight])
+  const visibleHunkMetrics = useMemo(
+    () => hunkMetrics.slice(visibleHunkWindow.startIndex, visibleHunkWindow.endIndex),
+    [hunkMetrics, visibleHunkWindow.endIndex, visibleHunkWindow.startIndex],
+  )
+  const totalDiffHeight = useMemo(
+    () => hunkMetrics.length > 0
+      ? hunkMetrics[hunkMetrics.length - 1].top + hunkMetrics[hunkMetrics.length - 1].height
+      : 0,
+    [hunkMetrics],
+  )
 
   const isModified = tab.leftContent !== tab.originalLeftContent || tab.rightContent !== tab.originalRightContent
 
-  const diffMarkers = useMemo((): readonly GutterMarker[] => {
-    if (!tab.diffResult) return []
-    const totalLines = Math.max(tab.diffResult.leftLines.length, tab.diffResult.rightLines.length)
-    if (totalLines === 0) return []
-    return hunks
-      .filter((h) => h.type === 'diff')
-      .map((h) => ({
-        start: h.startIndex / totalLines,
-        height: (h.endIndex - h.startIndex) / totalLines,
-      }))
-  }, [hunks, tab.diffResult])
-
-  const diffHunks = useMemo(
-    () => hunks.filter((hunk) => hunk.type === 'diff'),
-    [hunks],
+  const diffHunkMetrics = useMemo(
+    () => hunkMetrics.filter((metric) => metric.hunk.type === 'diff'),
+    [hunkMetrics],
   )
+
+  const diffMarkers = useMemo((): readonly GutterMarker[] => {
+    if (totalDiffHeight === 0) return []
+    return diffHunkMetrics.map((metric) => ({
+        start: metric.top / totalDiffHeight,
+        height: metric.height / totalDiffHeight,
+      }))
+  }, [diffHunkMetrics, totalDiffHeight])
 
   const scrollToDiff = useCallback((direction: 'next' | 'prev') => {
     const container = leftRef.current
-    if (!container || diffHunks.length === 0) return
-
-    const containerRect = container.getBoundingClientRect()
-    const tops = diffHunks
-      .map((hunk) => {
-        const el = diffHunkRefs.current[hunk.startIndex]
-        if (!el) return null
-        // Calculate position relative to container's scroll origin
-        const elRect = el.getBoundingClientRect()
-        const top = elRect.top - containerRect.top + container.scrollTop
-        return { startIndex: hunk.startIndex, top }
-      })
-      .filter((item): item is { startIndex: number; top: number } => item != null)
-
-    if (tops.length === 0) return
+    if (!container || diffHunkMetrics.length === 0) return
 
     const currentTop = container.scrollTop
-    let target = tops[0]
+    let target = diffHunkMetrics[0]
 
     if (direction === 'next') {
-      target = tops.find((item) => item.top > currentTop + 4) ?? tops[tops.length - 1]
+      target = diffHunkMetrics.find((metric) => metric.top > currentTop + 4) ?? diffHunkMetrics[diffHunkMetrics.length - 1]
     } else {
-      target = [...tops].reverse().find((item) => item.top < currentTop - 4) ?? tops[0]
+      target = [...diffHunkMetrics].reverse().find((metric) => metric.top < currentTop - 4) ?? diffHunkMetrics[0]
     }
 
     container.scrollTo({ top: target.top, behavior: 'smooth' })
     if (rightRef.current) {
       rightRef.current.scrollTo({ top: target.top, behavior: 'smooth' })
     }
-  }, [diffHunks])
+  }, [diffHunkMetrics])
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -234,20 +261,23 @@ export default function FileDiffView({ tab }: FileDiffViewProps) {
       <div className="flex flex-1 overflow-hidden">
         {/* Left panel */}
         <div ref={leftRef} className="flex-1 overflow-auto font-mono text-xs" onScroll={() => handleScroll('left')}>
-          {hunks.map((hunk) => (
+          {visibleHunkWindow.topSpacerHeight > 0 && (
+            <div aria-hidden="true" style={{ height: `${visibleHunkWindow.topSpacerHeight}px` }} />
+          )}
+          {visibleHunkMetrics.map((metric) => (
             <HunkBlock
-              key={hunk.startIndex}
-              hunk={hunk}
+              key={metric.hunk.startIndex}
+              hunk={metric.hunk}
               lines={leftLines}
               otherLines={rightLines}
               side="left"
-              onApplyHunk={() => handleApplyRange(hunk, 'left-to-right')}
+              onApplyHunk={() => handleApplyRange(metric.hunk, 'left-to-right')}
               onApplyLine={(lineIndex) => handleApplyRange({ startIndex: lineIndex, endIndex: lineIndex + 1 }, 'left-to-right')}
-              containerRef={(element) => {
-                diffHunkRefs.current[hunk.startIndex] = element
-              }}
             />
           ))}
+          {visibleHunkWindow.bottomSpacerHeight > 0 && (
+            <div aria-hidden="true" style={{ height: `${visibleHunkWindow.bottomSpacerHeight}px` }} />
+          )}
         </div>
 
         {/* Center gutter with scroll indicator and diff markers */}
@@ -255,17 +285,23 @@ export default function FileDiffView({ tab }: FileDiffViewProps) {
 
         {/* Right panel */}
         <div ref={rightRef} className="flex-1 overflow-auto font-mono text-xs" onScroll={() => handleScroll('right')}>
-          {hunks.map((hunk) => (
+          {visibleHunkWindow.topSpacerHeight > 0 && (
+            <div aria-hidden="true" style={{ height: `${visibleHunkWindow.topSpacerHeight}px` }} />
+          )}
+          {visibleHunkMetrics.map((metric) => (
             <HunkBlock
-              key={hunk.startIndex}
-              hunk={hunk}
+              key={metric.hunk.startIndex}
+              hunk={metric.hunk}
               lines={rightLines}
               otherLines={leftLines}
               side="right"
-              onApplyHunk={() => handleApplyRange(hunk, 'right-to-left')}
+              onApplyHunk={() => handleApplyRange(metric.hunk, 'right-to-left')}
               onApplyLine={(lineIndex) => handleApplyRange({ startIndex: lineIndex, endIndex: lineIndex + 1 }, 'right-to-left')}
             />
           ))}
+          {visibleHunkWindow.bottomSpacerHeight > 0 && (
+            <div aria-hidden="true" style={{ height: `${visibleHunkWindow.bottomSpacerHeight}px` }} />
+          )}
         </div>
       </div>
     </div>
@@ -285,15 +321,14 @@ interface HunkBlockProps {
   readonly side: 'left' | 'right'
   readonly onApplyHunk: () => void
   readonly onApplyLine: (lineIndex: number) => void
-  readonly containerRef?: (element: HTMLDivElement | null) => void
 }
 
-function HunkBlock({ hunk, lines, otherLines, side, onApplyHunk, onApplyLine, containerRef }: HunkBlockProps) {
+function HunkBlock({ hunk, lines, otherLines, side, onApplyHunk, onApplyLine }: HunkBlockProps) {
   const hunkLines = lines.slice(hunk.startIndex, hunk.endIndex)
   const isMultiLineDiff = hunk.endIndex - hunk.startIndex > 1
 
   return (
-    <div ref={containerRef} className="group relative">
+    <div className="group relative">
       {hunk.type === 'diff' && (
         <button
           onClick={onApplyHunk}
@@ -308,6 +343,7 @@ function HunkBlock({ hunk, lines, otherLines, side, onApplyHunk, onApplyLine, co
         <div
           key={hunk.startIndex + i}
           className={`group/line flex min-w-full w-max border-b border-neutral-800/30 ${LINE_BG[line.type]}`}
+          style={{ height: `${DIFF_ROW_HEIGHT}px` }}
         >
           <span className="inline-block w-12 shrink-0 select-none border-r border-neutral-800 px-2 py-0.5 text-right text-neutral-500">
             {line.lineNumber >= 0 ? line.lineNumber : ''}

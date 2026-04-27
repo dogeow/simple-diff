@@ -21,7 +21,7 @@ export default function TreeEntryCell({
   const indent = node.depth * indentSize
 
   return (
-    <div className="flex items-center" style={{ paddingLeft: `${indent}px` }}>
+    <div className="flex min-w-0 items-center" style={{ paddingLeft: `${indent}px` }}>
       {node.isDirectory ? (
         loading ? (
           <span className="mr-1 flex h-4 w-4 items-center justify-center">
@@ -41,8 +41,8 @@ export default function TreeEntryCell({
       ) : (
         <span className="mr-1 w-4" />
       )}
-      <span className="mr-1.5 text-xs">{node.isDirectory ? '📁' : '📄'}</span>
-      {children ?? <span className="font-mono text-xs">{node.name}</span>}
+      <span className="mr-1.5 shrink-0 text-xs">{node.isDirectory ? '📁' : '📄'}</span>
+      {children ?? <span className="min-w-0 truncate font-mono text-xs whitespace-nowrap">{node.name}</span>}
     </div>
   )
 }

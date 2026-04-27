@@ -1,9 +1,10 @@
-import { useMemo } from 'react'
+import { useDeferredValue, useMemo } from 'react'
 import { mergePathFilters } from '@shared/path-filter'
+import { useShallow } from 'zustand/react/shallow'
 import type { CompareEntry, CompareFilter } from '../../../shared/types'
 import { useCompareStore } from '../stores/compare-store'
 import { useSettingsStore } from '../stores/settings-store'
-import { buildTree, getVisibleNodes, prepareCompareEntries, type TreeNode, type TreeSide } from '../utils/tree-utils'
+import { buildVisibleNodes, prepareCompareEntries, type TreeNode, type TreeSide } from '../utils/tree-utils'
 
 interface UseVisibleCompareNodesOptions {
   readonly entries: readonly CompareEntry[]
@@ -16,10 +17,13 @@ export function useVisibleCompareNodes({
   filter,
   side,
 }: UseVisibleCompareNodesOptions): readonly TreeNode[] {
-  const expandedDirs = useCompareStore((state) => state.expandedDirs)
-  const extensionFilter = useCompareStore((state) => state.extensionFilter)
-  const hideDot = useCompareStore((state) => state.hideDot)
-  const hideDotFilter = useCompareStore((state) => state.hideDotFilter)
+  const deferredEntries = useDeferredValue(entries)
+  const { expandedDirs, extensionFilter, hideDot, hideDotFilter } = useCompareStore(useShallow((state) => ({
+    expandedDirs: state.expandedDirs,
+    extensionFilter: state.extensionFilter,
+    hideDot: state.hideDot,
+    hideDotFilter: state.hideDotFilter,
+  })))
   const globalPathFilters = useSettingsStore((state) => state.globalPathFilters)
   const pathFilter = useMemo(
     () => mergePathFilters(globalPathFilters, extensionFilter),
@@ -28,16 +32,15 @@ export function useVisibleCompareNodes({
 
   const preparedEntries = useMemo(
     () =>
-      prepareCompareEntries(entries, {
+      prepareCompareEntries(deferredEntries, {
         filter,
         pathFilter,
         hideDot,
         hideDotFilter,
         side,
       }),
-    [entries, filter, hideDot, hideDotFilter, pathFilter, side],
+    [deferredEntries, filter, hideDot, hideDotFilter, pathFilter, side],
   )
 
-  const tree = useMemo(() => buildTree(preparedEntries), [preparedEntries])
-  return useMemo(() => getVisibleNodes(tree, expandedDirs), [tree, expandedDirs])
+  return useMemo(() => buildVisibleNodes(preparedEntries, expandedDirs), [expandedDirs, preparedEntries])
 }

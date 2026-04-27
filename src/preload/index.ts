@@ -58,9 +58,9 @@ const api = {
     }
   },
 
-  onEntryUpdate: (callback: (compareId: string, entry: CompareEntry) => void) => {
-    const listener = (_event: Electron.IpcRendererEvent, compareId: string, entry: CompareEntry) =>
-      callback(compareId, entry)
+  onEntryUpdate: (callback: (compareId: string, entries: readonly CompareEntry[]) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, compareId: string, entries: readonly CompareEntry[]) =>
+      callback(compareId, entries)
     ipcRenderer.on(IPC_CHANNELS.COMPARE_ENTRY_UPDATE, listener)
     return () => {
       ipcRenderer.removeListener(IPC_CHANNELS.COMPARE_ENTRY_UPDATE, listener)

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { joinSourcePath, trimTrailingSeparators } from '@shared/source-path'
+import { useShallow } from 'zustand/react/shallow'
 import type { FileEntry, SSHConfig } from '../../../shared/types'
 import { useSSHStore } from '../stores/ssh-store'
 
@@ -85,7 +86,10 @@ export default function SourceSelector({
   onPathChange,
   onSSHConfigIdChange,
 }: SourceSelectorProps) {
-  const { configs, loadConfigs } = useSSHStore()
+  const { configs, loadConfigs } = useSSHStore(useShallow((state) => ({
+    configs: state.configs,
+    loadConfigs: state.loadConfigs,
+  })))
   const [isDragOver, setIsDragOver] = useState(false)
   const [remoteBrowserOpen, setRemoteBrowserOpen] = useState(false)
   const [remoteBrowserPath, setRemoteBrowserPath] = useState('/')

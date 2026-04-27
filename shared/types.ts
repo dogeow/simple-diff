@@ -55,7 +55,7 @@ export interface SSHConfigInternal extends SSHConfig {
 // ─── Compare ─────────────────────────────────────────────────
 
 export type CompareState = 'pending' | 'comparing' | 'equal' | 'left_only' | 'right_only' | 'different'
-export type CompareFilter = CompareState | 'all' | 'paired'
+export type CompareFilter = CompareState | 'all' | 'paired' | 'unresolved'
 
 export type DiffReason =
   | { readonly type: 'size'; readonly leftSize: number; readonly rightSize: number }

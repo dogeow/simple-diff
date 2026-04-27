@@ -31,6 +31,18 @@ export function collectBusyDirectoryPaths(
   return busyPaths
 }
 
+export function hasLoadingDescendantDirectory(
+  relativePath: string,
+  loadingDirs: ReadonlySet<string>,
+): boolean {
+  for (const loadingDir of loadingDirs) {
+    if (loadingDir === relativePath) return true
+    if (relativePath !== '' && loadingDir.startsWith(`${relativePath}/`)) return true
+  }
+
+  return false
+}
+
 export function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
@@ -57,5 +69,5 @@ export function shouldShowDirectorySpinner(
   loading: boolean,
   state: CompareState,
 ): boolean {
-  return isDirectory && (loading || state === 'comparing')
+  return isDirectory && (loading || state === 'pending' || state === 'comparing')
 }

@@ -199,7 +199,7 @@ describe('IPC compare handlers', () => {
       return compareResult
     })
 
-    const sender = { send: vi.fn() }
+    const sender = { send: vi.fn(), once: vi.fn(), off: vi.fn(), mainFrame: {} }
     const response = await getHandler(IPC_CHANNELS.COMPARE_RUN)({ sender }, createRequest('compare-success'))
 
     expect(response).toEqual({
@@ -230,7 +230,7 @@ describe('IPC compare handlers', () => {
       2,
       IPC_CHANNELS.COMPARE_ENTRY_UPDATE,
       'compare-success',
-      updateEntry,
+      [updateEntry],
     )
     expect(mocks.addHistory).toHaveBeenCalledWith({
       ...compareResult,
@@ -244,7 +244,7 @@ describe('IPC compare handlers', () => {
   it('aborts an active compare via COMPARE_CANCEL and suppresses progress events after cancellation', async () => {
     const leftSource = createMockSource()
     const rightSource = createMockSource()
-    const sender = { send: vi.fn() }
+    const sender = { send: vi.fn(), once: vi.fn(), off: vi.fn(), mainFrame: {} }
     const queuedEntry = createCompareEntry('cancelled.txt', 'equal')
 
     mocks.createFileSource
@@ -275,6 +275,41 @@ describe('IPC compare handlers', () => {
     expect(rightSource.dispose).toHaveBeenCalledTimes(1)
   })
 
+  it('aborts compare when the renderer can no longer receive scan progress', async () => {
+    const leftSource = createMockSource()
+    const rightSource = createMockSource()
+    const sender = {
+      send: vi.fn(() => {
+        throw new Error('Render frame was disposed before WebFrameMain could be accessed')
+      }),
+      once: vi.fn(),
+      off: vi.fn(),
+      mainFrame: {},
+    }
+    const queuedEntry = createCompareEntry('disposed.txt', 'pending')
+
+    mocks.createFileSource
+      .mockResolvedValueOnce(leftSource)
+      .mockResolvedValueOnce(rightSource)
+
+    mocks.compareDirectories.mockImplementation(({ signal, onEntriesFound }) =>
+      new Promise((_, reject) => {
+        signal?.addEventListener('abort', () => {
+          reject(new Error('对比已取消'))
+        }, { once: true })
+        onEntriesFound?.([queuedEntry])
+      }),
+    )
+
+    const response = await getHandler(IPC_CHANNELS.COMPARE_RUN)({ sender }, createRequest('compare-disposed'))
+
+    expect(response).toEqual({ success: false, error: '对比已取消' })
+    expect(sender.send).toHaveBeenCalledTimes(1)
+    expect(mocks.addHistory).not.toHaveBeenCalled()
+    expect(leftSource.dispose).toHaveBeenCalledTimes(1)
+    expect(rightSource.dispose).toHaveBeenCalledTimes(1)
+  })
+
   it('keeps multiple compares for the same sender running concurrently', async () => {
     const firstLeftSource = createMockSource()
     const firstRightSource = createMockSource()
@@ -298,7 +333,7 @@ describe('IPC compare handlers', () => {
       }))
       .mockResolvedValueOnce(createResult([createCompareEntry('second.txt', 'equal')]))
 
-    const sender = { send: vi.fn() }
+    const sender = { send: vi.fn(), once: vi.fn(), off: vi.fn(), mainFrame: {} }
 
     const firstPromise = getHandler(IPC_CHANNELS.COMPARE_RUN)({ sender }, createRequest('compare-1'))
     await flushAsyncWork()
@@ -354,7 +389,7 @@ describe('IPC compare handlers', () => {
       }))
       .mockResolvedValueOnce(createResult([createCompareEntry('rerun.txt', 'equal')]))
 
-    const sender = { send: vi.fn() }
+    const sender = { send: vi.fn(), once: vi.fn(), off: vi.fn(), mainFrame: {} }
 
     const firstPromise = getHandler(IPC_CHANNELS.COMPARE_RUN)({ sender }, createRequest('compare-rerun'))
     await flushAsyncWork()
@@ -393,8 +428,8 @@ describe('IPC compare handlers', () => {
       }))
       .mockResolvedValueOnce(createResult([createCompareEntry('second.txt', 'equal')]))
 
-    const senderOne = { send: vi.fn() }
-    const senderTwo = { send: vi.fn() }
+    const senderOne = { send: vi.fn(), once: vi.fn(), off: vi.fn(), mainFrame: {} }
+    const senderTwo = { send: vi.fn(), once: vi.fn(), off: vi.fn(), mainFrame: {} }
 
     const firstPromise = getHandler(IPC_CHANNELS.COMPARE_RUN)({ sender: senderOne }, createRequest('compare-1'))
     await flushAsyncWork()
@@ -452,7 +487,7 @@ describe('IPC compare handlers', () => {
         resolveSecondCompare = resolve
       }))
 
-    const sender = { send: vi.fn() }
+    const sender = { send: vi.fn(), once: vi.fn(), off: vi.fn(), mainFrame: {} }
 
     const firstPromise = getHandler(IPC_CHANNELS.COMPARE_RUN)({ sender }, createRequest('compare-1'))
     const secondPromise = getHandler(IPC_CHANNELS.COMPARE_RUN)({ sender }, createRequest('compare-2'))
@@ -514,8 +549,8 @@ describe('IPC compare handlers', () => {
         resolveThirdCompare = resolve
       }))
 
-    const senderOne = { send: vi.fn() }
-    const senderTwo = { send: vi.fn() }
+    const senderOne = { send: vi.fn(), once: vi.fn(), off: vi.fn(), mainFrame: {} }
+    const senderTwo = { send: vi.fn(), once: vi.fn(), off: vi.fn(), mainFrame: {} }
 
     const firstPromise = getHandler(IPC_CHANNELS.COMPARE_RUN)({ sender: senderOne }, createRequest('compare-1'))
     const secondPromise = getHandler(IPC_CHANNELS.COMPARE_RUN)({ sender: senderOne }, createRequest('compare-2'))

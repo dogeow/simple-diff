@@ -9,7 +9,7 @@ import { useAppStore } from './stores/app-store'
 import { useEffect, useRef } from 'react'
 import { sanitizePersistedCompareSessionSnapshot, useCompareStore } from './stores/compare-store'
 import { bindCompareEvents } from './utils/compare-events'
-import { useCompare } from './hooks/useCompare'
+import { useCompareActions } from './hooks/useCompare'
 
 export default function App() {
   const page = useAppStore((s) => s.page)
@@ -19,7 +19,7 @@ export default function App() {
   const setSyncTask = useCompareStore((s) => s.setSyncTask)
   const hydrateSourceInputs = useCompareStore((s) => s.hydrateSourceInputs)
   const restoredCompareTabsRef = useRef(false)
-  const { runCompare } = useCompare()
+  const { runCompare } = useCompareActions()
 
   useEffect(() => {
     if (restoredCompareTabsRef.current) return

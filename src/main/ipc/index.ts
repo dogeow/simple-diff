@@ -2,7 +2,7 @@ import { ipcMain, dialog, shell, BrowserWindow } from 'electron'
 import * as fs from 'fs/promises'
 import * as path from 'path'
 import { IPC_CHANNELS } from '@shared/types'
-import type { CompareRequest, SourceConfig, SSHConfigInput, StartSyncRequest } from '@shared/types'
+import type { CompareEntry, CompareRequest, SourceConfig, SSHConfigInput, StartSyncRequest } from '@shared/types'
 import { formatDuration } from '@shared/format-duration'
 import { createFileSource } from '../file-source/index'
 import { compareDirectories } from '../compare/comparator'
@@ -111,6 +111,17 @@ function registerCompareHandlers(): void {
       const controller = new AbortController()
       setActiveCompare(event.sender, { compareId: request.compareId, controller })
 
+      const sender = event.sender
+      const onSenderGone = (reason: string): void => {
+        if (controller.signal.aborted) return
+        compareLogger.warn(`[${request.compareId}] 渲染进程不再可用 (${reason})，取消对比`)
+        controller.abort()
+      }
+      const onDestroyed = (): void => onSenderGone('destroyed')
+      const onRenderProcessGone = (): void => onSenderGone('render-process-gone')
+      sender.once('destroyed', onDestroyed)
+      sender.once('render-process-gone', onRenderProcessGone)
+
       let scanBatchCount = 0
       let sentEntryUpdateCount = 0
 
@@ -123,6 +134,37 @@ function registerCompareHandlers(): void {
       compareLogger.info(`[${request.compareId}] 正在创建右侧数据源...`)
       const rightSource = await createFileSource(request.right)
       compareLogger.info(`[${request.compareId}] 右侧数据源就绪`)
+
+      const ENTRY_UPDATE_FLUSH_INTERVAL_MS = 50
+      const ENTRY_UPDATE_FLUSH_THRESHOLD = 200
+      const entryUpdateBuffer: CompareEntry[] = []
+      let flushTimer: NodeJS.Timeout | null = null
+
+      const abortForUnavailableRenderer = (phase: '扫描批次' | '条目更新'): void => {
+        if (controller.signal.aborted) return
+        compareLogger.warn(`[${request.compareId}] ${phase}无法发送到渲染进程，取消进行中的对比`)
+        controller.abort()
+      }
+
+      const flushEntryUpdates = (): void => {
+        if (flushTimer) {
+          clearTimeout(flushTimer)
+          flushTimer = null
+        }
+        if (entryUpdateBuffer.length === 0) return
+        const batch = entryUpdateBuffer.splice(0, entryUpdateBuffer.length)
+        if (controller.signal.aborted) return
+        sentEntryUpdateCount += batch.length
+        if (sentEntryUpdateCount <= 200 || sentEntryUpdateCount % 2000 === 0) {
+          compareLogger.info(
+            `[${request.compareId}] 发送条目更新批次: size=${batch.length} 累计=${sentEntryUpdateCount} sample=${batch.slice(0, 3).map((e) => `${e.relativePath || '.'}@${e.state}`).join('、')}`,
+          )
+        }
+        const sent = safeSendToWebContents(event.sender, IPC_CHANNELS.COMPARE_ENTRY_UPDATE, request.compareId, batch)
+        if (!sent) {
+          abortForUnavailableRenderer('条目更新')
+        }
+      }
 
       try {
         compareLogger.info(`[${request.compareId}] 开始逐层对比目录...`)
@@ -143,24 +185,23 @@ function registerCompareHandlers(): void {
             )
             const sent = safeSendToWebContents(event.sender, IPC_CHANNELS.COMPARE_SCAN_COMPLETE, request.compareId, entries)
             if (!sent) {
-              compareLogger.warn(`[${request.compareId}] 发送扫描批次失败: 渲染进程不可用`)
+              abortForUnavailableRenderer('扫描批次')
             }
           },
           onEntryUpdate: (entry) => {
             if (controller.signal.aborted) return
-            sentEntryUpdateCount += 1
-            if (sentEntryUpdateCount <= 10 || sentEntryUpdateCount % 200 === 0) {
-              compareLogger.info(
-                `[${request.compareId}] 发送条目更新 #${sentEntryUpdateCount}: path=${entry.relativePath || '.'} state=${entry.state}`,
-              )
+            entryUpdateBuffer.push(entry)
+            if (entryUpdateBuffer.length >= ENTRY_UPDATE_FLUSH_THRESHOLD) {
+              flushEntryUpdates()
+              return
             }
-            const sent = safeSendToWebContents(event.sender, IPC_CHANNELS.COMPARE_ENTRY_UPDATE, request.compareId, entry)
-            if (!sent) {
-              compareLogger.warn(`[${request.compareId}] 发送条目更新失败: path=${entry.relativePath || '.'} 渲染进程不可用`)
+            if (!flushTimer) {
+              flushTimer = setTimeout(flushEntryUpdates, ENTRY_UPDATE_FLUSH_INTERVAL_MS)
             }
           },
         })
 
+        flushEntryUpdates()
         compareLogger.info(`[${request.compareId}] 对比完成，耗时 ${formatDuration(result.duration)} — 相同:${result.stats.equal} 不同:${result.stats.different} 仅左:${result.stats.leftOnly} 仅右:${result.stats.rightOnly}`)
 
         // Attach source info for history
@@ -175,6 +216,14 @@ function registerCompareHandlers(): void {
         }
         throw error
       } finally {
+        flushEntryUpdates()
+        if (flushTimer) {
+          clearTimeout(flushTimer)
+          flushTimer = null
+        }
+        entryUpdateBuffer.length = 0
+        sender.off('destroyed', onDestroyed)
+        sender.off('render-process-gone', onRenderProcessGone)
         compareLogger.info(`[${request.compareId}] 释放对比资源，已发送扫描批次=${scanBatchCount} 条目更新=${sentEntryUpdateCount}`)
         await leftSource.dispose()
         await rightSource.dispose()

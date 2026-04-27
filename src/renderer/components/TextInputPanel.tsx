@@ -1,11 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { DiffLine } from '../../../shared/types'
 import type { InlineSegment } from '../utils/inline-diff'
+import { getVisibleRowWindow } from './text-panel-window'
 import {
   getDisplayRowIndexFromTextOffset,
   type ManualAlignRequest,
   type TextDiffSide,
 } from '../utils/manual-align'
+
+const DISPLAY_ROW_HEIGHT = 20
+const DISPLAY_ROW_OVERSCAN = 12
 
 interface TextInputPanelProps {
   readonly side: TextDiffSide
@@ -25,6 +29,16 @@ interface TextInputPanelProps {
   readonly onManualAlignLineClick?: (side: TextDiffSide, lineNumber: number | null) => void
   readonly onChange: (text: string, fileLabel?: string) => void
   readonly onClear: () => void
+}
+
+interface DisplayRow {
+  readonly key: string
+  readonly number: string
+  readonly lineNumber: number | null
+  readonly content: string
+  readonly highlighted: boolean
+  readonly type: DiffLine['type']
+  readonly segments: readonly InlineSegment[] | undefined
 }
 
 async function readFileAsText(file: File): Promise<string> {
@@ -61,40 +75,96 @@ export default function TextInputPanel({
   const gutterRef = useRef<HTMLDivElement>(null)
   const manualAlignOverlayRef = useRef<HTMLDivElement>(null)
   const internalTextAreaRef = useRef<HTMLTextAreaElement>(null)
+  const [overlayScrollTop, setOverlayScrollTop] = useState(0)
+  const [overlayViewportHeight, setOverlayViewportHeight] = useState(0)
 
   const resolvedTextAreaRef = textAreaRef ?? internalTextAreaRef
-  const displayRows = useMemo(() => {
+  const { displayRows, displayValue } = useMemo((): {
+    readonly displayRows: readonly DisplayRow[]
+    readonly displayValue: string
+  } => {
     if (diffLines && diffLines.length > 0) {
-      return diffLines.map((line, index) => ({
-        key: `${line.lineNumber}-${index}`,
-        number: line.lineNumber > 0 ? String(line.lineNumber) : '',
-        lineNumber: line.lineNumber > 0 ? line.lineNumber : null,
-        content: line.content,
-        highlighted: line.type === highlightType,
-        type: line.type,
-        segments: inlineSegments?.get(index),
-      }))
+      const rows: DisplayRow[] = []
+      const lineContents = new Array<string>(diffLines.length)
+
+      for (let index = 0; index < diffLines.length; index += 1) {
+        const line = diffLines[index]
+        const lineNumber = line.lineNumber > 0 ? line.lineNumber : null
+
+        lineContents[index] = line.content
+        rows.push({
+          key: `${line.lineNumber}-${index}`,
+          number: lineNumber === null ? '' : String(lineNumber),
+          lineNumber,
+          content: line.content,
+          highlighted: line.type === highlightType,
+          type: line.type,
+          segments: inlineSegments?.get(index),
+        })
+      }
+
+      return {
+        displayRows: rows,
+        displayValue: lineContents.join('\n'),
+      }
     }
 
     const rawLines = value.length > 0 ? value.split('\n') : ['']
-    return rawLines.map((content, index) => ({
-      key: String(index),
-      number: String(index + 1),
-      lineNumber: index + 1,
-      content,
-      highlighted: highlightedLines?.has(index + 1) ?? false,
-      type: highlightedLines?.has(index + 1) ? highlightType : 'equal',
-      segments: undefined,
-    }))
+    return {
+      displayRows: rawLines.map((content, index) => {
+        const lineNumber = index + 1
+        const highlighted = highlightedLines?.has(lineNumber) ?? false
+
+        return {
+          key: String(index),
+          number: String(lineNumber),
+          lineNumber,
+          content,
+          highlighted,
+          type: highlighted ? highlightType : 'equal',
+          segments: undefined,
+        }
+      }),
+      displayValue: value,
+    }
   }, [diffLines, highlightType, highlightedLines, inlineSegments, value])
-  const displayValue = useMemo(
-    () => displayRows.map((row) => row.content).join('\n'),
-    [displayRows],
+  const visibleRowWindow = useMemo(() => getVisibleRowWindow({
+    totalRows: displayRows.length,
+    scrollTop: overlayScrollTop,
+    viewportHeight: overlayViewportHeight,
+    rowHeight: DISPLAY_ROW_HEIGHT,
+    overscanRows: DISPLAY_ROW_OVERSCAN,
+  }), [displayRows.length, overlayScrollTop, overlayViewportHeight])
+  const visibleRows = useMemo(
+    () => displayRows.slice(visibleRowWindow.startIndex, visibleRowWindow.endIndex),
+    [displayRows, visibleRowWindow.endIndex, visibleRowWindow.startIndex],
   )
   const lineHighlightClass = highlightType === 'add' ? 'bg-green-900/30' : 'bg-red-900/30'
   const emphasisClass = highlightType === 'add' ? 'bg-green-600/50' : 'bg-red-600/50'
   const manualAlignActive = manualAlignRequest != null
   const awaitingManualAlignTarget = manualAlignRequest != null && manualAlignRequest.side !== side
+
+  useEffect(() => {
+    const element = resolvedTextAreaRef.current
+    if (!element) {
+      return
+    }
+
+    const updateViewport = () => {
+      setOverlayViewportHeight(element.clientHeight)
+      setOverlayScrollTop(element.scrollTop)
+    }
+
+    updateViewport()
+    if (typeof ResizeObserver === 'undefined') {
+      return
+    }
+
+    const observer = new ResizeObserver(updateViewport)
+    observer.observe(element)
+
+    return () => observer.disconnect()
+  }, [resolvedTextAreaRef])
 
   useEffect(() => {
     if (!manualAlignActive || !manualAlignOverlayRef.current) {
@@ -110,6 +180,7 @@ export default function TextInputPanel({
   }
 
   const syncHighlightScroll = (element: HTMLTextAreaElement) => {
+    setOverlayScrollTop(element.scrollTop)
     if (highlightRef.current) {
       highlightRef.current.scrollTop = element.scrollTop
       highlightRef.current.scrollLeft = element.scrollLeft
@@ -268,7 +339,8 @@ export default function TextInputPanel({
           className="pointer-events-none absolute inset-y-0 left-0 z-10 w-12 overflow-hidden border-r border-neutral-800 bg-neutral-950/95 font-mono text-xs leading-5 text-neutral-500"
         >
           <div className="py-2">
-            {displayRows.map((row) => (
+            {visibleRowWindow.topSpacerHeight > 0 && <div style={{ height: `${visibleRowWindow.topSpacerHeight}px` }} />}
+            {visibleRows.map((row) => (
               <div
                 key={row.key}
                 className={`h-5 px-2 text-right ${
@@ -282,6 +354,7 @@ export default function TextInputPanel({
                 {row.number}
               </div>
             ))}
+            {visibleRowWindow.bottomSpacerHeight > 0 && <div style={{ height: `${visibleRowWindow.bottomSpacerHeight}px` }} />}
           </div>
         </div>
 
@@ -291,7 +364,8 @@ export default function TextInputPanel({
           className="pointer-events-none absolute inset-0 overflow-hidden py-2 pl-14 pr-2 font-mono text-xs leading-5 text-neutral-100"
         >
           <div className="min-w-full w-max">
-            {displayRows.map((row) => (
+            {visibleRowWindow.topSpacerHeight > 0 && <div style={{ height: `${visibleRowWindow.topSpacerHeight}px` }} />}
+            {visibleRows.map((row) => (
               <div
                 key={row.key}
                 className={`h-5 min-w-full whitespace-pre rounded-sm pr-2 ${
@@ -307,6 +381,7 @@ export default function TextInputPanel({
                 {renderOverlayLine(row.segments, row.content, row.highlighted)}
               </div>
             ))}
+            {visibleRowWindow.bottomSpacerHeight > 0 && <div style={{ height: `${visibleRowWindow.bottomSpacerHeight}px` }} />}
           </div>
         </div>
 
@@ -315,7 +390,8 @@ export default function TextInputPanel({
             ref={manualAlignOverlayRef}
             className="absolute inset-0 z-30 overflow-hidden py-2 font-mono text-xs leading-5"
           >
-            {displayRows.map((row) => (
+            {visibleRowWindow.topSpacerHeight > 0 && <div style={{ height: `${visibleRowWindow.topSpacerHeight}px` }} />}
+            {visibleRows.map((row) => (
               <div
                 key={row.key}
                 onMouseDown={(event) => event.preventDefault()}
@@ -330,6 +406,7 @@ export default function TextInputPanel({
                 <div className="flex-1" />
               </div>
             ))}
+            {visibleRowWindow.bottomSpacerHeight > 0 && <div style={{ height: `${visibleRowWindow.bottomSpacerHeight}px` }} />}
           </div>
         )}
 

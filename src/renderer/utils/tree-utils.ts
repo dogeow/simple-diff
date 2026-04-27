@@ -73,6 +73,42 @@ export interface TreeNode {
   readonly depth: number
 }
 
+interface EntrySortInfo {
+  readonly entry: CompareEntry
+  readonly segments: readonly string[]
+}
+
+function isDirectoryAtSegment(info: EntrySortInfo, segmentIndex: number): boolean {
+  return segmentIndex < info.segments.length - 1 || info.entry.isDirectory
+}
+
+function compareEntrySortInfo(a: EntrySortInfo, b: EntrySortInfo): number {
+  const minLength = Math.min(a.segments.length, b.segments.length)
+
+  for (let i = 0; i < minLength; i++) {
+    const aSegment = a.segments[i]
+    const bSegment = b.segments[i]
+
+    if (aSegment === bSegment) continue
+
+    const aIsDirectory = isDirectoryAtSegment(a, i)
+    const bIsDirectory = isDirectoryAtSegment(b, i)
+    if (aIsDirectory !== bIsDirectory) {
+      return aIsDirectory ? -1 : 1
+    }
+
+    return aSegment.localeCompare(bSegment)
+  }
+
+  return a.segments.length - b.segments.length
+}
+
+function sortEntryInfos(entries: readonly CompareEntry[]): EntrySortInfo[] {
+  return entries
+    .map((entry) => ({ entry, segments: entry.relativePath.split('/') }))
+    .sort(compareEntrySortInfo)
+}
+
 export function buildTree(entries: readonly CompareEntry[]): TreeNode {
   const root: TreeNode = {
     name: '',
@@ -86,10 +122,10 @@ export function buildTree(entries: readonly CompareEntry[]): TreeNode {
   const dirMap = new Map<string, TreeNode>()
   dirMap.set('', root)
 
-  const sorted = [...entries].sort((a, b) => a.relativePath.localeCompare(b.relativePath))
+  const sorted = sortEntryInfos(entries)
 
-  for (const entry of sorted) {
-    const parts = entry.relativePath.split('/')
+  for (const { entry, segments } of sorted) {
+    const parts = segments
     const parentPath = parts.slice(0, -1).join('/')
 
     const node: TreeNode = {
@@ -111,6 +147,37 @@ export function buildTree(entries: readonly CompareEntry[]): TreeNode {
 
   sortTree(root)
   return root
+}
+
+export function buildVisibleNodes(
+  entries: readonly CompareEntry[],
+  expandedDirs: ReadonlySet<string>,
+): readonly TreeNode[] {
+  const result: TreeNode[] = []
+  const sorted = sortEntryInfos(entries)
+  let hiddenPrefix: string | null = null
+
+  for (const { entry, segments } of sorted) {
+    if (hiddenPrefix && entry.relativePath.startsWith(`${hiddenPrefix}/`)) {
+      continue
+    }
+
+    hiddenPrefix = null
+    result.push({
+      name: entry.name,
+      relativePath: entry.relativePath,
+      isDirectory: entry.isDirectory,
+      entry,
+      children: [],
+      depth: segments.length - 1,
+    })
+
+    if (entry.isDirectory && !expandedDirs.has(entry.relativePath)) {
+      hiddenPrefix = entry.relativePath
+    }
+  }
+
+  return result
 }
 
 export function getVisibleNodes(
@@ -198,16 +265,94 @@ function filterHiddenDotEntries(
   })
 }
 
+function prefilterEntries(
+  entries: readonly CompareEntry[],
+  options: {
+    readonly pathFilter: readonly string[]
+    readonly hideDot: boolean
+    readonly hideDotFilter: DotEntryFilter
+    readonly side?: TreeSide
+  },
+): readonly CompareEntry[] {
+  const { pathFilter, hideDot, hideDotFilter, side } = options
+  const shouldFilterByPath = pathFilter.length > 0
+  const shouldFilterBySide = side != null
+  let nextEntries: CompareEntry[] | null = null
+
+  for (let index = 0; index < entries.length; index += 1) {
+    const entry = entries[index]
+
+    if (shouldFilterBySide) {
+      const hiddenBySide = side === 'left'
+        ? entry.state === 'right_only'
+        : entry.state === 'left_only'
+
+      if (hiddenBySide) {
+        if (!nextEntries) {
+          nextEntries = entries.slice(0, index)
+        }
+        continue
+      }
+    }
+
+    if (shouldFilterByPath && matchesPathFilter(entry.relativePath, pathFilter)) {
+      if (!nextEntries) {
+        nextEntries = entries.slice(0, index)
+      }
+      continue
+    }
+
+    if (hideDot) {
+      const hiddenByDotAncestor = hasDotAncestor(entry.relativePath)
+      const hiddenByDotName = entry.name.startsWith('.') && (
+        hideDotFilter === 'all'
+          || (hideDotFilter === 'files' && !entry.isDirectory)
+          || (hideDotFilter === 'dirs' && entry.isDirectory)
+      )
+
+      if (hiddenByDotAncestor || hiddenByDotName) {
+        if (!nextEntries) {
+          nextEntries = entries.slice(0, index)
+        }
+        continue
+      }
+    }
+
+    if (nextEntries) {
+      nextEntries.push(entry)
+    }
+  }
+
+  return nextEntries ?? entries
+}
+
 function applyEffectiveDirectoryStates(entries: readonly CompareEntry[]): readonly CompareEntry[] {
   const effectiveDirStates = computeEffectiveDirStates(entries)
-  return entries.map((entry) => {
-    if (!entry.isDirectory) return entry
-    const effective = effectiveDirStates.get(entry.relativePath)
-    if (effective && effective !== entry.state) {
-      return { ...entry, state: effective }
+  if (effectiveDirStates.size === 0) {
+    return entries
+  }
+
+  let nextEntries: CompareEntry[] | null = null
+
+  for (let index = 0; index < entries.length; index += 1) {
+    const entry = entries[index]
+    const effective = entry.isDirectory ? effectiveDirStates.get(entry.relativePath) : undefined
+
+    if (!effective || effective === entry.state) {
+      if (nextEntries) {
+        nextEntries.push(entry)
+      }
+      continue
     }
-    return entry
-  })
+
+    if (!nextEntries) {
+      nextEntries = entries.slice(0, index)
+    }
+
+    nextEntries.push({ ...entry, state: effective })
+  }
+
+  return nextEntries ?? entries
 }
 
 export function matchesCompareFilter(targetFilter: CompareFilter, entry: CompareEntry): boolean {
@@ -218,7 +363,21 @@ export function matchesCompareFilter(targetFilter: CompareFilter, entry: Compare
   if (targetFilter === 'different') {
     return entry.state === 'different' || entry.state === 'left_only' || entry.state === 'right_only'
   }
+  if (targetFilter === 'unresolved') {
+    return entry.state === 'pending' || entry.state === 'comparing'
+  }
   return entry.state === targetFilter
+}
+
+function hasUnresolvedAncestor(
+  relativePath: string,
+  unresolvedDirs: ReadonlySet<string>,
+): boolean {
+  const parts = relativePath.split('/')
+  for (let i = 1; i < parts.length; i++) {
+    if (unresolvedDirs.has(parts.slice(0, i).join('/'))) return true
+  }
+  return false
 }
 
 function filterEntriesByState(
@@ -226,6 +385,19 @@ function filterEntriesByState(
   targetFilter: CompareFilter,
 ): readonly CompareEntry[] {
   if (targetFilter === 'all') return entries
+
+  if (targetFilter === 'equal') {
+    const unresolvedDirs = new Set<string>()
+    for (const entry of entries) {
+      if (entry.isDirectory && entry.state !== 'equal') {
+        unresolvedDirs.add(entry.relativePath)
+      }
+    }
+    return entries.filter((entry) => {
+      if (entry.state !== 'equal') return false
+      return !hasUnresolvedAncestor(entry.relativePath, unresolvedDirs)
+    })
+  }
 
   const neededDirs = new Set<string>()
   for (const entry of entries) {
@@ -258,12 +430,12 @@ export function prepareCompareEntries(
 ): readonly CompareEntry[] {
   const { filter, pathFilter, hideDot, hideDotFilter, side } = options
 
-  let result = filterEntriesBySide(entries, side)
-  result = filterEntriesByPaths(result, pathFilter)
-
-  if (hideDot) {
-    result = filterHiddenDotEntries(result, hideDotFilter)
-  }
+  let result = prefilterEntries(entries, {
+    pathFilter,
+    hideDot,
+    hideDotFilter,
+    side,
+  })
 
   result = applyEffectiveDirectoryStates(result)
   return filterEntriesByState(result, filter)
@@ -276,13 +448,16 @@ const DIR_STATE_PRIORITY: CompareState[] = ['different', 'comparing', 'pending',
  * A directory's effective state is the highest-priority state among its descendants.
  */
 export function computeEffectiveDirStates(entries: readonly CompareEntry[]): ReadonlyMap<string, CompareState> {
-  const entryByPath = new Map(entries.map((entry) => [entry.relativePath, entry]))
+  const entryByPath = new Map<string, CompareEntry>()
   const dirStates = new Map<string, Set<CompareState>>()
 
   for (const entry of entries) {
+    entryByPath.set(entry.relativePath, entry)
+
     const parts = entry.relativePath.split('/')
-    for (let i = 1; i < parts.length; i++) {
-      const ancestorPath = parts.slice(0, i).join('/')
+    let ancestorPath = ''
+    for (let i = 0; i < parts.length - 1; i++) {
+      ancestorPath = ancestorPath ? `${ancestorPath}/${parts[i]}` : parts[i]
       let stateSet = dirStates.get(ancestorPath)
       if (!stateSet) {
         stateSet = new Set()

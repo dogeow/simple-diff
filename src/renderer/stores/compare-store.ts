@@ -86,7 +86,7 @@ interface CompareStore {
 
   startScanning: (compareId: string, options?: { readonly preserveEntries?: boolean }) => void
   setScanEntries: (compareId: string, entries: readonly CompareEntry[]) => void
-  updateEntry: (compareId: string, entry: CompareEntry) => void
+  updateEntries: (compareId: string, entries: readonly CompareEntry[]) => void
   finishCompare: (compareId: string, result: CompareResult) => void
   pauseCompare: (compareId?: string) => void
   removeEntry: (relativePath: string) => void
@@ -172,16 +172,17 @@ export function applyScanEntriesToSnapshot(
   }
 }
 
-export function applyEntryUpdateToSnapshot(
+export function applyEntryUpdatesToSnapshot(
   snapshot: CompareSessionSnapshot,
   compareId: string,
-  entry: CompareEntry,
+  entries: readonly CompareEntry[],
 ): CompareSessionSnapshot {
   if (snapshot.activeCompareId !== compareId) return snapshot
+  if (entries.length === 0) return snapshot
 
   return {
     ...snapshot,
-    entries: upsertEntries(snapshot.entries, [entry]),
+    entries: upsertEntries(snapshot.entries, entries),
     scanning: true,
     comparing: true,
     paused: false,
@@ -269,6 +270,46 @@ function computeStats(entries: readonly CompareEntry[]): CompareStats {
     else if (e.state === 'right_only') rightOnly++
   }
   return { total: entries.length, equal, different, leftOnly, rightOnly }
+}
+
+export interface CompareEntrySummary {
+  readonly stats: CompareStats
+  readonly pendingCount: number
+  readonly allDirCount: number
+}
+
+function summarizeCompareEntries(entries: readonly CompareEntry[]): CompareEntrySummary {
+  let equal = 0
+  let different = 0
+  let leftOnly = 0
+  let rightOnly = 0
+  let pendingCount = 0
+  let allDirCount = 0
+
+  for (const entry of entries) {
+    if (entry.isDirectory) allDirCount += 1
+
+    if (entry.state === 'pending' || entry.state === 'comparing') {
+      pendingCount += 1
+    }
+
+    if (entry.state === 'equal') equal += 1
+    else if (entry.state === 'different') different += 1
+    else if (entry.state === 'left_only') leftOnly += 1
+    else if (entry.state === 'right_only') rightOnly += 1
+  }
+
+  return {
+    stats: {
+      total: entries.length,
+      equal,
+      different,
+      leftOnly,
+      rightOnly,
+    },
+    pendingCount,
+    allDirCount,
+  }
 }
 
 const compareInitial = {
@@ -537,9 +578,10 @@ export const useCompareStore = create<CompareStore>((set, get) => ({
     }))
   },
 
-  updateEntry: (compareId, entry) => {
+  updateEntries: (compareId, entries) => {
     if (get().activeCompareId !== compareId) return
-    set((state) => ({ entries: upsertEntries(state.entries, [entry]), paused: false }))
+    if (entries.length === 0) return
+    set((state) => ({ entries: upsertEntries(state.entries, entries), paused: false }))
   },
 
   finishCompare: (compareId, result) => {
@@ -753,4 +795,4 @@ export const useCompareStore = create<CompareStore>((set, get) => ({
   },
 }))
 
-export { computeStats }
+export { computeStats, summarizeCompareEntries }
