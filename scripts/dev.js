@@ -9,9 +9,16 @@ const root = resolve(__dirname, '..')
 async function startRenderer() {
   const server = await createServer({
     configFile: resolve(root, 'vite.config.renderer.ts'),
+    server: {
+      strictPort: false,
+    },
   })
   await server.listen()
-  return server
+
+  const address = server.httpServer?.address()
+  const port = typeof address === 'object' && address ? address.port : 5173
+
+  return `http://localhost:${port}`
 }
 
 function buildWatch(configFile, label) {
@@ -41,7 +48,7 @@ function buildWatch(configFile, label) {
   })
 }
 
-function startElectron() {
+function startElectron(devServerUrl) {
   const electronPath = resolve(root, 'node_modules/.bin/electron')
   const mainPath = resolve(root, 'dist/main/index.js')
 
@@ -50,7 +57,7 @@ function startElectron() {
     stdio: 'inherit',
     env: {
       ...process.env,
-      VITE_DEV_SERVER_URL: 'http://localhost:5173',
+      VITE_DEV_SERVER_URL: devServerUrl,
     },
   })
 
@@ -63,8 +70,8 @@ function startElectron() {
 
 async function main() {
   console.log('[dev] Starting renderer dev server...')
-  await startRenderer()
-  console.log('[dev] Renderer ready at http://localhost:5173')
+  const devServerUrl = await startRenderer()
+  console.log(`[dev] Renderer ready at ${devServerUrl}`)
 
   console.log('[dev] Building preload (watch)...')
   await buildWatch(resolve(root, 'vite.config.preload.ts'), 'preload')
@@ -75,7 +82,7 @@ async function main() {
   console.log('[dev] Main ready')
 
   console.log('[dev] Starting Electron...')
-  startElectron()
+  startElectron(devServerUrl)
 }
 
 main().catch((err) => {

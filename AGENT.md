@@ -15,7 +15,8 @@
 
 ## 项目结构
 
-```
+```text
+build/icon.png          # 应用图标资源（打包 + dev 运行时共用）
 shared/types.ts          # 跨进程共享类型 & IPC 通道
 src/main/                # Electron 主进程
   index.ts               # 入口，窗口创建
@@ -40,8 +41,14 @@ src/renderer/            # React SPA
 ```bash
 npm run dev              # 开发模式 (watch + Electron)
 npm run build            # 构建全部 (main + preload + renderer)
+npm run pack             # 生成未封装目录，用于本地验证打包结果
+npm run dist             # 生成安装包/分发产物
 npx tsc --noEmit         # 类型检查
 ```
+
+- 应用图标资源位于 `build/icon.png`
+- 打包时由 electron-builder 读取该文件
+- `npm run dev` 时由 `src/main/index.ts` 在运行时设置 Dock / 窗口图标；改图标后需要重启 Electron 才会生效
 
 ### 手动构建（调试用）
 

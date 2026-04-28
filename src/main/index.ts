@@ -1,5 +1,5 @@
-import { app, BrowserWindow } from 'electron'
-import { chmodSync, mkdirSync } from 'fs'
+import { app, BrowserWindow, nativeImage } from 'electron'
+import { chmodSync, existsSync, mkdirSync } from 'fs'
 import { stat } from 'fs/promises'
 import { join, dirname } from 'path'
 import { homedir } from 'os'
@@ -14,6 +14,27 @@ const PRIVATE_DIR_MODE = 0o700
 let mainWindow: BrowserWindow | null = null
 const pendingOpenPaths: string[] = []
 let pendingFlushTimer: NodeJS.Timeout | null = null
+
+function resolveDevIconPath(): string | null {
+  if (!isDev) return null
+
+  const iconPath = join(__dirname, '..', '..', 'build', 'icon.png')
+  return existsSync(iconPath) ? iconPath : null
+}
+
+function applyRuntimeIcon(): string | null {
+  const iconPath = resolveDevIconPath()
+  if (!iconPath) return null
+
+  if (process.platform === 'darwin') {
+    const dockIcon = nativeImage.createFromPath(iconPath)
+    if (!dockIcon.isEmpty()) {
+      app.dock?.setIcon(dockIcon)
+    }
+  }
+
+  return iconPath
+}
 
 function ensurePrivateDirectory(dirPath: string): void {
   mkdirSync(dirPath, { recursive: true, mode: PRIVATE_DIR_MODE })
@@ -40,6 +61,7 @@ function configurePrivateAppPaths(): void {
 
 function createWindow(): BrowserWindow {
   const preloadPath = join(__dirname, '..', 'preload', 'index.cjs')
+  const iconPath = resolveDevIconPath()
 
   const win = new BrowserWindow({
     width: 1200,
@@ -47,6 +69,7 @@ function createWindow(): BrowserWindow {
     minWidth: 900,
     minHeight: 600,
     title: 'Simple Diff',
+    ...(iconPath ? { icon: iconPath } : {}),
     webPreferences: {
       preload: preloadPath,
       contextIsolation: true,
@@ -124,6 +147,7 @@ configurePrivateAppPaths()
 app.whenReady().then(async () => {
   const { registerAllHandlers } = await import('./ipc/index')
   registerAllHandlers()
+  applyRuntimeIcon()
   mainWindow = createWindow()
 
   if (pendingOpenPaths.length > 0) {

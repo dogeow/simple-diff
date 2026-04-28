@@ -51,9 +51,13 @@
   "build": {
     "appId": "com.simplediff.app",
     "productName": "Simple Diff",
+    "directories": {
+      "buildResources": "build"
+    },
     "files": [
       "dist/**/*"
     ],
+    "icon": "icon.png",
     "mac": {
       "category": "public.app-category.developer-tools",
       "extendInfo": {
