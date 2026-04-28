@@ -82,7 +82,7 @@ describe('compare-store', () => {
       createCompareEntry('src/file.txt', { state: 'equal' }),
     ])
 
-    store.updateEntry('compare-1', createCompareEntry('docs/readme.md', { state: 'different' }))
+    store.updateEntries('compare-1', [createCompareEntry('docs/readme.md', { state: 'different' })])
 
     const { entries } = useCompareStore.getState()
     expect(entries).toHaveLength(2)
@@ -96,7 +96,7 @@ describe('compare-store', () => {
     store.setScanEntries('compare-1', [createCompareEntry('src/file.txt', { state: 'pending' })])
 
     store.setScanEntries('compare-2', [createCompareEntry('src/file.txt', { state: 'different' })])
-    store.updateEntry('compare-2', createCompareEntry('src/file.txt', { state: 'different' }))
+    store.updateEntries('compare-2', [createCompareEntry('src/file.txt', { state: 'different' })])
 
     const { entries } = useCompareStore.getState()
     expect(entries).toHaveLength(1)

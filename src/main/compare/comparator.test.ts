@@ -133,13 +133,10 @@ describe('compareDirectories', () => {
       ['src/child.txt'],
     ])
     expect(updates).toEqual([
-      { path: 'diff.txt', state: 'comparing' },
       { path: 'diff.txt', state: 'different' },
-      { path: 'same.txt', state: 'comparing' },
       { path: 'same.txt', state: 'equal' },
       { path: 'src', state: 'comparing' },
       { path: 'src', state: 'equal' },
-      { path: 'src/child.txt', state: 'comparing' },
       { path: 'src/child.txt', state: 'equal' },
     ])
     expect(result.stats).toEqual({
