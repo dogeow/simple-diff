@@ -19,7 +19,7 @@ const FILTERS: { value: CompareFilter; label: string }[] = [
   { value: 'left_only', label: '仅左' },
   { value: 'right_only', label: '仅右' },
   { value: 'equal', label: '相同' },
-  { value: 'unresolved', label: '对比中' },
+  { value: 'unresolved', label: '待比/对比中' },
 ]
 
 interface CompareToolbarProps {

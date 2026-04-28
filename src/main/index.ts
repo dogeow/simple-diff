@@ -1,17 +1,42 @@
 import { app, BrowserWindow } from 'electron'
+import { chmodSync, mkdirSync } from 'fs'
 import { stat } from 'fs/promises'
 import { join, dirname } from 'path'
+import { homedir } from 'os'
 import { fileURLToPath } from 'url'
 import { IPC_CHANNELS } from '../../shared/types'
-import { registerAllHandlers } from './ipc/index'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const isDev = !!process.env.VITE_DEV_SERVER_URL
 const OPEN_FILE_DEBOUNCE_MS = 250
+const PRIVATE_DIR_MODE = 0o700
 
 let mainWindow: BrowserWindow | null = null
 const pendingOpenPaths: string[] = []
 let pendingFlushTimer: NodeJS.Timeout | null = null
+
+function ensurePrivateDirectory(dirPath: string): void {
+  mkdirSync(dirPath, { recursive: true, mode: PRIVATE_DIR_MODE })
+
+  try {
+    chmodSync(dirPath, PRIVATE_DIR_MODE)
+  } catch {
+    // Keep running even if the host filesystem refuses chmod.
+  }
+}
+
+function configurePrivateAppPaths(): void {
+  const appDataRoot = process.platform === 'darwin'
+    ? join(homedir(), 'Library', 'Application Support', app.getName())
+    : app.getPath('userData')
+  const sessionDataRoot = join(appDataRoot, 'session-data')
+
+  ensurePrivateDirectory(appDataRoot)
+  ensurePrivateDirectory(sessionDataRoot)
+
+  app.setPath('userData', appDataRoot)
+  app.setPath('sessionData', sessionDataRoot)
+}
 
 function createWindow(): BrowserWindow {
   const preloadPath = join(__dirname, '..', 'preload', 'index.cjs')
@@ -94,7 +119,10 @@ app.on('open-file', (event, filePath) => {
   }
 })
 
-app.whenReady().then(() => {
+configurePrivateAppPaths()
+
+app.whenReady().then(async () => {
+  const { registerAllHandlers } = await import('./ipc/index')
   registerAllHandlers()
   mainWindow = createWindow()
 

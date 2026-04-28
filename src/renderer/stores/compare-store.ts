@@ -72,6 +72,7 @@ interface CompareStore {
   readonly activeCompareId: string | null
   readonly syncTask: SyncTaskSnapshot | null
   readonly compareVersion: number
+  readonly entrySummary: CompareEntrySummary
 
   setLeftPath: (path: string) => void
   setRightPath: (path: string) => void
@@ -106,6 +107,8 @@ interface CompareStore {
   createSnapshot: () => CompareSessionSnapshot
   restoreSnapshot: (snapshot: CompareSessionSnapshot) => void
 }
+
+type CompareStoreStateUpdate = CompareStore | Partial<CompareStore>
 
 export function hasCompareSessionContent(snapshot: CompareSessionSnapshot): boolean {
   return Boolean(
@@ -161,6 +164,15 @@ export function applyScanEntriesToSnapshot(
 ): CompareSessionSnapshot {
   if (snapshot.activeCompareId !== compareId) return snapshot
 
+  if (snapshot.paused) {
+    return {
+      ...snapshot,
+      entries: upsertEntries(snapshot.entries, entries),
+      done: false,
+      error: null,
+    }
+  }
+
   return {
     ...snapshot,
     entries: upsertEntries(snapshot.entries, entries),
@@ -179,6 +191,15 @@ export function applyEntryUpdatesToSnapshot(
 ): CompareSessionSnapshot {
   if (snapshot.activeCompareId !== compareId) return snapshot
   if (entries.length === 0) return snapshot
+
+  if (snapshot.paused) {
+    return {
+      ...snapshot,
+      entries: upsertEntries(snapshot.entries, entries),
+      done: false,
+      error: null,
+    }
+  }
 
   return {
     ...snapshot,
@@ -205,20 +226,23 @@ export function applyPauseCompareToSnapshot(
     done: false,
     error: null,
     loadingDirs: [],
-    activeCompareId: null,
+    activeCompareId: compareId,
   }
 }
 
 export function applyPausedCompareErrorToSnapshot(
   snapshot: CompareSessionSnapshot,
+  compareId: string,
   error: string | null,
 ): CompareSessionSnapshot {
-  if (!snapshot.paused || snapshot.activeCompareId !== null) return snapshot
+  if (!snapshot.paused) return snapshot
+  if (snapshot.activeCompareId && snapshot.activeCompareId !== compareId) return snapshot
 
   return {
     ...snapshot,
     paused: false,
     error,
+    activeCompareId: null,
   }
 }
 
@@ -229,9 +253,13 @@ export function applyFinishCompareToSnapshot(
 ): CompareSessionSnapshot {
   if (snapshot.activeCompareId !== compareId) return snapshot
 
+  const nextEntries = result.entriesIncluded === false
+    ? snapshot.entries
+    : upsertEntries([], result.entries)
+
   return {
     ...snapshot,
-    entries: upsertEntries([], result.entries),
+    entries: nextEntries,
     scanning: false,
     comparing: false,
     paused: false,
@@ -278,42 +306,64 @@ export interface CompareEntrySummary {
   readonly allDirCount: number
 }
 
-function summarizeCompareEntries(entries: readonly CompareEntry[]): CompareEntrySummary {
-  let equal = 0
-  let different = 0
-  let leftOnly = 0
-  let rightOnly = 0
-  let pendingCount = 0
-  let allDirCount = 0
-
-  for (const entry of entries) {
-    if (entry.isDirectory) allDirCount += 1
-
-    if (entry.state === 'pending' || entry.state === 'comparing') {
-      pendingCount += 1
-    }
-
-    if (entry.state === 'equal') equal += 1
-    else if (entry.state === 'different') different += 1
-    else if (entry.state === 'left_only') leftOnly += 1
-    else if (entry.state === 'right_only') rightOnly += 1
-  }
-
+function createEmptyCompareEntrySummary(): CompareEntrySummary {
   return {
     stats: {
-      total: entries.length,
-      equal,
-      different,
-      leftOnly,
-      rightOnly,
+      total: 0,
+      equal: 0,
+      different: 0,
+      leftOnly: 0,
+      rightOnly: 0,
     },
-    pendingCount,
-    allDirCount,
+    pendingCount: 0,
+    allDirCount: 0,
   }
+}
+
+function cloneCompareEntrySummary(summary: CompareEntrySummary): CompareEntrySummary {
+  return {
+    stats: { ...summary.stats },
+    pendingCount: summary.pendingCount,
+    allDirCount: summary.allDirCount,
+  }
+}
+
+function adjustCompareEntrySummary(
+  summary: CompareEntrySummary,
+  entry: CompareEntry,
+  factor: 1 | -1,
+): CompareEntrySummary {
+  summary.stats.total += factor
+
+  if (entry.isDirectory) {
+    summary.allDirCount += factor
+  }
+
+  if (entry.state === 'pending' || entry.state === 'comparing') {
+    summary.pendingCount += factor
+  }
+
+  if (entry.state === 'equal') summary.stats.equal += factor
+  else if (entry.state === 'different') summary.stats.different += factor
+  else if (entry.state === 'left_only') summary.stats.leftOnly += factor
+  else if (entry.state === 'right_only') summary.stats.rightOnly += factor
+
+  return summary
+}
+
+function summarizeCompareEntries(entries: readonly CompareEntry[]): CompareEntrySummary {
+  const summary = createEmptyCompareEntrySummary()
+
+  for (const entry of entries) {
+    adjustCompareEntrySummary(summary, entry, 1)
+  }
+
+  return summary
 }
 
 const compareInitial = {
   entries: [] as readonly CompareEntry[],
+  entrySummary: createEmptyCompareEntrySummary(),
   scanning: false,
   comparing: false,
   paused: false,
@@ -370,6 +420,43 @@ function upsertEntries(
   }
 
   return next
+}
+
+function upsertEntriesWithSummary(
+  existing: readonly CompareEntry[],
+  incoming: readonly CompareEntry[],
+  currentSummary: CompareEntrySummary,
+): { readonly entries: readonly CompareEntry[]; readonly entrySummary: CompareEntrySummary } {
+  if (incoming.length === 0) {
+    return {
+      entries: existing,
+      entrySummary: currentSummary,
+    }
+  }
+
+  const next = [...existing]
+  const indexByPath = new Map(existing.map((entry, index) => [entry.relativePath, index]))
+  const nextSummary = cloneCompareEntrySummary(currentSummary)
+
+  for (const entry of incoming) {
+    const existingIndex = indexByPath.get(entry.relativePath)
+    if (existingIndex == null) {
+      indexByPath.set(entry.relativePath, next.length)
+      next.push(entry)
+      adjustCompareEntrySummary(nextSummary, entry, 1)
+      continue
+    }
+
+    const previousEntry = next[existingIndex]
+    next[existingIndex] = entry
+    adjustCompareEntrySummary(nextSummary, previousEntry, -1)
+    adjustCompareEntrySummary(nextSummary, entry, 1)
+  }
+
+  return {
+    entries: next,
+    entrySummary: nextSummary,
+  }
 }
 
 function isDirectChildPath(parentRelative: string, candidatePath: string): boolean {
@@ -540,7 +627,7 @@ async function loadDirectoryChildren(
   return matchChildren(leftList, rightList, path)
 }
 
-export const useCompareStore = create<CompareStore>((set, get) => ({
+const compareStore = create<CompareStore>((set, get) => ({
   ...initialState,
 
   setLeftPath: (leftPath) => set({ leftPath }),
@@ -557,6 +644,7 @@ export const useCompareStore = create<CompareStore>((set, get) => ({
   startScanning: (activeCompareId, options) => set((state) => ({
     ...compareInitial,
     entries: options?.preserveEntries ? state.entries : compareInitial.entries,
+    entrySummary: options?.preserveEntries ? state.entrySummary : compareInitial.entrySummary,
     expandedDirs: options?.preserveEntries ? state.expandedDirs : compareInitial.expandedDirs,
     filter: options?.preserveEntries ? state.filter : compareInitial.filter,
     viewMode: options?.preserveEntries ? state.viewMode : compareInitial.viewMode,
@@ -570,32 +658,73 @@ export const useCompareStore = create<CompareStore>((set, get) => ({
 
   setScanEntries: (compareId, newEntries) => {
     if (get().activeCompareId !== compareId) return
-    set((state) => ({
-      entries: upsertEntries(state.entries, newEntries),
-      scanning: true,
-      comparing: true,
-      paused: false,
-    }))
+    set((state) => {
+      const next = upsertEntriesWithSummary(state.entries, newEntries, state.entrySummary)
+
+      if (state.paused) {
+        return {
+          entries: next.entries,
+          entrySummary: next.entrySummary,
+          done: false,
+          error: null,
+        }
+      }
+
+      return {
+        entries: next.entries,
+        entrySummary: next.entrySummary,
+        scanning: true,
+        comparing: true,
+        paused: false,
+      }
+    })
   },
 
   updateEntries: (compareId, entries) => {
     if (get().activeCompareId !== compareId) return
     if (entries.length === 0) return
-    set((state) => ({ entries: upsertEntries(state.entries, entries), paused: false }))
+    set((state) => {
+      const next = upsertEntriesWithSummary(state.entries, entries, state.entrySummary)
+
+      if (state.paused) {
+        return {
+          entries: next.entries,
+          entrySummary: next.entrySummary,
+          done: false,
+          error: null,
+        }
+      }
+
+      return {
+        entries: next.entries,
+        entrySummary: next.entrySummary,
+        paused: false,
+      }
+    })
   },
 
   finishCompare: (compareId, result) => {
     if (get().activeCompareId !== compareId) return
-    set({
-      entries: upsertEntries([], result.entries),
-      scanning: false,
-      comparing: false,
-      paused: false,
-      done: true,
-      error: null,
-      duration: result.duration,
-      loadingDirs: new Set(),
-      activeCompareId: null,
+    set((state) => {
+      const nextEntries = result.entriesIncluded === false
+        ? state.entries
+        : upsertEntries([], result.entries)
+      const nextSummary = result.entriesIncluded === false
+        ? state.entrySummary
+        : summarizeCompareEntries(nextEntries)
+
+      return {
+        entries: nextEntries,
+        entrySummary: nextSummary,
+        scanning: false,
+        comparing: false,
+        paused: false,
+        done: true,
+        error: null,
+        duration: result.duration,
+        loadingDirs: new Set(),
+        activeCompareId: null,
+      }
     })
   },
 
@@ -608,7 +737,7 @@ export const useCompareStore = create<CompareStore>((set, get) => ({
       done: false,
       error: null,
       loadingDirs: new Set(),
-      activeCompareId: null,
+      activeCompareId: compareId ?? get().activeCompareId,
     })
   },
 
@@ -616,7 +745,7 @@ export const useCompareStore = create<CompareStore>((set, get) => ({
     const entries = get().entries.filter((e) =>
       e.relativePath !== relativePath && !e.relativePath.startsWith(relativePath + '/'),
     )
-    set({ entries })
+    set({ entries, entrySummary: summarizeCompareEntries(entries) })
   },
 
   refreshDir: async (path) => {
@@ -639,9 +768,13 @@ export const useCompareStore = create<CompareStore>((set, get) => ({
       const nextChildren = await loadDirectoryChildren(path, dirEntry, state.leftSource, state.rightSource)
       if (requestCompareVersion !== get().compareVersion) return
 
-      set((current) => ({
-        entries: replaceDirectoryChildren(current.entries, path, nextChildren),
-      }))
+      set((current) => {
+        const entries = replaceDirectoryChildren(current.entries, path, nextChildren)
+        return {
+          entries,
+          entrySummary: summarizeCompareEntries(entries),
+        }
+      })
     } finally {
       const current = get()
       if (requestCompareVersion !== current.compareVersion) return
@@ -777,6 +910,7 @@ export const useCompareStore = create<CompareStore>((set, get) => ({
       hideDot: restoredSnapshot.hideDot,
       hideDotFilter: restoredSnapshot.hideDotFilter,
       entries: cloneEntries(restoredSnapshot.entries),
+      entrySummary: summarizeCompareEntries(restoredSnapshot.entries),
       scanning: restoredSnapshot.scanning,
       comparing: restoredSnapshot.comparing,
       paused: restoredSnapshot.paused,
@@ -794,5 +928,37 @@ export const useCompareStore = create<CompareStore>((set, get) => ({
     })
   },
 }))
+
+function withDerivedEntrySummary(
+  partial: CompareStoreStateUpdate,
+  currentState: CompareStore,
+): CompareStoreStateUpdate {
+  if (!('entries' in partial) || partial.entrySummary != null) {
+    return partial
+  }
+
+  return {
+    ...partial,
+    entrySummary: summarizeCompareEntries(partial.entries ?? currentState.entries),
+  }
+}
+
+const originalCompareStoreSetState = compareStore.setState.bind(compareStore)
+
+compareStore.setState = ((partial, replace) => {
+  if (typeof partial === 'function') {
+    return originalCompareStoreSetState(
+      (state) => withDerivedEntrySummary(partial(state), state),
+      replace,
+    )
+  }
+
+  return originalCompareStoreSetState(
+    withDerivedEntrySummary(partial, compareStore.getState()),
+    replace,
+  )
+}) as typeof compareStore.setState
+
+export const useCompareStore = compareStore
 
 export { computeStats, summarizeCompareEntries }

@@ -1,4 +1,4 @@
-import type { FileEntry, CompareEntry, CompareResult, CompareStats, DiffReason, StrategyName } from '@shared/types'
+import type { FileEntry, CompareCacheEntry, CompareEntry, CompareFileFingerprint, CompareResult, CompareState, DiffReason, StrategyName } from '@shared/types'
 import { joinSourcePath } from '@shared/source-path'
 import { matchesPathFilter } from '@shared/path-filter'
 import type { FileSource } from '../file-source/types'
@@ -22,12 +22,22 @@ const STRATEGY_MAP: Record<StrategyName, () => CompareStrategy> = {
 const DIRECTORY_SCAN_CONCURRENCY = 8
 const SFTP_DIRECTORY_SCAN_CONCURRENCY = 2
 const DIRECTORY_LOG_INTERVAL = 200
+const DIRECTORY_SUMMARY_LOG_LIMIT = 20
+const DIRECTORY_SUMMARY_LOG_INTERVAL = 200
 
 interface PendingDirectoryScan {
   readonly rel: string
   readonly leftAbs: string
   readonly rightAbs: string
   readonly entry?: CompareEntry
+}
+
+type MutableCompareStats = {
+  total: number
+  equal: number
+  different: number
+  leftOnly: number
+  rightOnly: number
 }
 
 export interface ComparatorOptions {
@@ -38,6 +48,8 @@ export interface ComparatorOptions {
   readonly compareId?: string
   readonly strategies: readonly StrategyName[]
   readonly extensionFilter?: readonly string[]
+  readonly previousEntries?: readonly CompareCacheEntry[]
+  readonly retainEntries?: boolean
   readonly signal?: AbortSignal
   /** Called each time a new batch of entries is discovered (level by level). */
   readonly onEntriesFound?: (entries: readonly CompareEntry[]) => void
@@ -58,6 +70,8 @@ function matchLevel(
   rightList: readonly FileEntry[],
   parentRelative: string,
   pathFilters: readonly string[],
+  reusableEntries: ReadonlyMap<string, CompareCacheEntry>,
+  onReusableEntry?: () => void,
 ): CompareEntry[] {
   const leftMap = new Map<string, FileEntry>()
   for (const entry of leftList) {
@@ -79,9 +93,6 @@ function matchLevel(
     const relativePath = parentRelative ? `${parentRelative}/${name}` : name
 
     if (matchesPathFilter(relativePath, pathFilters)) {
-      if (isDir) {
-          compareLogger.info(`跳过已过滤目录: ${relativePath}`)
-      }
       continue
     }
 
@@ -90,6 +101,21 @@ function matchLevel(
     } else if (!left && right) {
       entries.push({ relativePath, name, isDirectory: isDir, state: 'right_only', right: { ...right, path: relativePath }, reasons: [] })
     } else if (left && right) {
+      const reusableEntry = isDir ? undefined : getReusableEntry(relativePath, left, right, reusableEntries)
+      if (reusableEntry) {
+        onReusableEntry?.()
+        entries.push({
+          relativePath,
+          name,
+          isDirectory: false,
+          state: reusableEntry.state,
+          left: { ...left, path: relativePath },
+          right: { ...right, path: relativePath },
+          reasons: reusableEntry.reasons,
+        })
+        continue
+      }
+
       entries.push({
         relativePath, name, isDirectory: isDir, state: 'pending',
         left: { ...left, path: relativePath },
@@ -119,6 +145,39 @@ function summarizeEntries(entries: readonly CompareEntry[]): string {
   return `发现 ${entries.length} 项（目录 ${dirCount}，文件 ${fileCount}${scanTail}）：${sample}${more}`
 }
 
+function createReusableEntryMap(entries: readonly CompareCacheEntry[] | undefined): ReadonlyMap<string, CompareCacheEntry> {
+  if (!entries || entries.length === 0) return new Map()
+
+  return new Map(entries.map((entry) => [entry.relativePath, entry]))
+}
+
+function fileMetadataMatches(previous: CompareFileFingerprint, current: FileEntry): boolean {
+  return previous.isDirectory === current.isDirectory
+    && previous.size === current.size
+    && previous.mtime === current.mtime
+}
+
+function getReusableEntry(
+  relativePath: string,
+  left: FileEntry,
+  right: FileEntry,
+  reusableEntries: ReadonlyMap<string, CompareCacheEntry>,
+): CompareCacheEntry | undefined {
+  const cached = reusableEntries.get(relativePath)
+  if (!cached) return undefined
+  if (!fileMetadataMatches(cached.left, left)) return undefined
+  if (!fileMetadataMatches(cached.right, right)) return undefined
+  return cached
+}
+
+function incrementStats(stats: MutableCompareStats, state: CompareState): void {
+  stats.total++
+  if (state === 'equal') stats.equal++
+  else if (state === 'different') stats.different++
+  else if (state === 'left_only') stats.leftOnly++
+  else if (state === 'right_only') stats.rightOnly++
+}
+
 export async function compareDirectories(options: ComparatorOptions): Promise<CompareResult> {
   const {
     leftSource,
@@ -128,6 +187,8 @@ export async function compareDirectories(options: ComparatorOptions): Promise<Co
     compareId,
     strategies,
     extensionFilter,
+    previousEntries,
+    retainEntries = true,
     onEntriesFound,
     onEntryUpdate,
     signal,
@@ -139,10 +200,18 @@ export async function compareDirectories(options: ComparatorOptions): Promise<Co
   const directoryScanConcurrency = resolveDirectoryScanConcurrency(leftSource, rightSource)
 
   const pathFilters = extensionFilter ?? []
+  const reusableEntries = createReusableEntryMap(previousEntries)
 
   const allEntries: CompareEntry[] = []
+  const collectEntry = (entry: CompareEntry): void => {
+    if (retainEntries) {
+      allEntries.push(entry)
+    }
+  }
   const stats = { total: 0, equal: 0, different: 0, leftOnly: 0, rightOnly: 0 }
+  let reusedEntryCount = 0
   let scannedDirCount = 0
+  let directorySummaryLogCount = 0
 
   let currentLevel: readonly PendingDirectoryScan[] = [
     { rel: '', leftAbs: leftRoot, rightAbs: rightRoot },
@@ -182,19 +251,23 @@ export async function compareDirectories(options: ComparatorOptions): Promise<Co
         clearInterval(heartbeat)
       }
 
-      const levelEntries = matchLevel(leftList, rightList, rel, pathFilters)
+      const levelEntries = matchLevel(leftList, rightList, rel, pathFilters, reusableEntries, () => {
+        reusedEntryCount += 1
+      })
 
       if (directoryEntry) {
         const resolvedDirectory: CompareEntry = { ...directoryEntry, state: 'equal', reasons: [] }
-        allEntries.push(resolvedDirectory)
-        stats.total++
-        stats.equal++
+        collectEntry(resolvedDirectory)
+        incrementStats(stats, resolvedDirectory.state)
         onEntryUpdate?.(resolvedDirectory)
       }
 
       if (levelEntries.length === 0) return
 
-      compareLogger.info(`${logPrefix}目录 ${dirLabel} ${summarizeEntries(levelEntries)}`)
+      directorySummaryLogCount += 1
+      if (directorySummaryLogCount <= DIRECTORY_SUMMARY_LOG_LIMIT || directorySummaryLogCount % DIRECTORY_SUMMARY_LOG_INTERVAL === 0) {
+        compareLogger.info(`${logPrefix}目录 ${dirLabel} ${summarizeEntries(levelEntries)}`)
+      }
 
       throwIfAborted(signal)
       onEntriesFound?.(levelEntries)
@@ -211,10 +284,8 @@ export async function compareDirectories(options: ComparatorOptions): Promise<Co
               entry,
             })
           } else {
-            allEntries.push(entry)
-            stats.total++
-            if (entry.state === 'left_only') stats.leftOnly++
-            else if (entry.state === 'right_only') stats.rightOnly++
+            collectEntry(entry)
+            incrementStats(stats, entry.state)
           }
           continue
         }
@@ -246,16 +317,12 @@ export async function compareDirectories(options: ComparatorOptions): Promise<Co
 
           const state = reasons.length > 0 ? 'different' : 'equal'
           const resolved: CompareEntry = { ...entry, state, reasons }
-          allEntries.push(resolved)
-          stats.total++
-          if (state === 'equal') stats.equal++
-          else stats.different++
+          collectEntry(resolved)
+          incrementStats(stats, state)
           onEntryUpdate?.(resolved)
         } else {
-          allEntries.push(entry)
-          stats.total++
-          if (entry.state === 'left_only') stats.leftOnly++
-          else if (entry.state === 'right_only') stats.rightOnly++
+          collectEntry(entry)
+          incrementStats(stats, entry.state)
         }
       }
     })
@@ -264,8 +331,11 @@ export async function compareDirectories(options: ComparatorOptions): Promise<Co
   }
 
   const duration = Date.now() - startTime
+  if (reusableEntries.size > 0) {
+    compareLogger.info(`${logPrefix}复用历史对比结果 ${reusedEntryCount}/${reusableEntries.size} 个文件`)
+  }
   compareLogger.info(`${logPrefix}对比完成，耗时 ${formatDuration(duration)} — 共 ${stats.total} 项`)
-  return { entries: allEntries, stats, duration }
+  return { entries: allEntries, entriesIncluded: retainEntries, stats, duration }
 }
 
 function resolveDirectoryScanConcurrency(leftSource: FileSource, rightSource: FileSource): number {

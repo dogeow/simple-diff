@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { CompareEntry, FileEntry } from '../../../shared/types'
 import { useAppStore } from '../stores/app-store'
 import { useCompareStore } from '../stores/compare-store'
-import { bindCompareEvents } from './compare-events'
+import { bindCompareEvents, flushBufferedCompareEvents } from './compare-events'
 
 function createFileEntry(name: string, overrides: Partial<FileEntry> = {}): FileEntry {
   return {
@@ -58,7 +58,7 @@ function resetAppStore(): void {
 }
 
 async function flushCompareEvents(): Promise<void> {
-  await vi.advanceTimersByTimeAsync(20)
+  await vi.advanceTimersByTimeAsync(100)
 }
 
 describe('bindCompareEvents', () => {
@@ -281,6 +281,108 @@ describe('bindCompareEvents', () => {
     expect(updateEntriesSpy).toHaveBeenCalledTimes(1)
     expect(useCompareStore.getState().entries.map((entry) => entry.relativePath)).toEqual(['docs', 'docs/readme.md'])
     expect(useCompareStore.getState().entries.map((entry) => entry.state)).toEqual(['equal', 'different'])
+  })
+
+  it('flushes already-buffered active compare events after pause', async () => {
+    let entryHandler: ((compareId: string, entries: readonly CompareEntry[]) => void) | null = null
+
+    bindCompareEvents({
+      onScanComplete: () => () => {},
+      onEntryUpdate: (callback) => {
+        entryHandler = callback
+        return () => {}
+      },
+    })
+
+    useCompareStore.getState().startScanning('compare-1')
+
+    entryHandler!('compare-1', [createCompareEntry('docs/readme.md', { state: 'different' })])
+    useCompareStore.getState().pauseCompare('compare-1')
+
+    await flushCompareEvents()
+
+    const state = useCompareStore.getState()
+    expect(state.paused).toBe(true)
+    expect(state.activeCompareId).toBe('compare-1')
+    expect(state.entries).toHaveLength(1)
+    expect(state.entries[0]?.state).toBe('different')
+  })
+
+  it('can flush buffered events synchronously for a finished compare', () => {
+    let entryHandler: ((compareId: string, entries: readonly CompareEntry[]) => void) | null = null
+
+    bindCompareEvents({
+      onScanComplete: () => () => {},
+      onEntryUpdate: (callback) => {
+        entryHandler = callback
+        return () => {}
+      },
+    })
+
+    useCompareStore.getState().startScanning('compare-1')
+    entryHandler!('compare-1', [createCompareEntry('docs/readme.md', { state: 'different' })])
+
+    flushBufferedCompareEvents('compare-1')
+
+    const state = useCompareStore.getState()
+    expect(state.entries).toHaveLength(1)
+    expect(state.entries[0]?.state).toBe('different')
+  })
+
+  it('mirrors late paused compare updates into the active compare tab snapshot', async () => {
+    let entryHandler: ((compareId: string, entries: readonly CompareEntry[]) => void) | null = null
+
+    useAppStore.getState().saveCompareTab({
+      id: 'compare-tab-1',
+      title: 'docs',
+      snapshot: {
+        leftPath: '/left',
+        rightPath: '/right',
+        leftSourceType: 'local',
+        rightSourceType: 'local',
+        leftSSHConfigId: '',
+        rightSSHConfigId: '',
+        strategies: ['size', 'mtime'],
+        extensionFilter: [],
+        hideDot: true,
+        hideDotFilter: 'all',
+        entries: [],
+        scanning: false,
+        comparing: false,
+        paused: true,
+        done: false,
+        error: null,
+        duration: 0,
+        leftSource: { type: 'local', path: '/left' },
+        rightSource: { type: 'local', path: '/right' },
+        loadingDirs: [],
+        filter: 'all',
+        expandedDirs: [],
+        viewMode: 'split',
+        activeCompareId: 'compare-1',
+      },
+      diffTabs: [],
+      activeDiffTabId: null,
+    })
+
+    bindCompareEvents({
+      onScanComplete: () => () => {},
+      onEntryUpdate: (callback) => {
+        entryHandler = callback
+        return () => {}
+      },
+    })
+
+    useCompareStore.getState().startScanning('compare-1')
+    useCompareStore.getState().pauseCompare('compare-1')
+
+    entryHandler!('compare-1', [createCompareEntry('docs/readme.md', { state: 'different' })])
+
+    await flushCompareEvents()
+
+    const compareTab = useAppStore.getState().compareTabs[0]
+    expect(compareTab?.snapshot.entries).toHaveLength(1)
+    expect(compareTab?.snapshot.entries[0]?.state).toBe('different')
   })
 
   it('keeps stale events out of background compare tabs after compare id rollover', async () => {

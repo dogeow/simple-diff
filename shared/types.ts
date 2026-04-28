@@ -75,12 +75,27 @@ export interface CompareEntry {
   readonly reasons: readonly DiffReason[]
 }
 
+export interface CompareFileFingerprint {
+  readonly isDirectory: boolean
+  readonly size: number
+  readonly mtime: number
+}
+
+export interface CompareCacheEntry {
+  readonly relativePath: string
+  readonly state: 'equal' | 'different'
+  readonly left: CompareFileFingerprint
+  readonly right: CompareFileFingerprint
+  readonly reasons: readonly DiffReason[]
+}
+
 export interface CompareRequest {
   readonly compareId: string
   readonly left: SourceConfig
   readonly right: SourceConfig
   readonly strategies: readonly StrategyName[]
   readonly extensionFilter?: readonly string[]
+  readonly previousEntries?: readonly CompareCacheEntry[]
 }
 
 export interface CompareStats {
@@ -93,6 +108,7 @@ export interface CompareStats {
 
 export interface CompareResult {
   readonly entries: readonly CompareEntry[]
+  readonly entriesIncluded?: boolean
   readonly stats: CompareStats
   readonly duration: number // ms
   readonly leftSource?: SourceConfig

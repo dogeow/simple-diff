@@ -3,7 +3,7 @@ import type { CompareEntry, CompareFilter } from '../../../shared/types'
 import { useShallow } from 'zustand/react/shallow'
 import { useCompareNodeInteractions } from '../hooks/useCompareNodeInteractions'
 import { useVisibleCompareNodes } from '../hooks/useVisibleCompareNodes'
-import { useCompareStore, summarizeCompareEntries } from '../stores/compare-store'
+import { useCompareStore } from '../stores/compare-store'
 import CompareToolbar from './CompareToolbar'
 import TreeRow from './TreeRow'
 import FileContextMenu, { type ContextMenuAction } from './FileContextMenu'
@@ -72,8 +72,10 @@ function CompareTreeTable({
 
     const safeViewportHeight = Math.max(viewportHeight, ROW_HEIGHT)
     const visibleCount = Math.ceil(safeViewportHeight / ROW_HEIGHT)
-    const startIndex = Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - OVERSCAN_ROWS)
-    const endIndex = Math.min(visibleNodes.length, startIndex + visibleCount + OVERSCAN_ROWS * 2)
+    const windowSize = visibleCount + OVERSCAN_ROWS * 2
+    const rawStartIndex = Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - OVERSCAN_ROWS)
+    const startIndex = Math.min(rawStartIndex, Math.max(0, visibleNodes.length - windowSize))
+    const endIndex = Math.min(visibleNodes.length, startIndex + windowSize)
 
     return {
       startIndex,
@@ -209,6 +211,7 @@ export default function CompareTree({ entries, filter, onFilterChange, onDoubleC
     rightSource,
     setSyncTask,
     compareDone,
+    entrySummary,
   } = useCompareStore(useShallow((s) => ({
     expandedDirs: s.expandedDirs,
     expandAll: s.expandAll,
@@ -230,9 +233,9 @@ export default function CompareTree({ entries, filter, onFilterChange, onDoubleC
     rightSource: s.rightSource,
     setSyncTask: s.setSyncTask,
     compareDone: s.done,
+    entrySummary: s.entrySummary,
   })))
 
-  const entrySummary = useMemo(() => summarizeCompareEntries(entries), [entries])
   const { stats, pendingCount, allDirCount } = entrySummary
   const allExpanded = allDirCount > 0 && expandedDirs.size >= allDirCount
   const toggleExpandAll = useCallback(() => {

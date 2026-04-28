@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { CompareEntry, FileEntry, IpcResult, SourceConfig } from '../../../shared/types'
-import { hasCompareSessionContent, useCompareStore } from './compare-store'
+import { applyPauseCompareToSnapshot, applyPausedCompareErrorToSnapshot, hasCompareSessionContent, useCompareStore } from './compare-store'
 
 const leftSource: SourceConfig = { type: 'local', path: '/left' }
 const rightSource: SourceConfig = { type: 'local', path: '/right' }
@@ -88,6 +88,18 @@ describe('compare-store', () => {
     expect(entries).toHaveLength(2)
     expect(entries.find((entry) => entry.relativePath === 'src/file.txt')?.state).toBe('equal')
     expect(entries.find((entry) => entry.relativePath === 'docs/readme.md')?.state).toBe('different')
+
+    expect(useCompareStore.getState().entrySummary).toEqual({
+      stats: {
+        total: 2,
+        equal: 1,
+        different: 1,
+        leftOnly: 0,
+        rightOnly: 0,
+      },
+      pendingCount: 0,
+      allDirCount: 0,
+    })
   })
 
   it('ignores updates from stale compare ids', () => {
@@ -101,6 +113,27 @@ describe('compare-store', () => {
     const { entries } = useCompareStore.getState()
     expect(entries).toHaveLength(1)
     expect(entries[0]?.state).toBe('pending')
+  })
+
+  it('derives entry summary for direct setState entry fixtures', () => {
+    useCompareStore.setState({
+      entries: [
+        createCompareEntry('src', { isDirectory: true, state: 'equal' }),
+        createCompareEntry('src/file.txt', { state: 'different' }),
+      ],
+    })
+
+    expect(useCompareStore.getState().entrySummary).toEqual({
+      stats: {
+        total: 2,
+        equal: 1,
+        different: 1,
+        leftOnly: 0,
+        rightOnly: 0,
+      },
+      pendingCount: 0,
+      allDirCount: 1,
+    })
   })
 
   it('hydrates rerunnable source fields from source configs', () => {
@@ -539,6 +572,38 @@ describe('compare-store', () => {
     expect(state.done).toBe(true)
     expect(state.activeCompareId).toBeNull()
     expect(state.loadingDirs.size).toBe(0)
+  })
+
+  it('preserves streamed entries when a compare finishes without final entry payloads', () => {
+    const store = useCompareStore.getState()
+    store.startScanning('compare-1')
+
+    store.setScanEntries('compare-1', [createCompareEntry('done.txt', { state: 'pending' })])
+    store.updateEntries('compare-1', [createCompareEntry('done.txt', { state: 'equal' })])
+
+    store.finishCompare('compare-1', {
+      entries: [],
+      entriesIncluded: false,
+      stats: { total: 1, equal: 1, different: 0, leftOnly: 0, rightOnly: 0 },
+      duration: 42,
+    })
+
+    const state = useCompareStore.getState()
+    expect(state.done).toBe(true)
+    expect(state.entries).toEqual([createCompareEntry('done.txt', { state: 'equal' })])
+    expect(state.entrySummary.stats).toEqual({ total: 1, equal: 1, different: 0, leftOnly: 0, rightOnly: 0 })
+  })
+
+  it('writes paused compare errors even when the paused snapshot still keeps its compare id', () => {
+    const store = useCompareStore.getState()
+    store.startScanning('compare-1')
+
+    const pausedSnapshot = applyPauseCompareToSnapshot(store.createSnapshot(), 'compare-1')
+    const erroredSnapshot = applyPausedCompareErrorToSnapshot(pausedSnapshot, 'compare-1', 'network failed')
+
+    expect(erroredSnapshot.paused).toBe(false)
+    expect(erroredSnapshot.error).toBe('network failed')
+    expect(erroredSnapshot.activeCompareId).toBeNull()
   })
 
   it('preserves existing entries when restarting the active compare session', () => {

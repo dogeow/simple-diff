@@ -17,6 +17,12 @@ import * as historyStore from '../history/history-store'
 import { syncManager } from '../sync/sync-manager'
 
 const compareLogger = logger.child('compare')
+const ENTRY_UPDATE_FLUSH_INTERVAL_MS = 100
+const ENTRY_UPDATE_FLUSH_THRESHOLD = 1000
+const SCAN_BATCH_LOG_LIMIT = 20
+const SCAN_BATCH_LOG_INTERVAL = 200
+const ENTRY_UPDATE_LOG_LIMIT = 20
+const ENTRY_UPDATE_LOG_INTERVAL = 5000
 
 interface ActiveCompare {
   readonly compareId: string
@@ -135,8 +141,6 @@ function registerCompareHandlers(): void {
       const rightSource = await createFileSource(request.right)
       compareLogger.info(`[${request.compareId}] 右侧数据源就绪`)
 
-      const ENTRY_UPDATE_FLUSH_INTERVAL_MS = 50
-      const ENTRY_UPDATE_FLUSH_THRESHOLD = 200
       const entryUpdateBuffer: CompareEntry[] = []
       let flushTimer: NodeJS.Timeout | null = null
 
@@ -153,9 +157,9 @@ function registerCompareHandlers(): void {
         }
         if (entryUpdateBuffer.length === 0) return
         const batch = entryUpdateBuffer.splice(0, entryUpdateBuffer.length)
-        if (controller.signal.aborted) return
+        const previousEntryUpdateCount = sentEntryUpdateCount
         sentEntryUpdateCount += batch.length
-        if (sentEntryUpdateCount <= 200 || sentEntryUpdateCount % 2000 === 0) {
+        if (previousEntryUpdateCount < ENTRY_UPDATE_LOG_LIMIT || Math.floor(previousEntryUpdateCount / ENTRY_UPDATE_LOG_INTERVAL) !== Math.floor(sentEntryUpdateCount / ENTRY_UPDATE_LOG_INTERVAL)) {
           compareLogger.info(
             `[${request.compareId}] 发送条目更新批次: size=${batch.length} 累计=${sentEntryUpdateCount} sample=${batch.slice(0, 3).map((e) => `${e.relativePath || '.'}@${e.state}`).join('、')}`,
           )
@@ -176,20 +180,23 @@ function registerCompareHandlers(): void {
           compareId: request.compareId,
           strategies: request.strategies,
           extensionFilter: request.extensionFilter,
+          previousEntries: request.previousEntries,
+          retainEntries: false,
           signal: controller.signal,
           onEntriesFound: (entries) => {
             if (controller.signal.aborted) return
             scanBatchCount += 1
-            compareLogger.info(
-              `[${request.compareId}] 发送扫描批次 #${scanBatchCount}: entries=${entries.length} sample=${entries.slice(0, 3).map((entry) => entry.relativePath).join('、') || '.'}`,
-            )
+            if (scanBatchCount <= SCAN_BATCH_LOG_LIMIT || scanBatchCount % SCAN_BATCH_LOG_INTERVAL === 0) {
+              compareLogger.info(
+                `[${request.compareId}] 发送扫描批次 #${scanBatchCount}: entries=${entries.length} sample=${entries.slice(0, 3).map((entry) => entry.relativePath).join('、') || '.'}`,
+              )
+            }
             const sent = safeSendToWebContents(event.sender, IPC_CHANNELS.COMPARE_SCAN_COMPLETE, request.compareId, entries)
             if (!sent) {
               abortForUnavailableRenderer('扫描批次')
             }
           },
           onEntryUpdate: (entry) => {
-            if (controller.signal.aborted) return
             entryUpdateBuffer.push(entry)
             if (entryUpdateBuffer.length >= ENTRY_UPDATE_FLUSH_THRESHOLD) {
               flushEntryUpdates()

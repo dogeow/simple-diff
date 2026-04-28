@@ -193,6 +193,57 @@ describe('compareDirectories', () => {
     expect(rightSource.list.mock.calls.map(([dirPath]) => dirPath)).toEqual(['/right', '/right/src'])
   })
 
+  it('reuses cached unchanged file results and only compares changed paired files', async () => {
+    const leftSource = createMockSource({
+      type: 'local',
+      listings: {
+        '/left': [
+          createFileEntry('changed.txt', { size: 10, mtime: 200 }),
+          createFileEntry('same.txt', { size: 10, mtime: 100 }),
+        ],
+      },
+      hashFile: async (filePath) => filePath.includes('/changed.txt') ? `left:${filePath}` : `unexpected:${filePath}`,
+    })
+    const rightSource = createMockSource({
+      type: 'local',
+      listings: {
+        '/right': [
+          createFileEntry('changed.txt', { size: 10, mtime: 200 }),
+          createFileEntry('same.txt', { size: 10, mtime: 100 }),
+        ],
+      },
+      hashFile: async (filePath) => filePath.includes('/changed.txt') ? `right:${filePath}` : `unexpected:${filePath}`,
+    })
+
+    const result = await compareDirectories({
+      leftSource,
+      rightSource,
+      leftRoot: '/left',
+      rightRoot: '/right',
+      strategies: ['hash'],
+      previousEntries: [{
+        relativePath: 'same.txt',
+        state: 'equal',
+        left: { isDirectory: false, size: 10, mtime: 100 },
+        right: { isDirectory: false, size: 10, mtime: 100 },
+        reasons: [],
+      }, {
+        relativePath: 'changed.txt',
+        state: 'equal',
+        left: { isDirectory: false, size: 10, mtime: 100 },
+        right: { isDirectory: false, size: 10, mtime: 100 },
+        reasons: [],
+      }],
+    })
+
+    expect(result.entries.map((entry) => [entry.relativePath, entry.state])).toEqual([
+      ['changed.txt', 'different'],
+      ['same.txt', 'equal'],
+    ])
+    expect(leftSource.hashFile.mock.calls.map(([filePath]) => filePath)).toEqual(['/left/changed.txt'])
+    expect(rightSource.hashFile.mock.calls.map(([filePath]) => filePath)).toEqual(['/right/changed.txt'])
+  })
+
   it('supports exact path filters without skipping same-named nested directories elsewhere', async () => {
     const leftSource = createMockSource({
       type: 'local',

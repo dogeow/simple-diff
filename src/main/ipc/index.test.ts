@@ -132,6 +132,7 @@ function createRequest(compareId: string): CompareRequest {
 function createResult(entries: readonly CompareEntry[] = []): CompareResult {
   return {
     entries,
+    entriesIncluded: true,
     stats: {
       total: entries.length,
       equal: entries.filter((entry) => entry.state === 'equal').length,
@@ -218,6 +219,7 @@ describe('IPC compare handlers', () => {
       rightRoot: '/right',
       strategies: ['size'],
       extensionFilter: ['dist'],
+      retainEntries: false,
       signal: expect.any(AbortSignal),
     }))
     expect(sender.send).toHaveBeenNthCalledWith(
@@ -241,7 +243,7 @@ describe('IPC compare handlers', () => {
     expect(rightSource.dispose).toHaveBeenCalledTimes(1)
   })
 
-  it('aborts an active compare via COMPARE_CANCEL and suppresses progress events after cancellation', async () => {
+  it('aborts an active compare via COMPARE_CANCEL after flushing already-buffered entry updates', async () => {
     const leftSource = createMockSource()
     const rightSource = createMockSource()
     const sender = { send: vi.fn(), once: vi.fn(), off: vi.fn(), mainFrame: {} }
@@ -269,7 +271,13 @@ describe('IPC compare handlers', () => {
 
     expect(cancelResponse).toEqual({ success: true, data: undefined })
     expect(runResponse).toEqual({ success: false, error: '对比已取消' })
-    expect(sender.send).not.toHaveBeenCalled()
+    expect(sender.send).toHaveBeenNthCalledWith(
+      1,
+      IPC_CHANNELS.COMPARE_ENTRY_UPDATE,
+      'compare-cancel',
+      [queuedEntry],
+    )
+    expect(sender.send).toHaveBeenCalledTimes(1)
     expect(mocks.addHistory).not.toHaveBeenCalled()
     expect(leftSource.dispose).toHaveBeenCalledTimes(1)
     expect(rightSource.dispose).toHaveBeenCalledTimes(1)
