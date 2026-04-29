@@ -388,7 +388,7 @@ const initialState = {
   leftSSHConfigId: '',
   rightSSHConfigId: '',
   strategies: ['size', 'mtime'] as readonly StrategyName[],
-  extensionFilter: ['node_modules', '.git', 'dist'] as readonly string[],
+  extensionFilter: ['node_modules', '.git', 'dist', '.DS_Store'] as readonly string[],
   hideDot: false,
   hideDotFilter: 'all' as HideDotFilter,
   compareVersion: 0,

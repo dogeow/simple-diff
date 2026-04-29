@@ -41,7 +41,7 @@ function resetCompareStore(): void {
     leftSSHConfigId: '',
     rightSSHConfigId: '',
     strategies: ['size', 'mtime'],
-    extensionFilter: ['node_modules', '.git', 'dist'],
+    extensionFilter: ['node_modules', '.git', 'dist', '.DS_Store'],
     hideDot: true,
     hideDotFilter: 'all',
   })
