@@ -50,17 +50,28 @@ export class SFTPSource implements FileSource {
 
   private async withSftpRetry<T>(
     operationLabel: string,
-    operation: (sftp: SFTPWrapper) => Promise<T>,
+    operation: (sftp: SFTPWrapper, registerCleanup: (cleanup: () => void) => void) => Promise<T>,
     timeoutMs: number = this.opTimeoutMs,
   ): Promise<T> {
     let lastError: unknown = null
 
     for (let attempt = 0; attempt < 2; attempt += 1) {
       const sftp = await this.getSftp()
+      const cleanups: Array<() => void> = []
+      const registerCleanup = (cleanup: () => void): void => {
+        cleanups.push(cleanup)
+      }
+      const runCleanups = (): void => {
+        for (const cleanup of cleanups) {
+          try { cleanup() } catch { /* ignore cleanup errors */ }
+        }
+        cleanups.length = 0
+      }
 
       try {
-        return await withTimeout(operation(sftp), timeoutMs, operationLabel)
+        return await withTimeout(operation(sftp, registerCleanup), timeoutMs, operationLabel, runCleanups)
       } catch (error) {
+        runCleanups()
         lastError = error
         const message = getSftpErrorMessage(error)
 
@@ -140,10 +151,11 @@ export class SFTPSource implements FileSource {
   }
 
   async readFileBuffer(filePath: string): Promise<Buffer> {
-    return this.withSftpRetry(`读取文件 ${filePath}`, async (sftp) => {
+    return this.withSftpRetry(`读取文件 ${filePath}`, async (sftp, registerCleanup) => {
       return new Promise((resolve, reject) => {
         const chunks: Buffer[] = []
         const stream = sftp.createReadStream(filePath)
+        registerCleanup(() => stream.destroy())
         stream.on('data', (chunk: Buffer | string) => chunks.push(Buffer.from(chunk)))
         stream.on('end', () => resolve(Buffer.concat(chunks)))
         stream.on('error', reject)
@@ -152,11 +164,12 @@ export class SFTPSource implements FileSource {
   }
 
   async hashFile(filePath: string): Promise<string> {
-    return this.withSftpRetry(`计算哈希 ${filePath}`, async (sftp) => {
+    return this.withSftpRetry(`计算哈希 ${filePath}`, async (sftp, registerCleanup) => {
       const hash = createHash('sha1')
 
       await new Promise<void>((resolve, reject) => {
         const stream = sftp.createReadStream(filePath)
+        registerCleanup(() => stream.destroy())
         stream.on('data', (chunk: Buffer | string) => hash.update(chunk))
         stream.on('end', () => resolve())
         stream.on('error', reject)
@@ -167,11 +180,12 @@ export class SFTPSource implements FileSource {
   }
 
   async hashFileRange(filePath: string, start: number, endInclusive: number): Promise<string> {
-    return this.withSftpRetry(`计算区间哈希 ${filePath}:${start}-${endInclusive}`, async (sftp) => {
+    return this.withSftpRetry(`计算区间哈希 ${filePath}:${start}-${endInclusive}`, async (sftp, registerCleanup) => {
       const hash = createHash('sha1')
 
       await new Promise<void>((resolve, reject) => {
         const stream = sftp.createReadStream(filePath, { start, end: endInclusive })
+        registerCleanup(() => stream.destroy())
         stream.on('data', (chunk: Buffer | string) => hash.update(chunk))
         stream.on('end', () => resolve())
         stream.on('error', reject)
@@ -186,9 +200,10 @@ export class SFTPSource implements FileSource {
   }
 
   async writeFileBuffer(filePath: string, content: Buffer): Promise<void> {
-    return this.withSftpRetry(`写入文件 ${filePath}`, async (sftp) => {
+    return this.withSftpRetry(`写入文件 ${filePath}`, async (sftp, registerCleanup) => {
       return new Promise((resolve, reject) => {
         const stream = sftp.createWriteStream(filePath)
+        registerCleanup(() => stream.destroy())
         stream.on('close', () => resolve())
         stream.on('error', reject)
         stream.end(content)
@@ -257,10 +272,16 @@ function getSftpErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
-function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  label: string,
+  onTimeout?: () => void,
+): Promise<T> {
   if (timeoutMs <= 0) return promise
   return new Promise<T>((resolve, reject) => {
     const timer = setTimeout(() => {
+      try { onTimeout?.() } catch { /* ignore cleanup errors */ }
       reject(new Error(`SFTP 操作超时：${label} (operation timed out after ${timeoutMs}ms)`))
     }, timeoutMs)
     promise.then(

@@ -320,42 +320,33 @@ function createEmptyCompareEntrySummary(): CompareEntrySummary {
   }
 }
 
-function cloneCompareEntrySummary(summary: CompareEntrySummary): CompareEntrySummary {
-  return {
-    stats: { ...summary.stats },
-    pendingCount: summary.pendingCount,
-    allDirCount: summary.allDirCount,
-  }
-}
-
 function adjustCompareEntrySummary(
   summary: CompareEntrySummary,
   entry: CompareEntry,
   factor: 1 | -1,
 ): CompareEntrySummary {
-  summary.stats.total += factor
-
-  if (entry.isDirectory) {
-    summary.allDirCount += factor
+  const stats = summary.stats
+  const nextStats = {
+    total: stats.total + factor,
+    equal: stats.equal + (entry.state === 'equal' ? factor : 0),
+    different: stats.different + (entry.state === 'different' ? factor : 0),
+    leftOnly: stats.leftOnly + (entry.state === 'left_only' ? factor : 0),
+    rightOnly: stats.rightOnly + (entry.state === 'right_only' ? factor : 0),
   }
 
-  if (entry.state === 'pending' || entry.state === 'comparing') {
-    summary.pendingCount += factor
+  return {
+    stats: nextStats,
+    pendingCount: summary.pendingCount
+      + (entry.state === 'pending' || entry.state === 'comparing' ? factor : 0),
+    allDirCount: summary.allDirCount + (entry.isDirectory ? factor : 0),
   }
-
-  if (entry.state === 'equal') summary.stats.equal += factor
-  else if (entry.state === 'different') summary.stats.different += factor
-  else if (entry.state === 'left_only') summary.stats.leftOnly += factor
-  else if (entry.state === 'right_only') summary.stats.rightOnly += factor
-
-  return summary
 }
 
 function summarizeCompareEntries(entries: readonly CompareEntry[]): CompareEntrySummary {
-  const summary = createEmptyCompareEntrySummary()
+  let summary = createEmptyCompareEntrySummary()
 
   for (const entry of entries) {
-    adjustCompareEntrySummary(summary, entry, 1)
+    summary = adjustCompareEntrySummary(summary, entry, 1)
   }
 
   return summary
@@ -436,21 +427,21 @@ function upsertEntriesWithSummary(
 
   const next = [...existing]
   const indexByPath = new Map(existing.map((entry, index) => [entry.relativePath, index]))
-  const nextSummary = cloneCompareEntrySummary(currentSummary)
+  let nextSummary = currentSummary
 
   for (const entry of incoming) {
     const existingIndex = indexByPath.get(entry.relativePath)
     if (existingIndex == null) {
       indexByPath.set(entry.relativePath, next.length)
       next.push(entry)
-      adjustCompareEntrySummary(nextSummary, entry, 1)
+      nextSummary = adjustCompareEntrySummary(nextSummary, entry, 1)
       continue
     }
 
     const previousEntry = next[existingIndex]
     next[existingIndex] = entry
-    adjustCompareEntrySummary(nextSummary, previousEntry, -1)
-    adjustCompareEntrySummary(nextSummary, entry, 1)
+    nextSummary = adjustCompareEntrySummary(nextSummary, previousEntry, -1)
+    nextSummary = adjustCompareEntrySummary(nextSummary, entry, 1)
   }
 
   return {

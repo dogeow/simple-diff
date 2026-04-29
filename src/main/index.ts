@@ -166,3 +166,10 @@ app.on('window-all-closed', () => {
     app.quit()
   }
 })
+
+app.on('before-quit', () => {
+  if (pendingFlushTimer) {
+    clearTimeout(pendingFlushTimer)
+    pendingFlushTimer = null
+  }
+})

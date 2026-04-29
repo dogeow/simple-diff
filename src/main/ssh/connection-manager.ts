@@ -1,4 +1,5 @@
 import { NodeSSH } from 'node-ssh'
+import type { Config as NodeSSHConfig } from 'node-ssh'
 import type { SSHConfigInternal } from '@shared/types'
 import { readFile, access } from 'fs/promises'
 import { homedir } from 'os'
@@ -12,6 +13,12 @@ const DEFAULT_KEY_PATHS = [
   'id_rsa',
   'id_ecdsa',
 ]
+
+const SSH_READY_TIMEOUT_MS = 10000
+const SSH_KEEPALIVE_INTERVAL_MS = 15000
+const SSH_KEEPALIVE_COUNT_MAX = 3
+
+const REDACTED = '[REDACTED]'
 
 function expandHome(p: string): string {
   if (p.startsWith('~/') || p === '~') {
@@ -34,6 +41,48 @@ async function findDefaultKey(): Promise<string | null> {
   return null
 }
 
+async function buildConnectConfig(config: SSHConfigInternal): Promise<NodeSSHConfig> {
+  const base: NodeSSHConfig = {
+    host: config.host,
+    port: config.port,
+    username: config.username,
+    readyTimeout: SSH_READY_TIMEOUT_MS,
+    keepaliveInterval: SSH_KEEPALIVE_INTERVAL_MS,
+    keepaliveCountMax: SSH_KEEPALIVE_COUNT_MAX,
+  }
+
+  if (config.authType === 'password') {
+    return { ...base, password: config.password }
+  }
+
+  const explicitKeyPath = config.privateKeyPath ? expandHome(config.privateKeyPath) : null
+  const keyPath = explicitKeyPath ?? (await findDefaultKey())
+
+  if (keyPath) {
+    const privateKey = await readFile(keyPath, 'utf-8')
+    return {
+      ...base,
+      privateKey,
+      ...(config.passphrase ? { passphrase: config.passphrase } : {}),
+    }
+  }
+
+  if (process.env.SSH_AUTH_SOCK) {
+    return { ...base, agent: process.env.SSH_AUTH_SOCK }
+  }
+
+  return base
+}
+
+/** Returns a copy of the connect config with credentials redacted, safe for logging. */
+function redactConnectConfig(config: NodeSSHConfig): Record<string, unknown> {
+  const redacted: Record<string, unknown> = { ...config }
+  if (redacted.password != null) redacted.password = REDACTED
+  if (redacted.privateKey != null) redacted.privateKey = REDACTED
+  if (redacted.passphrase != null) redacted.passphrase = REDACTED
+  return redacted
+}
+
 export class ConnectionManager {
   private readonly connections = new Map<string, NodeSSH>()
 
@@ -46,37 +95,18 @@ export class ConnectionManager {
 
     sshLogger.info(`SSH 正在连接: ${config.username}@${config.host}:${config.port}`)
     const ssh = new NodeSSH()
-    const connectConfig: Record<string, unknown> = {
-      host: config.host,
-      port: config.port,
-      username: config.username,
-      readyTimeout: 10000,
-      keepaliveInterval: 15000,
-      keepaliveCountMax: 3,
+    const connectConfig = await buildConnectConfig(config)
+
+    try {
+      await ssh.connect(connectConfig)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      const safeConfig = JSON.stringify(redactConnectConfig(connectConfig))
+      sshLogger.error(`SSH 连接失败: ${config.host}:${config.port} - ${message} (config=${safeConfig})`)
+      throw error
     }
 
-    if (config.authType === 'password') {
-      connectConfig.password = config.password
-    } else if (config.authType === 'privateKey') {
-      let keyPath = config.privateKeyPath ? expandHome(config.privateKeyPath) : null
-      if (!keyPath) {
-        keyPath = await findDefaultKey()
-      }
-      if (keyPath) {
-        const keyContent = await readFile(keyPath, 'utf-8')
-        connectConfig.privateKey = keyContent
-        if (config.passphrase) {
-          connectConfig.passphrase = config.passphrase
-        }
-      }
-      // Fallback: try SSH agent
-      if (!keyPath && process.env.SSH_AUTH_SOCK) {
-        connectConfig.agent = process.env.SSH_AUTH_SOCK
-      }
-    }
-
-    await ssh.connect(connectConfig)
-  sshLogger.info(`SSH 连接成功: ${config.host}:${config.port}`)
+    sshLogger.info(`SSH 连接成功: ${config.host}:${config.port}`)
     this.connections.set(config.id, ssh)
     return ssh
   }
@@ -92,40 +122,13 @@ export class ConnectionManager {
   async testConnection(config: SSHConfigInternal): Promise<boolean> {
     const ssh = new NodeSSH()
     try {
-      const connectConfig: Record<string, unknown> = {
-        host: config.host,
-        port: config.port,
-        username: config.username,
-        readyTimeout: 10000,
-        keepaliveInterval: 15000,
-        keepaliveCountMax: 3,
-      }
-
-      if (config.authType === 'password') {
-        connectConfig.password = config.password
-      } else if (config.authType === 'privateKey') {
-        let keyPath = config.privateKeyPath ? expandHome(config.privateKeyPath) : null
-        if (!keyPath) {
-          keyPath = await findDefaultKey()
-        }
-        if (keyPath) {
-          const keyContent = await readFile(keyPath, 'utf-8')
-          connectConfig.privateKey = keyContent
-          if (config.passphrase) {
-            connectConfig.passphrase = config.passphrase
-          }
-        }
-        if (!keyPath && process.env.SSH_AUTH_SOCK) {
-          connectConfig.agent = process.env.SSH_AUTH_SOCK
-        }
-      }
-
+      const connectConfig = await buildConnectConfig(config)
       await ssh.connect(connectConfig)
-      ssh.dispose()
       return true
     } catch {
-      ssh.dispose()
       return false
+    } finally {
+      ssh.dispose()
     }
   }
 
