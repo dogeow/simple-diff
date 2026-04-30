@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLogStore } from '../stores/log-store'
 import { useAppStore } from '../stores/app-store'
 import type { LogLevel, LogScope } from '../../../shared/types'
+import { ChevronDownIcon, ChevronRightIcon, TrashIcon } from './Icons'
 
 type LogScopeFilter = 'current' | 'all' | LogScope
 
@@ -12,15 +13,21 @@ function formatTs(ts: number): string {
 
 const LEVEL_STYLE: Record<LogLevel, string> = {
   info: 'text-neutral-300',
-  warn: 'text-yellow-400',
-  error: 'text-red-400',
+  warn: 'text-amber-300',
+  error: 'text-rose-300',
+}
+
+const LEVEL_DOT: Record<LogLevel, string> = {
+  info: 'bg-neutral-500',
+  warn: 'bg-amber-400',
+  error: 'bg-rose-400',
 }
 
 const SCOPE_STYLE: Record<LogScope, string> = {
-  app: 'bg-neutral-700 text-neutral-200',
-  compare: 'bg-blue-900/60 text-blue-300',
-  sync: 'bg-emerald-900/60 text-emerald-300',
-  ssh: 'bg-purple-900/60 text-purple-300',
+  app: 'bg-neutral-800 text-neutral-300 ring-neutral-700',
+  compare: 'bg-blue-500/15 text-blue-300 ring-blue-500/30',
+  sync: 'bg-emerald-500/15 text-emerald-300 ring-emerald-500/30',
+  ssh: 'bg-purple-500/15 text-purple-300 ring-purple-500/30',
 }
 
 const FILTER_OPTIONS: ReadonlyArray<{ value: LogScopeFilter; label: string }> = [
@@ -41,11 +48,34 @@ function resolveCurrentScope(page: ReturnType<typeof useAppStore.getState>['page
 export default function LogPanel() {
   const logs = useLogStore((s) => s.logs)
   const visible = useLogStore((s) => s.visible)
+  const height = useLogStore((s) => s.height)
   const toggleVisible = useLogStore((s) => s.toggleVisible)
+  const setHeight = useLogStore((s) => s.setHeight)
   const clear = useLogStore((s) => s.clear)
   const page = useAppStore((s) => s.page)
   const scrollRef = useRef<HTMLDivElement>(null)
   const [activeFilter, setActiveFilter] = useState<LogScopeFilter>('current')
+  const [resizing, setResizing] = useState(false)
+
+  const handleResizeStart = useCallback((startEvent: React.MouseEvent) => {
+    startEvent.preventDefault()
+    const startY = startEvent.clientY
+    const startHeight = height
+    setResizing(true)
+
+    const handleMove = (event: MouseEvent) => {
+      const delta = startY - event.clientY
+      setHeight(startHeight + delta)
+    }
+    const handleUp = () => {
+      setResizing(false)
+      document.removeEventListener('mousemove', handleMove)
+      document.removeEventListener('mouseup', handleUp)
+    }
+
+    document.addEventListener('mousemove', handleMove)
+    document.addEventListener('mouseup', handleUp)
+  }, [height, setHeight])
 
   const currentScope = resolveCurrentScope(page)
   const filteredLogs = useMemo(() => {
@@ -71,26 +101,40 @@ export default function LogPanel() {
   }, [filteredLogs])
 
   return (
-    <div className="flex shrink-0 flex-col border-t border-neutral-700 bg-neutral-900">
+    <div className="relative flex shrink-0 flex-col border-t border-neutral-800 bg-neutral-900">
+      {visible && (
+        <div
+          role="separator"
+          aria-orientation="horizontal"
+          aria-label="拖动调整日志面板高度"
+          onMouseDown={handleResizeStart}
+          className={`absolute -top-1 left-0 right-0 z-20 h-2 cursor-row-resize transition-colors ${
+            resizing ? 'bg-blue-500/60' : 'hover:bg-blue-500/30'
+          }`}
+        />
+      )}
       {/* Title bar */}
       <div className="flex flex-wrap items-center gap-2 border-b border-neutral-800 bg-neutral-850 px-3 py-1.5">
         <button
           onClick={toggleVisible}
-          className="text-xs text-neutral-400 hover:text-neutral-200"
+          aria-label={visible ? '收起日志' : '展开日志'}
+          className="inline-flex h-5 w-5 items-center justify-center rounded text-neutral-400 transition-colors hover:bg-neutral-800 hover:text-neutral-200"
         >
-          {visible ? '▼' : '▶'}
+          {visible ? <ChevronDownIcon width={12} height={12} /> : <ChevronRightIcon width={12} height={12} />}
         </button>
-        <span className="text-xs font-medium text-neutral-400">日志</span>
-        <span className="text-xs text-neutral-600">{filteredLogs.length}/{logs.length}</span>
+        <span className="text-xs font-medium text-neutral-300">日志</span>
+        <span className="rounded-full bg-neutral-800/80 px-1.5 py-0.5 text-[10px] tabular-nums text-neutral-500">
+          {filteredLogs.length}/{logs.length}
+        </span>
         <div className="flex flex-wrap gap-1">
           {FILTER_OPTIONS.map((option) => (
             <button
               key={option.value}
               onClick={() => setActiveFilter(option.value)}
-              className={`rounded px-2 py-0.5 text-[11px] transition-colors ${
+              className={`rounded px-2 py-0.5 text-[11px] font-medium transition-colors ${
                 activeFilter === option.value
                   ? 'bg-blue-600 text-white'
-                  : 'bg-neutral-800 text-neutral-400 hover:bg-neutral-700 hover:text-neutral-200'
+                  : 'bg-neutral-800/70 text-neutral-400 hover:bg-neutral-800 hover:text-neutral-200'
               }`}
             >
               {option.label}
@@ -100,8 +144,9 @@ export default function LogPanel() {
         <div className="ml-auto">
           <button
             onClick={clear}
-            className="text-xs text-neutral-500 hover:text-neutral-300"
+            className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs text-neutral-500 transition-colors hover:bg-neutral-800 hover:text-neutral-200"
           >
+            <TrashIcon width={11} height={11} />
             清除
           </button>
         </div>
@@ -109,15 +154,19 @@ export default function LogPanel() {
 
       {/* Log content */}
       {visible && (
-        <div ref={scrollRef} className="h-36 overflow-auto font-mono text-xs leading-5">
+        <div
+          ref={scrollRef}
+          style={{ height: `${height}px` }}
+          className="overflow-auto bg-neutral-900 font-mono text-xs leading-5"
+        >
           {filteredLogs.length === 0 && (
-            <div className="px-3 py-2 text-neutral-600">暂无日志</div>
+            <div className="px-3 py-3 text-neutral-600">暂无日志</div>
           )}
           {filteredLogs.map((log, i) => (
-            <div key={`${log.timestamp}-${log.scope}-${i}`} className={`flex gap-2 px-3 hover:bg-neutral-800/50 ${LEVEL_STYLE[log.level]}`}>
+            <div key={`${log.timestamp}-${log.scope}-${i}`} className={`flex items-start gap-2 px-3 py-0.5 hover:bg-neutral-800/40 ${LEVEL_STYLE[log.level]}`}>
+              <span className={`mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full ${LEVEL_DOT[log.level]}`} />
               <span className="shrink-0 text-neutral-600">{formatTs(log.timestamp)}</span>
-              <span className="shrink-0 w-10 text-right uppercase opacity-60">{log.level}</span>
-              <span className={`mt-0.5 shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium uppercase ${SCOPE_STYLE[log.scope]}`}>
+              <span className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium uppercase ring-1 ring-inset ${SCOPE_STYLE[log.scope]}`}>
                 {log.scope}
               </span>
               <span className="break-all">{log.message}</span>

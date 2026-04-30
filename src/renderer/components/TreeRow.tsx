@@ -20,7 +20,7 @@ export default function TreeRow({ node, expanded, loading, onToggle, onDoubleCli
 
   return (
     <tr
-      className={`border-b border-neutral-800 hover:bg-neutral-800/50 cursor-pointer select-none ${rowBg(entry.state)}`}
+      className={`group/row cursor-pointer select-none border-b border-neutral-800/70 transition-colors hover:bg-neutral-800/60 ${rowBg(entry.state)}`}
       onDoubleClick={onDoubleClick}
       onContextMenu={onContextMenu}
     >

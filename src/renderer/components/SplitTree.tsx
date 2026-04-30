@@ -73,9 +73,16 @@ function PathHeader({
     setEditingPath(false)
   }, [onSourcePathSubmit, pathInput, sourcePath, side])
 
+  const sideBadgeClass = side === 'left'
+    ? 'bg-sky-500/15 text-sky-300'
+    : 'bg-violet-500/15 text-violet-300'
+
   return (
     <div className="flex flex-1 flex-col overflow-hidden">
-      <div className="flex h-7 items-center border-b border-neutral-700 bg-neutral-800/80 px-2">
+      <div className="flex h-7 items-center gap-1.5 border-b border-neutral-800 bg-neutral-850 px-2">
+        <span className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase ${sideBadgeClass}`}>
+          {side === 'left' ? 'L' : 'R'}
+        </span>
         {editingPath ? (
           <input
             type="text"
@@ -87,12 +94,12 @@ function PathHeader({
               if (e.key === 'Escape') setEditingPath(false)
             }}
             autoFocus
-            className="flex-1 rounded border border-neutral-600 bg-neutral-900 px-1.5 py-0.5 font-mono text-xs text-neutral-200 outline-none focus:border-blue-500"
+            className="flex-1 rounded-md border border-neutral-600 bg-neutral-900 px-1.5 py-0.5 font-mono text-xs text-neutral-200 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500/30"
           />
         ) : (
           <button
             onClick={handlePathEdit}
-            className="flex-1 truncate text-left font-mono text-xs text-neutral-400 hover:text-neutral-200"
+            className="flex-1 truncate rounded text-left font-mono text-xs text-neutral-400 transition-colors hover:text-neutral-200"
             title={sourcePath}
           >
             {truncatePath(sourcePath, 88) || '—'}
@@ -280,7 +287,7 @@ function SideTable({
   return (
     <div>
       <table className="min-w-full text-left text-sm">
-        <thead className="sticky top-0 z-10 border-b border-neutral-700 bg-neutral-800 text-xs text-neutral-400">
+        <thead className="sticky top-0 z-10 border-b border-neutral-800 bg-neutral-850 text-[10px] font-medium uppercase tracking-wider text-neutral-500">
           <tr>
             <th className="px-3 py-1.5 whitespace-nowrap">名称</th>
             <th className="w-20 px-2 py-1.5 text-center whitespace-nowrap">状态</th>
@@ -291,8 +298,11 @@ function SideTable({
         <tbody>
           {visibleNodes.length === 0 && (
             <tr>
-              <td colSpan={4} className="px-3 py-6 text-center text-neutral-500 text-xs">
-                {emptyStateMessage}
+              <td colSpan={4} className="px-3 py-10 text-center text-xs text-neutral-500">
+                <div className="flex flex-col items-center gap-2">
+                  <span className="flex h-8 w-8 items-center justify-center rounded-full bg-neutral-800 text-neutral-600">∅</span>
+                  {emptyStateMessage}
+                </div>
               </td>
             </tr>
           )}

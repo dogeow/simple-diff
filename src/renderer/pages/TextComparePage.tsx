@@ -251,26 +251,26 @@ export default function TextComparePage() {
 
   return (
     <div className="flex h-full flex-col gap-2 p-3">
-      <div className="flex shrink-0 flex-wrap items-center gap-2">
+      <div className="flex shrink-0 flex-wrap items-center gap-1.5">
         <button
           onClick={swap}
-          className="rounded bg-neutral-700 px-3 py-1.5 text-sm text-neutral-200 hover:bg-neutral-600"
+          className="inline-flex items-center gap-1.5 rounded-md border border-neutral-700 bg-neutral-800/70 px-3 py-1.5 text-sm text-neutral-200 transition-colors hover:border-neutral-600 hover:bg-neutral-800"
         >
           交换 ⇄
         </button>
         <button
           onClick={clear}
-          className="rounded bg-neutral-700 px-3 py-1.5 text-sm text-neutral-200 hover:bg-neutral-600"
+          className="inline-flex items-center gap-1.5 rounded-md border border-neutral-700 bg-neutral-800/70 px-3 py-1.5 text-sm text-neutral-200 transition-colors hover:border-neutral-600 hover:bg-neutral-800"
         >
           清空
         </button>
         <button
           onClick={toggleCharLevel}
           disabled={!result}
-          className={`rounded px-3 py-1.5 text-sm transition-colors ${
+          className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm transition-colors ${
             charLevel
               ? 'bg-blue-600 text-white hover:bg-blue-500'
-              : 'bg-neutral-700 text-neutral-200 hover:bg-neutral-600'
+              : 'border border-neutral-700 bg-neutral-800/70 text-neutral-200 hover:border-neutral-600 hover:bg-neutral-800'
           } disabled:cursor-not-allowed disabled:opacity-40`}
         >
           字符对比{charLevel ? '：开' : '：关'}
@@ -278,17 +278,17 @@ export default function TextComparePage() {
         {(manualAlignRequest || manualAlignments.length > 0) && (
           <button
             onClick={clearManualAlignments}
-            className="rounded bg-neutral-700 px-3 py-1.5 text-sm text-neutral-200 hover:bg-neutral-600"
+            className="inline-flex items-center gap-1.5 rounded-md border border-neutral-700 bg-neutral-800/70 px-3 py-1.5 text-sm text-neutral-200 transition-colors hover:border-neutral-600 hover:bg-neutral-800"
           >
             清除手动对齐
           </button>
         )}
-        {error && <span className="text-sm text-red-400">{error}</span>}
-        <div className="ml-auto flex flex-wrap items-center gap-3 text-xs">
-          <span className={manualAlignError ? 'text-amber-300' : 'text-neutral-500'}>
+        {error && <span className="rounded-md bg-rose-500/10 px-2 py-1 text-sm text-rose-300">{error}</span>}
+        <div className="ml-auto flex flex-wrap items-center gap-2 text-xs">
+          <span className={`rounded-md px-2 py-1 ${manualAlignError ? 'bg-amber-500/10 text-amber-300' : 'text-neutral-500'}`}>
             {manualAlignError ?? manualAlignHint}
           </span>
-          <span className="text-neutral-500">
+          <span className="rounded-md bg-neutral-800/60 px-2 py-1 text-neutral-400">
             {diffSummary
               ? diffSummary.hasDiff
                 ? `左侧 ${diffSummary.leftChanges} 行变化，右侧 ${diffSummary.rightChanges} 行变化`

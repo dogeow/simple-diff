@@ -284,51 +284,53 @@ export default function TextInputPanel({
     }
   }
 
+  const sideBadgeClass = side === 'left'
+    ? 'bg-sky-500/15 text-sky-300'
+    : 'bg-violet-500/15 text-violet-300'
+
   return (
     <div
-      className={`flex min-h-0 flex-1 flex-col overflow-hidden rounded border transition-colors ${
-        isDragOver ? 'border-blue-500 bg-blue-500/5' : 'border-neutral-700'
+      className={`flex min-h-0 flex-1 flex-col overflow-hidden rounded-md border transition-colors ${
+        isDragOver ? 'border-blue-500 bg-blue-500/5 ring-2 ring-dashed ring-blue-500/40' : 'border-neutral-800'
       }`}
       onDragEnter={handleDragEnter}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
-      <div className="flex shrink-0 items-center gap-2 border-b border-neutral-700 bg-neutral-800 px-2 py-1 text-xs">
-        <span className="font-medium text-neutral-300">{label}</span>
+      <div className="flex shrink-0 items-center gap-2 border-b border-neutral-800 bg-neutral-850 px-2 py-1.5 text-xs">
+        <span className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase ${sideBadgeClass}`}>
+          {side === 'left' ? 'L' : 'R'}
+        </span>
+        <span className="font-medium text-neutral-200">{label}</span>
         {fileLabel && (
-          <span className="truncate text-neutral-500" title={fileLabel}>
+          <span className="truncate font-mono text-neutral-500" title={fileLabel}>
             {fileLabel}
           </span>
         )}
-        {manualAlignRequest?.side === side && manualAlignRequest.lineNumber != null && (
-          <span className="rounded bg-amber-500/10 px-1.5 py-0.5 text-[11px] text-amber-300">
-            锚点行 {manualAlignRequest.lineNumber}
-          </span>
-        )}
-        {manualAlignRequest?.side === side && manualAlignRequest.lineNumber == null && (
-          <span className="rounded bg-amber-500/10 px-1.5 py-0.5 text-[11px] text-amber-300">
-            点击当前侧锚点行
+        {manualAlignRequest?.side === side && (
+          <span className="inline-flex items-center gap-1 rounded bg-amber-500/10 px-1.5 py-0.5 text-[11px] text-amber-300">
+            <span className="h-1.5 w-1.5 rounded-full bg-amber-400" />
+            {manualAlignRequest.lineNumber == null
+              ? '点击当前侧锚点行'
+              : `锚点行 ${manualAlignRequest.lineNumber} · 可点击改锚点`}
           </span>
         )}
         {awaitingManualAlignTarget && (
-          <span className="rounded bg-amber-500/10 px-1.5 py-0.5 text-[11px] text-amber-300">
+          <span className="inline-flex items-center gap-1 rounded bg-amber-500/10 px-1.5 py-0.5 text-[11px] text-amber-300">
+            <span className="h-1.5 w-1.5 rounded-full bg-amber-400" />
             点击此侧目标行
           </span>
         )}
-        {manualAlignRequest?.side === side && (
-          <span className="rounded bg-amber-500/10 px-1.5 py-0.5 text-[11px] text-amber-300">
-            {manualAlignRequest.lineNumber == null ? '先选锚点' : '可点击改锚点'}
-          </span>
-        )}
-        <span className="ml-auto text-neutral-600">{value.length} 字符</span>
+        <span className="ml-auto rounded bg-neutral-800/70 px-1.5 py-0.5 tabular-nums text-neutral-500">{value.length} 字符</span>
         {value && (
           <button
             onClick={onClear}
-            className="rounded px-1.5 text-neutral-400 hover:bg-neutral-700 hover:text-neutral-200"
+            aria-label="清空"
+            className="inline-flex h-5 w-5 items-center justify-center rounded text-neutral-400 transition-colors hover:bg-neutral-700 hover:text-neutral-100"
             title="清空"
           >
-            ×
+            <span aria-hidden="true">×</span>
           </button>
         )}
       </div>

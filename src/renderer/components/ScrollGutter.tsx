@@ -108,14 +108,14 @@ export default function ScrollGutter({ scrollRef, markers }: ScrollGutterProps) 
   return (
     <div
       ref={gutterRef}
-      className="relative w-4 shrink-0 cursor-pointer border-x border-neutral-600 bg-neutral-700"
+      className="group relative w-3 shrink-0 cursor-pointer border-x border-neutral-800 bg-neutral-850"
       onClick={handleGutterClick}
     >
       {/* Diff markers */}
       {markers?.map((m, i) => (
         <div
           key={i}
-          className="absolute left-0 right-0 bg-red-500/70"
+          className="absolute left-0 right-0 bg-amber-500/70 transition-colors group-hover:bg-amber-400/80"
           style={{
             top: `${m.start * 100}%`,
             height: `max(${m.height * 100}%, 2px)`,
@@ -126,7 +126,7 @@ export default function ScrollGutter({ scrollRef, markers }: ScrollGutterProps) 
       {/* Scroll thumb */}
       {visible && (
         <div
-          className="absolute left-0.5 right-0.5 z-10 rounded-full bg-neutral-400/60 transition-colors hover:bg-neutral-400/80"
+          className="absolute left-0.5 right-0.5 z-10 rounded-full bg-neutral-500/50 transition-colors hover:bg-neutral-400/80"
           style={{
             top: `${thumbTop}px`,
             height: `${thumbHeight}px`,

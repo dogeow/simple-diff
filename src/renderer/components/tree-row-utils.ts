@@ -56,10 +56,10 @@ export function formatTime(ms: number): string {
 
 export function rowBg(state: CompareState): string {
   switch (state) {
-    case 'different': return 'bg-rose-950/12'
-    case 'left_only': return 'bg-sky-950/12'
-    case 'right_only': return 'bg-violet-950/12'
-    case 'comparing': return 'bg-cyan-950/10'
+    case 'different': return 'bg-amber-500/[0.05]'
+    case 'left_only': return 'bg-sky-500/[0.05]'
+    case 'right_only': return 'bg-violet-500/[0.05]'
+    case 'comparing': return 'bg-cyan-500/[0.04]'
     default: return ''
   }
 }

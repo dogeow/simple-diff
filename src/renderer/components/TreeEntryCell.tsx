@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 import type { TreeNode } from '../utils/tree-utils'
+import { ChevronDownIcon, ChevronRightIcon, FolderIcon } from './Icons'
 
 interface TreeEntryCellProps {
   readonly node: TreeNode
@@ -8,6 +9,15 @@ interface TreeEntryCellProps {
   readonly onToggle: () => void
   readonly indentSize?: number
   readonly children?: ReactNode
+}
+
+function FileGlyph() {
+  return (
+    <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+      <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" />
+      <path d="M14 3v5h5" />
+    </svg>
+  )
 }
 
 export default function TreeEntryCell({
@@ -25,7 +35,7 @@ export default function TreeEntryCell({
       {node.isDirectory ? (
         loading ? (
           <span className="mr-1 flex h-4 w-4 items-center justify-center">
-            <span className="inline-block h-3 w-3 animate-spin rounded-full border border-current border-t-transparent text-blue-400" />
+            <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-blue-400 border-t-transparent" />
           </span>
         ) : (
           <button
@@ -33,15 +43,18 @@ export default function TreeEntryCell({
               event.stopPropagation()
               onToggle()
             }}
-            className="mr-1 flex h-4 w-4 items-center justify-center text-xs text-neutral-400 hover:text-neutral-200"
+            aria-label={expanded ? '收起' : '展开'}
+            className="mr-1 flex h-4 w-4 items-center justify-center rounded text-neutral-500 transition-colors hover:bg-neutral-700/60 hover:text-neutral-200"
           >
-            {expanded ? '▼' : '▶'}
+            {expanded ? <ChevronDownIcon width={11} height={11} /> : <ChevronRightIcon width={11} height={11} />}
           </button>
         )
       ) : (
-        <span className="mr-1 w-4" />
+        <span className="mr-1 w-4" aria-hidden="true" />
       )}
-      <span className="mr-1.5 shrink-0 text-xs">{node.isDirectory ? '📁' : '📄'}</span>
+      <span className={`mr-1.5 flex h-4 w-4 shrink-0 items-center justify-center ${node.isDirectory ? 'text-blue-300/80' : 'text-neutral-500'}`}>
+        {node.isDirectory ? <FolderIcon width={12} height={12} /> : <FileGlyph />}
+      </span>
       {children ?? <span className="min-w-0 truncate font-mono text-xs whitespace-nowrap">{node.name}</span>}
     </div>
   )

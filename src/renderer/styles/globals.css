@@ -1,1 +1,57 @@
 @import 'tailwindcss';
+
+@theme {
+  --color-neutral-750: oklch(0.295 0 0);
+  --color-neutral-850: oklch(0.225 0 0);
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+    overflow: hidden;
+  }
+
+  *:focus-visible {
+    outline: 2px solid var(--color-blue-500);
+    outline-offset: 1px;
+    border-radius: 3px;
+  }
+
+  /* WebKit scrollbar (Chromium / Electron) */
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background-color: var(--color-neutral-700);
+    border-radius: 6px;
+    border: 2px solid transparent;
+    background-clip: content-box;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background-color: var(--color-neutral-600);
+    background-clip: content-box;
+  }
+
+  ::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+}
+
+@layer utilities {
+  .app-drag-region {
+    -webkit-app-region: drag;
+  }
+
+  .app-drag-region :where(button, input, select, textarea, a, [role='button']) {
+    -webkit-app-region: no-drag;
+  }
+}

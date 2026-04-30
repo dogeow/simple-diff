@@ -1,12 +1,12 @@
 import type { CompareState } from '../../../shared/types'
 
-const STATE_STYLES: Record<CompareState, { bg: string; text: string; label: string }> = {
-  pending: { bg: 'bg-neutral-700/50', text: 'text-neutral-500', label: '待比' },
-  comparing: { bg: 'bg-cyan-950/40', text: 'text-cyan-300', label: '对比中' },
-  equal: { bg: 'bg-green-900/30', text: 'text-green-400', label: '相同' },
-  different: { bg: 'bg-rose-950/40', text: 'text-rose-300', label: '不同' },
-  left_only: { bg: 'bg-sky-950/40', text: 'text-sky-300', label: '仅左' },
-  right_only: { bg: 'bg-violet-950/40', text: 'text-violet-300', label: '仅右' },
+const STATE_STYLES: Record<CompareState, { bg: string; text: string; ring: string; label: string }> = {
+  pending: { bg: 'bg-neutral-800/60', text: 'text-neutral-400', ring: 'ring-neutral-700/60', label: '待比' },
+  comparing: { bg: 'bg-cyan-500/10', text: 'text-cyan-300', ring: 'ring-cyan-500/30', label: '对比中' },
+  equal: { bg: 'bg-emerald-500/10', text: 'text-emerald-300', ring: 'ring-emerald-500/30', label: '相同' },
+  different: { bg: 'bg-amber-500/10', text: 'text-amber-300', ring: 'ring-amber-500/30', label: '不同' },
+  left_only: { bg: 'bg-sky-500/10', text: 'text-sky-300', ring: 'ring-sky-500/30', label: '仅左' },
+  right_only: { bg: 'bg-violet-500/10', text: 'text-violet-300', ring: 'ring-violet-500/30', label: '仅右' },
 }
 
 interface StatusBadgeProps {
@@ -16,7 +16,9 @@ interface StatusBadgeProps {
 export default function StatusBadge({ state }: StatusBadgeProps) {
   const style = STATE_STYLES[state]
   return (
-    <span className={`inline-flex items-center gap-1 whitespace-nowrap rounded px-2 py-0.5 text-xs font-medium ${style.bg} ${style.text}`}>
+    <span
+      className={`inline-flex items-center justify-center whitespace-nowrap rounded-full px-2 py-0.5 text-[10px] font-medium ring-1 ring-inset ${style.bg} ${style.text} ${style.ring}`}
+    >
       {style.label}
     </span>
   )

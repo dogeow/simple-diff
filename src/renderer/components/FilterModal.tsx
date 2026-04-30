@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { formatPathFiltersForDisplay, mergeDisplayedPathFilters } from '@shared/path-filter'
+import { FilterIcon } from './Icons'
 
 interface FilterModalProps {
   readonly extensionFilter: readonly string[]
@@ -36,6 +37,7 @@ export default function FilterModal({ extensionFilter, onChange }: FilterModalPr
   }
 
   const active = extensionFilter.length > 0
+  const buttonLabel = active ? `过滤 (${extensionFilter.length})` : '过滤'
 
   return (
     <div className="relative" ref={ref}>
@@ -44,37 +46,42 @@ export default function FilterModal({ extensionFilter, onChange }: FilterModalPr
           setInput(formatPathFiltersForDisplay(extensionFilter).join('\n'))
           setOpen(!open)
         }}
-        className={`h-7 rounded px-2.5 text-[11px] font-medium leading-none transition-colors ${
+        className={`inline-flex h-7 items-center gap-1 rounded-md px-2.5 text-[11px] font-medium leading-none transition-colors ${
           active
             ? 'bg-blue-600 text-white hover:bg-blue-500'
-            : 'bg-neutral-700 text-neutral-300 hover:bg-neutral-600'
+            : 'border border-neutral-700 bg-neutral-800/70 text-neutral-300 hover:border-neutral-600 hover:bg-neutral-800'
         }`}
       >
-        过滤{active ? ` (${extensionFilter.length})` : ''}
+        <FilterIcon width={11} height={11} />
+        {buttonLabel}
       </button>
 
       {open && (
-        <div className="absolute top-full left-0 z-50 mt-1 w-48 rounded border border-neutral-600 bg-neutral-800 p-3 shadow-xl">
-          <label className="mb-1.5 block text-xs text-neutral-400">
-            排除目录或路径（一行一个，右键忽略会写入精确路径规则）
+        <div className="absolute top-full left-0 z-50 mt-1 w-64 rounded-md border border-neutral-700 bg-neutral-850 p-3 shadow-2xl">
+          <label className="mb-1.5 block text-[11px] font-medium text-neutral-400">
+            排除目录或路径
           </label>
+          <p className="mb-2 text-[10px] text-neutral-600">
+            一行一个；右键『忽略』会自动写入精确路径规则
+          </p>
           <textarea
             value={input}
             onChange={(e) => setInput(e.target.value)}
             placeholder={"node_modules\n.git\ndist"}
             rows={6}
-            className="mb-2 w-full resize-none rounded border border-neutral-600 bg-neutral-900 px-2 py-1.5 text-sm text-neutral-100 outline-none focus:border-blue-500"
+            spellCheck={false}
+            className="mb-2 w-full resize-none rounded-md border border-neutral-700 bg-neutral-900 px-2 py-1.5 font-mono text-xs text-neutral-100 outline-none transition-colors focus:border-blue-500 focus:ring-1 focus:ring-blue-500/30"
           />
           <div className="flex gap-2">
             <button
               onClick={handleApply}
-              className="h-7 flex-1 rounded bg-blue-600 px-2 text-[11px] font-medium leading-none text-white hover:bg-blue-500"
+              className="h-7 flex-1 rounded-md bg-blue-600 px-2 text-[11px] font-medium leading-none text-white shadow-sm transition-colors hover:bg-blue-500"
             >
               应用
             </button>
             <button
               onClick={handleClear}
-              className="h-7 flex-1 rounded bg-neutral-700 px-2 text-[11px] font-medium leading-none text-neutral-300 hover:bg-neutral-600"
+              className="h-7 flex-1 rounded-md border border-neutral-700 bg-neutral-800 px-2 text-[11px] font-medium leading-none text-neutral-300 transition-colors hover:border-neutral-600 hover:bg-neutral-700"
             >
               清除
             </button>

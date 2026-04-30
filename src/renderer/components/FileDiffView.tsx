@@ -4,6 +4,7 @@ import { useAppStore } from '../stores/app-store'
 import type { DiffLine } from '../../../shared/types'
 import { computeTextDiff } from '../../../shared/text-diff'
 import { truncatePath } from '../utils/tree-utils'
+import { showToast } from '../stores/toast-store'
 import ScrollGutter, { type GutterMarker } from './ScrollGutter'
 import { applyDiffRange, canApplyLine, groupIntoHunks, type Hunk } from './file-diff-utils'
 import { buildHunkMetrics, getVisibleHunkWindow } from './file-diff-window'
@@ -86,6 +87,19 @@ export default function FileDiffView({ tab }: FileDiffViewProps) {
     () => hunkMetrics.filter((metric) => metric.hunk.type === 'diff'),
     [hunkMetrics],
   )
+
+  const diffSummary = useMemo(() => {
+    if (!tab.diffResult) return { added: 0, removed: 0, hunks: 0 }
+    let added = 0
+    let removed = 0
+    for (const line of tab.diffResult.leftLines) {
+      if (line.type === 'remove') removed += 1
+    }
+    for (const line of tab.diffResult.rightLines) {
+      if (line.type === 'add') added += 1
+    }
+    return { added, removed, hunks: diffHunkMetrics.length }
+  }, [tab.diffResult, diffHunkMetrics.length])
 
   const diffMarkers = useMemo((): readonly GutterMarker[] => {
     if (totalDiffHeight === 0) return []
@@ -185,12 +199,24 @@ export default function FileDiffView({ tab }: FileDiffViewProps) {
           ? { originalLeftContent: content }
           : { originalRightContent: content }),
       })
+      showToast({
+        tone: 'success',
+        message: side === 'left' ? '已保存左侧' : '已保存右侧',
+        description: tab.fileName,
+      })
+    } else {
+      showToast({
+        tone: 'error',
+        message: '保存失败',
+        description: result.error ?? '未知错误',
+      })
     }
   }, [tab, hasDiffTabSession, updateDiffTab])
 
   if (tab.loading) {
     return (
-      <div className="flex h-full items-center justify-center text-neutral-400">
+      <div className="flex h-full items-center justify-center gap-2 text-neutral-400">
+        <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-blue-400 border-t-transparent" />
         加载中...
       </div>
     )
@@ -210,12 +236,15 @@ export default function FileDiffView({ tab }: FileDiffViewProps) {
     <div className="flex h-full flex-col">
       {/* Save bar */}
       {isModified && (
-        <div className="flex items-center gap-2 border-b border-neutral-700 bg-neutral-800 px-3 py-1.5">
-          <span className="text-xs text-yellow-400">已修改</span>
+        <div className="flex items-center gap-2 border-b border-amber-500/30 bg-amber-500/5 px-3 py-1.5">
+          <span className="inline-flex items-center gap-1.5 text-xs font-medium text-amber-300">
+            <span className="h-1.5 w-1.5 rounded-full bg-amber-400" />
+            已修改
+          </span>
           {tab.leftContent !== tab.originalLeftContent && tab.leftSource && (
             <button
               onClick={() => handleSave('left')}
-              className="rounded bg-blue-600 px-2 py-0.5 text-xs text-white hover:bg-blue-500"
+              className="rounded-md bg-blue-600 px-2 py-0.5 text-xs font-medium text-white shadow-sm hover:bg-blue-500"
             >
               保存左侧
             </button>
@@ -223,7 +252,7 @@ export default function FileDiffView({ tab }: FileDiffViewProps) {
           {tab.rightContent !== tab.originalRightContent && tab.rightSource && (
             <button
               onClick={() => handleSave('right')}
-              className="rounded bg-blue-600 px-2 py-0.5 text-xs text-white hover:bg-blue-500"
+              className="rounded-md bg-blue-600 px-2 py-0.5 text-xs font-medium text-white shadow-sm hover:bg-blue-500"
             >
               保存右侧
             </button>
@@ -232,29 +261,52 @@ export default function FileDiffView({ tab }: FileDiffViewProps) {
       )}
 
       {/* Path headers (sticky) */}
-      <div className="flex shrink-0 border-b border-neutral-700 bg-neutral-800">
-        <div className="flex-1 truncate border-r border-neutral-700 px-3 py-1 text-xs text-neutral-400" title={tab.leftFullPath || '(不存在)'}>
-          左侧 — {truncatePath(tab.leftFullPath || '(不存在)')}
-        </div>
-        <div className="flex-1 truncate px-3 py-1 text-xs text-neutral-400" title={tab.rightFullPath || '(不存在)'}>
-          右侧 — {truncatePath(tab.rightFullPath || '(不存在)')}
-        </div>
+      <div className="flex shrink-0 border-b border-neutral-800 bg-neutral-850">
+        <PathHeaderCell side="left" path={tab.leftFullPath} />
+        <PathHeaderCell side="right" path={tab.rightFullPath} />
       </div>
 
-      <div className="flex shrink-0 items-center gap-2 border-b border-neutral-700 bg-neutral-900/70 px-3 py-1 text-[11px] text-neutral-500">
+      <div className="flex shrink-0 items-center gap-2 border-b border-neutral-800 bg-neutral-900/70 px-3 py-1.5 text-[11px] text-neutral-500">
         <button
           onClick={() => scrollToDiff('prev')}
-          className="rounded bg-neutral-700 px-2 py-0.5 text-neutral-300 hover:bg-neutral-600"
+          disabled={diffSummary.hunks === 0}
+          className="inline-flex items-center gap-1 rounded-md border border-neutral-700 bg-neutral-800/70 px-2 py-0.5 text-neutral-300 transition-colors hover:border-neutral-600 hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-neutral-800/70"
         >
           上一个差异
         </button>
         <button
           onClick={() => scrollToDiff('next')}
-          className="rounded bg-neutral-700 px-2 py-0.5 text-neutral-300 hover:bg-neutral-600"
+          disabled={diffSummary.hunks === 0}
+          className="inline-flex items-center gap-1 rounded-md border border-neutral-700 bg-neutral-800/70 px-2 py-0.5 text-neutral-300 transition-colors hover:border-neutral-600 hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-neutral-800/70"
         >
           下一个差异
         </button>
-        <span className="ml-auto">快捷键: Shift+F7 上一个, F7 下一个</span>
+        {diffSummary.hunks > 0 ? (
+          <span className="inline-flex items-center gap-2 rounded-md border border-neutral-800 bg-neutral-900/40 px-2 py-0.5">
+            <span className="inline-flex items-center gap-1 text-emerald-300">
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+              <span className="tabular-nums">+{diffSummary.added}</span>
+            </span>
+            <span className="inline-flex items-center gap-1 text-rose-300">
+              <span className="h-1.5 w-1.5 rounded-full bg-rose-400" />
+              <span className="tabular-nums">−{diffSummary.removed}</span>
+            </span>
+            <span className="text-neutral-500">·</span>
+            <span className="tabular-nums text-neutral-400">{diffSummary.hunks} 个差异块</span>
+          </span>
+        ) : (
+          <span className="inline-flex items-center gap-1 rounded-md border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-emerald-300">
+            <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+            两侧内容一致
+          </span>
+        )}
+        <span className="ml-auto inline-flex items-center gap-1 text-[10px] text-neutral-600">
+          <kbd className="rounded border border-neutral-700 bg-neutral-800 px-1.5 py-0.5 font-mono text-[10px] text-neutral-400">Shift+F7</kbd>
+          上一个
+          <span className="mx-1 text-neutral-700">·</span>
+          <kbd className="rounded border border-neutral-700 bg-neutral-800 px-1.5 py-0.5 font-mono text-[10px] text-neutral-400">F7</kbd>
+          下一个
+        </span>
       </div>
 
       {/* Diff content — two panels with synchronized scroll */}
@@ -308,10 +360,64 @@ export default function FileDiffView({ tab }: FileDiffViewProps) {
   )
 }
 
+interface PathHeaderCellProps {
+  readonly side: 'left' | 'right'
+  readonly path: string
+}
+
+function PathHeaderCell({ side, path }: PathHeaderCellProps) {
+  const display = path || '(不存在)'
+  const badgeClass = side === 'left'
+    ? 'bg-sky-500/15 text-sky-300'
+    : 'bg-violet-500/15 text-violet-300'
+  const borderClass = side === 'left' ? 'border-r border-neutral-800' : ''
+
+  const handleCopy = async () => {
+    if (!path) return
+    try {
+      await navigator.clipboard.writeText(path)
+      showToast({ tone: 'success', message: '已复制路径', description: path })
+    } catch (error) {
+      showToast({ tone: 'error', message: '复制失败', description: String(error) })
+    }
+  }
+
+  return (
+    <div
+      className={`group flex flex-1 items-center gap-1.5 truncate px-3 py-1.5 text-xs text-neutral-400 ${borderClass}`}
+      title={display}
+    >
+      <span className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase ${badgeClass}`}>
+        {side === 'left' ? 'L' : 'R'}
+      </span>
+      <span className="min-w-0 flex-1 truncate font-mono">{truncatePath(display)}</span>
+      {path && (
+        <button
+          onClick={handleCopy}
+          aria-label="复制完整路径"
+          title="复制完整路径"
+          className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded text-neutral-500 opacity-0 transition-opacity hover:bg-neutral-700/50 hover:text-neutral-200 group-hover:opacity-100"
+        >
+          <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+            <rect x="9" y="9" width="13" height="13" rx="2" />
+            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+          </svg>
+        </button>
+      )}
+    </div>
+  )
+}
+
 const LINE_BG: Record<DiffLine['type'], string> = {
   equal: '',
-  add: 'bg-green-900/30',
-  remove: 'bg-red-900/30',
+  add: 'bg-emerald-500/10',
+  remove: 'bg-rose-500/10',
+}
+
+const LINE_EDGE: Record<DiffLine['type'], string> = {
+  equal: 'border-l-2 border-l-transparent',
+  add: 'border-l-2 border-l-emerald-500/50',
+  remove: 'border-l-2 border-l-rose-500/50',
 }
 
 interface HunkBlockProps {
@@ -332,8 +438,8 @@ function HunkBlock({ hunk, lines, otherLines, side, onApplyHunk, onApplyLine }: 
       {hunk.type === 'diff' && (
         <button
           onClick={onApplyHunk}
-          className="absolute top-0 z-20 rounded bg-blue-600/80 px-1 py-0.5 text-[10px] text-white opacity-0 transition-opacity group-hover:opacity-100"
-          style={side === 'left' ? { right: 2, top: 2 } : { left: 2, top: 2 }}
+          className="absolute z-20 inline-flex items-center gap-0.5 rounded-md bg-blue-600 px-1.5 py-0.5 text-[10px] font-medium text-white opacity-0 shadow-sm transition-all hover:bg-blue-500 group-hover:opacity-100"
+          style={side === 'left' ? { right: 4, top: 2 } : { left: 4, top: 2 }}
           title={side === 'left' ? '整块应用到右侧' : '整块应用到左侧'}
         >
           {isMultiLineDiff ? (side === 'left' ? '整块→' : '←整块') : (side === 'left' ? '→' : '←')}
@@ -342,10 +448,10 @@ function HunkBlock({ hunk, lines, otherLines, side, onApplyHunk, onApplyLine }: 
       {hunkLines.map((line, i) => (
         <div
           key={hunk.startIndex + i}
-          className={`group/line flex min-w-full w-max border-b border-neutral-800/30 ${LINE_BG[line.type]}`}
+          className={`group/line flex w-max min-w-full border-b border-neutral-800/30 ${LINE_BG[line.type]} ${LINE_EDGE[line.type]}`}
           style={{ height: `${DIFF_ROW_HEIGHT}px` }}
         >
-          <span className="inline-block w-12 shrink-0 select-none border-r border-neutral-800 px-2 py-0.5 text-right text-neutral-500">
+          <span className="inline-block w-12 shrink-0 select-none border-r border-neutral-800/60 px-2 py-0.5 text-right tabular-nums text-neutral-600">
             {line.lineNumber >= 0 ? line.lineNumber : ''}
           </span>
           {canApplyLine({
@@ -355,7 +461,7 @@ function HunkBlock({ hunk, lines, otherLines, side, onApplyHunk, onApplyLine }: 
           }) && (
             <button
               onClick={() => onApplyLine(hunk.startIndex + i)}
-              className="mx-1 my-0.5 shrink-0 rounded bg-blue-600/70 px-1 py-0 text-[10px] text-white opacity-0 transition-opacity group-hover/line:opacity-100"
+              className="mx-1 my-0.5 inline-flex shrink-0 items-center justify-center rounded bg-blue-600 px-1 text-[10px] font-medium text-white opacity-0 shadow-sm transition-opacity hover:bg-blue-500 group-hover/line:opacity-100"
               title={side === 'left' ? '仅应用当前行到右侧' : '仅应用当前行到左侧'}
             >
               {side === 'left' ? '→' : '←'}

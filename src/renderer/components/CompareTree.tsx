@@ -126,23 +126,26 @@ function CompareTreeTable({
 
   return (
     <>
-      <div ref={tableRef} className="flex-1 overflow-auto rounded border border-neutral-700" onScroll={(event) => setScrollTop(event.currentTarget.scrollTop)}>
+      <div ref={tableRef} className="flex-1 overflow-auto rounded-md border border-neutral-800 bg-neutral-900/40" onScroll={(event) => setScrollTop(event.currentTarget.scrollTop)}>
         <table className="w-full text-left text-sm">
-          <thead className="sticky top-0 z-10 border-b border-neutral-700 bg-neutral-800 text-xs text-neutral-400">
+          <thead className="sticky top-0 z-10 border-b border-neutral-800 bg-neutral-850 text-[10px] font-medium uppercase tracking-wider text-neutral-500">
             <tr>
-              <th className="w-20 border-r border-neutral-700/50 px-2 py-2 text-right">左大小</th>
-              <th className="w-32 border-r border-neutral-700/50 px-2 py-2 text-right">左修改时间</th>
+              <th className="w-20 border-r border-neutral-800 px-2 py-2 text-right">左大小</th>
+              <th className="w-32 border-r border-neutral-800 px-2 py-2 text-right">左修改时间</th>
               <th className="px-3 py-2">名称</th>
               <th className="w-16 px-2 py-2 text-center">状态</th>
-              <th className="w-20 border-l border-neutral-700/50 px-2 py-2 text-right">右大小</th>
-              <th className="w-32 border-l border-neutral-700/50 px-2 py-2 text-right">右修改时间</th>
+              <th className="w-20 border-l border-neutral-800 px-2 py-2 text-right">右大小</th>
+              <th className="w-32 border-l border-neutral-800 px-2 py-2 text-right">右修改时间</th>
             </tr>
           </thead>
           <tbody>
             {visibleNodes.length === 0 && (
               <tr>
-                <td colSpan={6} className="px-3 py-8 text-center text-neutral-500">
-                  {emptyStateMessage}
+                <td colSpan={6} className="px-3 py-12 text-center text-sm text-neutral-500">
+                  <div className="flex flex-col items-center gap-2">
+                    <span className="flex h-10 w-10 items-center justify-center rounded-full bg-neutral-800 text-neutral-600 text-base">∅</span>
+                    {emptyStateMessage}
+                  </div>
                 </td>
               </tr>
             )}

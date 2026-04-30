@@ -3,6 +3,7 @@ import type { CompareHistoryEntry, SSHConfig, SourceConfig } from '../../../shar
 import { useCompareStore } from '../stores/compare-store'
 import { useAppStore } from '../stores/app-store'
 import { truncatePath } from '../utils/tree-utils'
+import { PlayIcon, TrashIcon } from '../components/Icons'
 
 function extractSavedSftpLabel(savedLabel: string, configId: string): string | null {
   if (!savedLabel.startsWith('sftp://')) return null
@@ -193,6 +194,7 @@ export default function HistoryPage() {
               onClick={handleClear}
               className="group inline-flex shrink-0 items-center gap-1.5 rounded-md border border-red-900/50 bg-red-950/30 px-3 py-1.5 text-xs font-medium text-red-300 transition-colors hover:border-red-700 hover:bg-red-900/40 hover:text-red-200"
             >
+              <TrashIcon width={12} height={12} />
               清空历史
             </button>
           )}
@@ -286,14 +288,17 @@ export default function HistoryPage() {
                 <div className="flex shrink-0 gap-1.5 opacity-90 transition-opacity group-hover:opacity-100">
                   <button
                     onClick={() => handleRerun(entry)}
-                    className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white shadow-sm transition-colors hover:bg-blue-500"
+                    className="inline-flex items-center gap-1.5 rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white shadow-sm transition-colors hover:bg-blue-500"
                   >
+                    <PlayIcon width={11} height={11} />
                     重新对比
                   </button>
                   <button
                     onClick={() => handleDelete(entry.id)}
-                    className="rounded-md border border-neutral-700 bg-neutral-800/60 px-3 py-1.5 text-xs text-neutral-300 transition-colors hover:border-neutral-600 hover:bg-neutral-700/70 hover:text-neutral-100"
+                    aria-label={`删除 ${leftLabel} ↔ ${rightLabel}`}
+                    className="inline-flex items-center gap-1.5 rounded-md border border-neutral-700 bg-neutral-800/60 px-3 py-1.5 text-xs text-neutral-300 transition-colors hover:border-neutral-600 hover:bg-neutral-700/70 hover:text-neutral-100"
                   >
+                    <TrashIcon width={11} height={11} />
                     删除
                   </button>
                 </div>
