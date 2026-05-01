@@ -1,5 +1,5 @@
 import { useMemo, useCallback, useEffect, useRef, useState } from 'react'
-import type { CompareEntry, CompareFilter } from '../../../shared/types'
+import type { CompareEntry, CompareFilter, SyncDirection } from '../../../shared/types'
 import { useShallow } from 'zustand/react/shallow'
 import { useCompareNodeInteractions } from '../hooks/useCompareNodeInteractions'
 import { useVisibleCompareNodes } from '../hooks/useVisibleCompareNodes'
@@ -7,12 +7,15 @@ import { useCompareStore } from '../stores/compare-store'
 import CompareToolbar from './CompareToolbar'
 import TreeRow from './TreeRow'
 import FileContextMenu, { type ContextMenuAction } from './FileContextMenu'
-import { useCompareActions } from '../hooks/useCompare'
+import { rememberSyncDirtyRoots, useCompareActions } from '../hooks/useCompare'
 import { useAppStore } from '../stores/app-store'
 import type { StrategyName } from '../../../shared/types'
 import { shouldShowSyncTaskInCompare } from '../utils/sync-task-visibility'
 import { createExactPathFilter } from '@shared/path-filter'
 import { type TreeNode } from '../utils/tree-utils'
+import { getSyncRecompareRootsFromEntries } from '../utils/sync-dirty'
+import { collectSyncEntriesForSelection, resolveCompareSelection, type CompareSelectionState } from '../utils/compare-selection'
+import { isSameSourceConfig } from '../utils/source-label'
 
 interface CompareTreeProps {
   readonly entries: readonly CompareEntry[]
@@ -29,6 +32,22 @@ interface ContextMenuState {
   readonly x: number
   readonly y: number
   readonly node: TreeNode
+}
+
+function canQueueSyncDirection(
+  syncTask: ReturnType<typeof useCompareStore.getState>['syncTask'],
+  leftSource: ReturnType<typeof useCompareStore.getState>['leftSource'],
+  rightSource: ReturnType<typeof useCompareStore.getState>['rightSource'],
+  direction: SyncDirection,
+): boolean {
+  if (!syncTask || !leftSource || !rightSource) {
+    return true
+  }
+
+  return syncTask.status === 'running'
+    && syncTask.direction === direction
+    && isSameSourceConfig(syncTask.leftSource, leftSource)
+    && isSameSourceConfig(syncTask.rightSource, rightSource)
 }
 
 const ROW_HEIGHT = 40
@@ -55,8 +74,16 @@ function CompareTreeTable({
 }: CompareTreeTableProps) {
   const tableRef = useRef<HTMLDivElement>(null)
   const nodeInteractions = useCompareNodeInteractions(onDoubleClickFile)
-  const dirtyDisplayPaths = useCompareStore((state) => state.dirtyDisplayPaths)
+  const { dirtyDisplayPaths, leftSource, rightSource, compareDone, syncTask, setSyncTask } = useCompareStore(useShallow((state) => ({
+    dirtyDisplayPaths: state.dirtyDisplayPaths,
+    leftSource: state.leftSource,
+    rightSource: state.rightSource,
+    compareDone: state.done,
+    syncTask: state.syncTask,
+    setSyncTask: state.setSyncTask,
+  })))
   const [ctxMenu, setCtxMenu] = useState<ContextMenuState | null>(null)
+  const [selection, setSelection] = useState<CompareSelectionState>({ selectedPaths: new Set(), anchorPath: null })
   const [scrollTop, setScrollTop] = useState(0)
   const [viewportHeight, setViewportHeight] = useState(0)
   const visibleNodes = useVisibleCompareNodes({ entries, filter })
@@ -90,6 +117,33 @@ function CompareTreeTable({
     () => visibleNodes.slice(renderedWindow.startIndex, renderedWindow.endIndex),
     [renderedWindow.endIndex, renderedWindow.startIndex, visibleNodes],
   )
+  const orderedPaths = useMemo(() => visibleNodes.map((node) => node.relativePath), [visibleNodes])
+  const selectedCount = selection.selectedPaths.size
+  const leftSelectionEntries = useMemo(
+    () => collectSyncEntriesForSelection(entries, selection.selectedPaths, 'left_to_right'),
+    [entries, selection.selectedPaths],
+  )
+  const rightSelectionEntries = useMemo(
+    () => collectSyncEntriesForSelection(entries, selection.selectedPaths, 'right_to_left'),
+    [entries, selection.selectedPaths],
+  )
+
+  useEffect(() => {
+    const visiblePathSet = new Set(visibleNodes.map((node) => node.relativePath))
+    setSelection((current) => {
+      const nextSelectedPaths = new Set(Array.from(current.selectedPaths).filter((path) => visiblePathSet.has(path)))
+      const nextAnchorPath = current.anchorPath && visiblePathSet.has(current.anchorPath) ? current.anchorPath : null
+
+      if (nextSelectedPaths.size === current.selectedPaths.size && nextAnchorPath === current.anchorPath) {
+        return current
+      }
+
+      return {
+        selectedPaths: nextSelectedPaths,
+        anchorPath: nextAnchorPath,
+      }
+    })
+  }, [visibleNodes])
 
   useEffect(() => {
     const element = tableRef.current
@@ -117,16 +171,108 @@ function CompareTreeTable({
     setExtensionFilter(nextFilters)
   }, [extensionFilter, onExtensionFilterChange, setExtensionFilter])
 
+  const handleSelectNode = useCallback((event: React.MouseEvent, node: TreeNode) => {
+    setSelection((current) => resolveCompareSelection(current, {
+      orderedPaths,
+      clickedPath: node.relativePath,
+      shiftKey: event.shiftKey,
+      metaKey: event.metaKey,
+      ctrlKey: event.ctrlKey,
+    }))
+  }, [orderedPaths])
+
+  const handleCopySelection = useCallback(async (paths: ReadonlySet<string>, direction: SyncDirection) => {
+    if (!leftSource || !rightSource || !compareDone) return
+    if (!canQueueSyncDirection(syncTask, leftSource, rightSource, direction)) return
+
+    const syncEntries = collectSyncEntriesForSelection(entries, paths, direction)
+    if (syncEntries.length === 0) return
+
+    const response = await window.api.startSync({
+      leftSource,
+      rightSource,
+      direction,
+      entries: syncEntries,
+    })
+
+    if (response.success) {
+      useCompareStore.getState().markDirtyPaths(Array.from(paths))
+      rememberSyncDirtyRoots(response.data?.id, getSyncRecompareRootsFromEntries(syncEntries))
+      setSyncTask(response.data ?? null)
+    }
+  }, [compareDone, entries, leftSource, rightSource, setSyncTask, syncTask])
+
   const getContextActions = useCallback((node: TreeNode): readonly ContextMenuAction[] => {
     if (!node.entry) return []
-    return [{
+    const effectiveSelectedPaths = selection.selectedPaths.has(node.relativePath)
+      ? selection.selectedPaths
+      : new Set([node.relativePath])
+    const leftSyncEntries = collectSyncEntriesForSelection(entries, effectiveSelectedPaths, 'left_to_right')
+    const rightSyncEntries = collectSyncEntriesForSelection(entries, effectiveSelectedPaths, 'right_to_left')
+    const selectedSuffix = effectiveSelectedPaths.size > 1 ? ` (${effectiveSelectedPaths.size})` : ''
+    const actions: ContextMenuAction[] = []
+
+    if (compareDone && leftSyncEntries.length > 0 && canQueueSyncDirection(syncTask, leftSource, rightSource, 'left_to_right')) {
+      actions.push({
+        label: effectiveSelectedPaths.size > 1 ? `复制所选到右边${selectedSuffix}` : '复制到右边',
+        onClick: () => {
+          void handleCopySelection(effectiveSelectedPaths, 'left_to_right')
+        },
+      })
+    }
+
+    if (compareDone && rightSyncEntries.length > 0 && canQueueSyncDirection(syncTask, leftSource, rightSource, 'right_to_left')) {
+      actions.push({
+        label: effectiveSelectedPaths.size > 1 ? `复制所选到左边${selectedSuffix}` : '复制到左边',
+        onClick: () => {
+          void handleCopySelection(effectiveSelectedPaths, 'right_to_left')
+        },
+      })
+    }
+
+    actions.push({
       label: `${node.isDirectory ? '忽略目录' : '忽略文件'}：『${node.name}』`,
       onClick: () => handleIgnoreNode(node),
-    }]
-  }, [handleIgnoreNode])
+    })
+
+    return actions
+  }, [compareDone, entries, handleCopySelection, handleIgnoreNode, leftSource, rightSource, selection.selectedPaths, syncTask])
 
   return (
     <>
+      {selectedCount > 0 && (
+        <div className="flex shrink-0 items-center justify-between gap-3 rounded-md border border-neutral-800 bg-neutral-900/60 px-3 py-2 text-xs text-neutral-400">
+          <div className="min-w-0 truncate">
+            已选 {selectedCount} 项，可按 Shift 连选、按 Cmd/Ctrl 增减选择
+          </div>
+          <div className="flex shrink-0 flex-wrap items-center gap-2">
+            <button
+              onClick={() => {
+                void handleCopySelection(selection.selectedPaths, 'left_to_right')
+              }}
+              disabled={leftSelectionEntries.length === 0 || !canQueueSyncDirection(syncTask, leftSource, rightSource, 'left_to_right')}
+              className="inline-flex items-center rounded-md bg-emerald-600 px-2.5 py-1 text-xs font-medium text-white transition-colors hover:bg-emerald-500 disabled:cursor-not-allowed disabled:bg-neutral-700 disabled:text-neutral-500"
+            >
+              复制所选到右边
+            </button>
+            <button
+              onClick={() => {
+                void handleCopySelection(selection.selectedPaths, 'right_to_left')
+              }}
+              disabled={rightSelectionEntries.length === 0 || !canQueueSyncDirection(syncTask, leftSource, rightSource, 'right_to_left')}
+              className="inline-flex items-center rounded-md bg-cyan-600 px-2.5 py-1 text-xs font-medium text-white transition-colors hover:bg-cyan-500 disabled:cursor-not-allowed disabled:bg-neutral-700 disabled:text-neutral-500"
+            >
+              复制所选到左边
+            </button>
+            <button
+              onClick={() => setSelection({ selectedPaths: new Set(), anchorPath: null })}
+              className="inline-flex items-center rounded-md border border-neutral-700 bg-neutral-800/70 px-2.5 py-1 text-xs font-medium text-neutral-200 transition-colors hover:border-neutral-600 hover:bg-neutral-800"
+            >
+              清除选择
+            </button>
+          </div>
+        </div>
+      )}
       <div ref={tableRef} className="flex-1 overflow-auto rounded-md border border-neutral-800 bg-neutral-900/40" onScroll={(event) => setScrollTop(event.currentTarget.scrollTop)}>
         <table className="w-full text-left text-sm">
           <thead className="sticky top-0 z-10 border-b border-neutral-800 bg-neutral-850 text-[10px] font-medium uppercase tracking-wider text-neutral-500">
@@ -162,6 +308,8 @@ function CompareTreeTable({
                 expanded={nodeInteractions.isExpanded(node)}
                 loading={nodeInteractions.isLoading(node)}
                 dirty={dirtyDisplayPaths.has('') || dirtyDisplayPaths.has(node.relativePath)}
+                selected={selection.selectedPaths.has(node.relativePath)}
+                onClick={(event) => handleSelectNode(event, node)}
                 onToggle={() => nodeInteractions.toggleNode(node)}
                 onDoubleClick={() => nodeInteractions.openNode(node)}
                 onContextMenu={(event) => {
@@ -315,6 +463,9 @@ export default function CompareTree({ entries, filter, onFilterChange, onDoubleC
       entries,
     })
     if (response.success) {
+      const roots = getSyncRecompareRootsFromEntries(entries)
+      useCompareStore.getState().markDirtyPaths(roots)
+      rememberSyncDirtyRoots(response.data?.id, roots)
       setSyncTask(response.data ?? null)
     }
   }, [compareDone, entries, leftSource, pendingCount, rightSource, setSyncTask])

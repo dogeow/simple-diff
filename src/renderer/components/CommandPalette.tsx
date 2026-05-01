@@ -37,6 +37,7 @@ const PAGE_LABELS: Record<Page, string> = {
   text: '文本对比',
   ssh: 'SSH 管理',
   history: '历史',
+  sync: '同步任务',
   settings: '设置',
 }
 
@@ -119,6 +120,14 @@ export default function CommandPalette({ open, onClose }: CommandPaletteProps) {
         Icon: HistoryIcon,
         keywords: 'history 历史 记录',
         onSelect: () => navigate('history'),
+      },
+      {
+        id: 'nav-sync',
+        title: PAGE_LABELS.sync,
+        hint: '查看当前同步文件列表',
+        Icon: RefreshIcon,
+        keywords: 'sync 同步 任务 文件 列表',
+        onSelect: () => navigate('sync'),
       },
       {
         id: 'nav-settings',

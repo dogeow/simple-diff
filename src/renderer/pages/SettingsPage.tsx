@@ -4,6 +4,7 @@ import { useCompareActions } from '../hooks/useCompare'
 import { useSettingsStore } from '../stores/settings-store'
 import { CheckIcon, FilterIcon, TrashIcon } from '../components/Icons'
 import { showToast } from '../stores/toast-store'
+import { isFilterAdditionOnly } from '../utils/filter-change'
 
 export default function SettingsPage() {
   const globalPathFilters = useSettingsStore((s) => s.globalPathFilters)
@@ -21,8 +22,11 @@ export default function SettingsPage() {
 
   const handleSave = async () => {
     const merged = mergeDisplayedPathFilters(input.split('\n'), globalPathFilters)
+    const additionOnly = isFilterAdditionOnly(globalPathFilters, merged)
     setGlobalPathFilters(merged)
-    await rerunActiveSessionIfRunning()
+    if (!additionOnly) {
+      await rerunActiveSessionIfRunning()
+    }
     showToast({
       tone: 'success',
       message: '全局过滤已保存',

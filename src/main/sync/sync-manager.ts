@@ -9,6 +9,7 @@ import type {
   StartSyncRequest,
   SyncDirection,
   SyncItem,
+  SyncTaskItemSnapshot,
   SyncTaskSnapshot,
 } from '@shared/types'
 import { expandDirectoryEntries, seedSyncQueues } from './plan'
@@ -26,6 +27,20 @@ function now(): number {
   return Date.now()
 }
 
+function buildTaskItemSnapshots(task: PersistedSyncTask): readonly SyncTaskItemSnapshot[] {
+  const allItems = task.allItems ?? task.pendingItems
+
+  return allItems.map((item, index) => ({
+    relativePath: item.relativePath,
+    kind: item.kind,
+    status: index < task.completedItems
+      ? 'completed'
+      : task.status === 'running' && task.currentPath === item.relativePath
+        ? 'running'
+        : 'pending',
+  }))
+}
+
 function toSnapshot(task: PersistedSyncTask): SyncTaskSnapshot {
   return {
     id: task.id,
@@ -40,6 +55,7 @@ function toSnapshot(task: PersistedSyncTask): SyncTaskSnapshot {
     lastError: task.lastError,
     createdAt: task.createdAt,
     updatedAt: task.updatedAt,
+    items: buildTaskItemSnapshots(task),
   }
 }
 
@@ -50,6 +66,29 @@ function sourceRootForDirection(direction: SyncDirection, left: SourceConfig, ri
   return direction === 'left_to_right'
     ? { source: left, target: right }
     : { source: right, target: left }
+}
+
+function isSameSourceConfig(left: SourceConfig, right: SourceConfig): boolean {
+  if (left.type !== right.type) {
+    return false
+  }
+
+  if (left.path !== right.path) {
+    return false
+  }
+
+  return left.type !== 'sftp' || left.configId === right.configId
+}
+
+function canAppendToTask(task: PersistedSyncTask, request: StartSyncRequest): boolean {
+  return task.status === 'running'
+    && task.direction === request.direction
+    && isSameSourceConfig(task.leftSource, request.leftSource)
+    && isSameSourceConfig(task.rightSource, request.rightSource)
+}
+
+function syncItemKey(item: SyncItem): string {
+  return `${item.kind}:${item.relativePath}`
 }
 
 export class SyncManager {
@@ -88,7 +127,11 @@ export class SyncManager {
 
   async start(request: StartSyncRequest): Promise<SyncTaskSnapshot> {
     if (this.task?.status === 'running') {
-      throw new Error('已有同步任务正在运行')
+      if (!canAppendToTask(this.task, request)) {
+        throw new Error('已有同步任务正在运行')
+      }
+
+      return this.appendToRunningTask(request)
     }
 
     const seeded = seedSyncQueues(request.entries, request.direction)
@@ -100,6 +143,7 @@ export class SyncManager {
       rightSource: request.rightSource,
       direction: request.direction,
       status: seeded.totalItems === 0 && seeded.pendingDirs.length === 0 ? 'completed' : 'running',
+      allItems: seeded.pendingItems,
       pendingItems: seeded.pendingItems,
       pendingDirs: seeded.pendingDirs,
       totalItems: seeded.totalItems,
@@ -131,6 +175,62 @@ export class SyncManager {
       this.ensureLoop()
     }
 
+    return toSnapshot(this.task)
+  }
+
+  private async appendToRunningTask(request: StartSyncRequest): Promise<SyncTaskSnapshot> {
+    if (!this.task) {
+      throw new Error('没有可追加的同步任务')
+    }
+
+    const seeded = seedSyncQueues(request.entries, request.direction)
+    if (seeded.pendingItems.length === 0) {
+      return toSnapshot(this.task)
+    }
+
+    const incomingTask: PersistedSyncTask = {
+      id: this.task.id,
+      leftSource: request.leftSource,
+      rightSource: request.rightSource,
+      direction: request.direction,
+      status: 'running',
+      pendingItems: seeded.pendingItems,
+      pendingDirs: seeded.pendingDirs,
+      totalItems: seeded.totalItems,
+      completedItems: 0,
+      currentPath: null,
+      lastCompletedPath: null,
+      lastError: null,
+      createdAt: this.task.createdAt,
+      updatedAt: now(),
+    }
+
+    const hydratedIncomingTask = await this.hydrateTaskItems(incomingTask)
+    const remainingItems = this.activeSyncQueue
+      ? this.activeSyncQueue.slice(this.activeSyncIndex)
+      : this.task.pendingItems
+    const existingItemKeys = new Set(remainingItems.map(syncItemKey))
+    const appendedItems = hydratedIncomingTask.pendingItems.filter((item) => !existingItemKeys.has(syncItemKey(item)))
+
+    if (appendedItems.length === 0) {
+      return toSnapshot(this.task)
+    }
+
+    if (this.activeSyncQueue) {
+      this.activeSyncQueue = [...this.activeSyncQueue, ...appendedItems]
+    }
+
+    this.task = {
+      ...this.task,
+      allItems: [...(this.task.allItems ?? remainingItems), ...appendedItems],
+      pendingItems: [...remainingItems, ...appendedItems],
+      pendingDirs: [],
+      totalItems: this.task.totalItems + appendedItems.length,
+      updatedAt: now(),
+    }
+    this.commitTaskChange()
+    this.ensureLoop()
+    syncLogger.info(`追加同步项: ${appendedItems.length} 项`)
     return toSnapshot(this.task)
   }
 
@@ -280,6 +380,7 @@ export class SyncManager {
 
       return {
         ...task,
+        allItems: pendingItems,
         pendingItems,
         pendingDirs: [],
         totalItems: task.completedItems + pendingItems.length,
@@ -339,6 +440,7 @@ export class SyncManager {
 
     return {
       ...this.task,
+      allItems: this.task.allItems ?? hydratedTask.allItems ?? hydratedTask.pendingItems,
       pendingItems: hydratedTask.pendingItems,
       pendingDirs: hydratedTask.pendingDirs,
       totalItems: hydratedTask.totalItems,

@@ -256,7 +256,7 @@ describe('leaveComparePage', () => {
     const opened = openSyncTaskView({ expandLogs: true })
 
     expect(opened).toBe(true)
-    expect(useAppStore.getState().page).toBe('compare')
+    expect(useAppStore.getState().page).toBe('sync')
     expect(useAppStore.getState().activeCompareTabId).toBe('compare-tab-sync')
     expect(useAppStore.getState().diffTabs.map((tab) => tab.id)).toEqual(['src/file.txt'])
     expect(useCompareStore.getState().leftSource).toEqual(syncLeftSource)

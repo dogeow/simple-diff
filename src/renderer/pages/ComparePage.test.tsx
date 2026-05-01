@@ -10,6 +10,7 @@ import { useAppStore, type CompareTab } from '../stores/app-store'
 import { useCompareStore, type CompareSessionSnapshot } from '../stores/compare-store'
 import { useLogStore } from '../stores/log-store'
 import { useSettingsStore } from '../stores/settings-store'
+import { useSSHStore } from '../stores/ssh-store'
 
 function createFileEntry(name: string, path: string): FileEntry {
   return {
@@ -132,6 +133,7 @@ function resetStores(compareTabs: readonly CompareTab[] = []): void {
 
   useLogStore.setState({ logs: [], visible: false })
   useSettingsStore.setState({ globalPathFilters: [] })
+  useSSHStore.setState({ configs: [], loading: false, loadConfigs: async () => undefined })
 }
 
 function installApiMock(overrides: Partial<Window['api']> = {}) {
@@ -256,6 +258,31 @@ describe('ComparePage renderer interactions', () => {
     expect(screen.getAllByText('readme.md')).toHaveLength(2)
   })
 
+  it('does not restart compare when adding an ignore filter', async () => {
+    resetStores()
+    const api = installApiMock()
+    useCompareStore.setState({
+      viewMode: 'merged',
+      extensionFilter: ['node_modules'],
+      entries: [
+        createCompareDirectory('config'),
+        createCompareEntry('config/app.php'),
+        createCompareEntry('readme.md'),
+      ],
+      expandedDirs: new Set(['config']),
+    })
+
+    render(<ComparePage />)
+
+    fireEvent.contextMenu(screen.getByText('config').closest('tr')!)
+    fireEvent.click(await screen.findByRole('button', { name: '忽略目录：『config』' }))
+
+    await waitFor(() => {
+      expect(useCompareStore.getState().extensionFilter).toContain('path:config')
+    })
+    expect(api.runCompare).not.toHaveBeenCalled()
+  })
+
   it('shows exact path filters in the modal without the path prefix', async () => {
     resetStores()
     useCompareStore.setState({ extensionFilter: ['path:bootstrap', 'node_modules'] })
@@ -297,7 +324,7 @@ describe('ComparePage renderer interactions', () => {
     expect(screen.queryByText('扫描中…')).toBeNull()
     expect(screen.queryByText('对比中…')).toBeNull()
     expect(screen.getByRole('button', { name: '双方' })).toBeTruthy()
-    expect(screen.getByText('不同 1')).toBeTruthy()
+    expect(screen.getByRole('button', { name: '不同' })).toBeTruthy()
   })
 
   it('does not show the incomplete compare warning banner', () => {
@@ -326,6 +353,32 @@ describe('ComparePage renderer interactions', () => {
     render(<ComparePage />)
 
     expect(screen.getByRole('alert').textContent).toContain('左侧目录不可访问：/Volumes/未命名2/迅雷下载/书籍。可能是硬盘未插入、未挂载，或路径已变更。')
+  })
+
+  it('shows a source pair summary for sftp compares', () => {
+    resetStores()
+    useSSHStore.setState({
+      configs: [
+        { id: 'left-server', label: '生产服', host: 'prod.example.com', port: 22, username: 'deploy', authType: 'privateKey' },
+        { id: 'right-server', label: '预发服', host: 'staging.example.com', port: 22, username: 'deploy', authType: 'privateKey' },
+      ],
+      loading: false,
+      loadConfigs: async () => undefined,
+    })
+    useCompareStore.setState({
+      leftSourceType: 'sftp',
+      rightSourceType: 'sftp',
+      leftSSHConfigId: 'left-server',
+      rightSSHConfigId: 'right-server',
+      leftPath: '/var/www/api-next',
+      rightPath: '/var/www/api',
+      leftSource: { type: 'sftp', configId: 'left-server', path: '/var/www/api-next' },
+      rightSource: { type: 'sftp', configId: 'right-server', path: '/var/www/api' },
+    })
+
+    render(<ComparePage />)
+
+    expect(screen.getByText('生产服:/var/www/api-next ↔ 预发服:/var/www/api')).toBeTruthy()
   })
 
   it('shows dot files by default instead of hiding them', () => {

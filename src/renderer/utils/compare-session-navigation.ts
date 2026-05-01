@@ -134,7 +134,11 @@ export function openSyncTaskView(options?: { readonly expandLogs?: boolean }): b
   const syncTask = useCompareStore.getState().syncTask
 
   if (!syncTask) {
-    return openCompareTab(undefined, options)
+    const opened = openCompareTab(undefined, options)
+    if (!opened) {
+      useAppStore.getState().setPage('sync')
+    }
+    return true
   }
 
   const appState = useAppStore.getState()
@@ -146,14 +150,12 @@ export function openSyncTaskView(options?: { readonly expandLogs?: boolean }): b
   )
 
   if (matchingCompareTab) {
-    return openCompareTab(matchingCompareTab.id, options)
+    useCompareStore.getState().restoreSnapshot(matchingCompareTab.snapshot)
+    appState.replaceDiffTabs(matchingCompareTab.diffTabs, matchingCompareTab.activeDiffTabId)
+    appState.setActiveCompareTab(matchingCompareTab.id)
   }
 
-  if (openCompareTab(undefined, options)) {
-    return true
-  }
-
-  appState.setPage('compare')
+  appState.setPage('sync')
 
   if (options?.expandLogs) {
     useLogStore.getState().setVisible(true)

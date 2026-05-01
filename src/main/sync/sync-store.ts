@@ -7,6 +7,7 @@ export interface PersistedSyncTask {
   readonly rightSource: SourceConfig
   readonly direction: SyncDirection
   readonly status: SyncTaskStatus
+  readonly allItems?: readonly SyncItem[]
   readonly pendingItems: readonly SyncItem[]
   readonly pendingDirs: readonly string[]
   readonly totalItems: number
@@ -51,6 +52,7 @@ export function getSyncTask(): PersistedSyncTask | null {
       rightSource: task.rightSource!,
       direction: task.direction!,
       status: task.status ?? 'paused',
+      allItems: task.allItems ?? task.items,
       pendingItems: remainingItems,
       pendingDirs,
       totalItems: task.items.length,

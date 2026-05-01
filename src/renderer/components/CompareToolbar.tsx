@@ -3,6 +3,7 @@ import type { CompareFilter, StrategyName, SyncTaskSnapshot } from '../../../sha
 import type { CompareStats } from '../../../shared/types'
 import type { ViewMode, HideDotFilter } from '../stores/compare-store'
 import { formatSyncProgress } from '../utils/format-sync-progress'
+import { openSyncTaskView } from '../utils/compare-session-navigation'
 import FilterModal from './FilterModal'
 import { ArrowLeftIcon, ArrowRightIcon, ChevronDownIcon, ChevronRightIcon, ChevronUpDownIcon, PauseIcon, PlayIcon, RefreshIcon } from './Icons'
 
@@ -13,35 +14,15 @@ const STRATEGY_LABELS: Record<StrategyName, string> = {
   hash: '内容哈希',
 }
 
-const FILTERS: { value: CompareFilter; label: string }[] = [
-  { value: 'all', label: '全部' },
-  { value: 'paired', label: '双方' },
-  { value: 'different', label: '不同' },
-  { value: 'left_only', label: '仅左' },
-  { value: 'right_only', label: '仅右' },
-  { value: 'equal', label: '相同' },
-  { value: 'unresolved', label: '待比/对比中' },
+const FILTERS: { value: CompareFilter; label: string; statKey?: keyof CompareStats | 'pending' | 'paired' }[] = [
+  { value: 'all', label: '全部', statKey: 'total' },
+  { value: 'paired', label: '双方', statKey: 'paired' },
+  { value: 'different', label: '不同', statKey: 'different' },
+  { value: 'left_only', label: '仅左', statKey: 'leftOnly' },
+  { value: 'right_only', label: '仅右', statKey: 'rightOnly' },
+  { value: 'equal', label: '相同', statKey: 'equal' },
+  { value: 'unresolved', label: '待比', statKey: 'pending' },
 ]
-
-const STAT_TONES = {
-  total: 'text-neutral-300',
-  equal: 'text-emerald-300',
-  different: 'text-amber-300',
-  leftOnly: 'text-sky-300',
-  rightOnly: 'text-violet-300',
-  pending: 'text-neutral-500',
-  dirty: 'text-amber-300',
-} as const
-
-const STAT_DOTS = {
-  total: 'bg-neutral-500',
-  equal: 'bg-emerald-400',
-  different: 'bg-amber-400',
-  leftOnly: 'bg-sky-400',
-  rightOnly: 'bg-violet-400',
-  pending: 'bg-neutral-600',
-  dirty: 'bg-amber-400',
-} as const
 
 interface CompareToolbarProps {
   readonly filter: CompareFilter
@@ -79,13 +60,11 @@ interface CompareToolbarProps {
 
 const COMPACT_BTN = 'inline-flex items-center gap-1 h-7 rounded-md px-2 text-[11px] font-medium leading-none transition-colors'
 
-function StatChip({ tone, label, value }: { tone: keyof typeof STAT_TONES; label: string; value: number }) {
-  return (
-    <span className={`inline-flex items-center gap-1 ${STAT_TONES[tone]}`}>
-      <span className={`h-1.5 w-1.5 rounded-full ${STAT_DOTS[tone]}`} aria-hidden="true" />
-      <span className="tabular-nums">{`${label} ${value}`}</span>
-    </span>
-  )
+function getFilterStatValue(statKey: keyof CompareStats | 'pending' | 'paired' | undefined, stats: CompareStats, pendingCount: number): number | null {
+  if (!statKey) return null
+  if (statKey === 'pending') return pendingCount
+  if (statKey === 'paired') return Math.max(0, stats.total - stats.leftOnly - stats.rightOnly)
+  return stats[statKey]
 }
 
 export default function CompareToolbar({
@@ -171,6 +150,7 @@ export default function CompareToolbar({
             <button
               key={f.value}
               onClick={() => onFilterChange(f.value)}
+              aria-label={f.label}
               className={`${COMPACT_BTN} ${
                 filter === f.value
                   ? 'bg-blue-600 text-white'
@@ -178,6 +158,18 @@ export default function CompareToolbar({
               }`}
             >
               {f.label}
+              {(() => {
+                const value = getFilterStatValue(f.statKey, stats, pendingCount)
+                if (value == null || (f.statKey === 'pending' && value === 0)) return null
+                return (
+                  <>
+                    {' '}
+                    <span aria-hidden="true" className="ml-0.5 rounded bg-black/20 px-1.5 py-0.5 text-[10px] tabular-nums">
+                      {value}
+                    </span>
+                  </>
+                )
+              })()}
             </button>
           ))}
         </div>
@@ -208,6 +200,9 @@ export default function CompareToolbar({
               <div className="min-w-0 w-56">
                 {syncTask.currentPath && <span className="block truncate font-mono text-neutral-500">{syncTask.currentPath}</span>}
               </div>
+              <button onClick={() => openSyncTaskView({ expandLogs: true })} className={`${COMPACT_BTN} border border-neutral-600 bg-neutral-700/80 text-neutral-200 hover:bg-neutral-700`}>
+                详情
+              </button>
               {syncTask.status === 'running' && (
                 <button onClick={onPauseSync} className={`${COMPACT_BTN} border border-neutral-600 bg-neutral-700/80 text-neutral-200 hover:bg-neutral-700`}>
                   <PauseIcon width={10} height={10} />
@@ -228,15 +223,12 @@ export default function CompareToolbar({
             </div>
           )}
 
-          <div className="flex flex-wrap items-center gap-3 rounded-md border border-neutral-800 bg-neutral-900/40 px-2.5 py-1 text-[11px]">
-            <StatChip tone="total" label="共" value={stats.total} />
-            <StatChip tone="equal" label="相同" value={stats.equal} />
-            <StatChip tone="different" label="不同" value={stats.different} />
-            <StatChip tone="leftOnly" label="仅左" value={stats.leftOnly} />
-            <StatChip tone="rightOnly" label="仅右" value={stats.rightOnly} />
-            {pendingCount > 0 && <StatChip tone="pending" label="待比" value={pendingCount} />}
-            {dirtyCount > 0 && <StatChip tone="dirty" label="待重比" value={dirtyCount} />}
-          </div>
+          {dirtyCount > 0 && (
+            <div className="flex items-center gap-1 rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-[11px] text-amber-300">
+              <span className="h-1.5 w-1.5 rounded-full bg-amber-400" aria-hidden="true" />
+              <span className="tabular-nums">待重比 {dirtyCount}</span>
+            </div>
+          )}
 
           <div className="flex flex-wrap gap-1">
             {!hasGlobalSyncTask && (

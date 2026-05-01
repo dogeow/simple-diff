@@ -19,7 +19,7 @@ export default function GlobalRunningIndicator() {
   })))
 
   // Hide on home/compare pages — those have their own status indicators
-  if (page === 'home' || page === 'compare') return null
+  if (page === 'home' || page === 'compare' || page === 'sync') return null
 
   const compareRunning = scanning || comparing
   const syncRunning = syncTask?.status === 'running' || syncTask?.status === 'paused'

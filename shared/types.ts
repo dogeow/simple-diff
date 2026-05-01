@@ -140,10 +140,17 @@ export interface CompareResult {
 export type SyncDirection = 'left_to_right' | 'right_to_left'
 export type SyncTaskStatus = 'running' | 'paused' | 'completed' | 'failed'
 export type SyncItemKind = 'directory' | 'file'
+export type SyncTaskItemStatus = 'pending' | 'running' | 'completed'
 
 export interface SyncItem {
   readonly relativePath: string
   readonly kind: SyncItemKind
+}
+
+export interface SyncTaskItemSnapshot {
+  readonly relativePath: string
+  readonly kind: SyncItemKind
+  readonly status: SyncTaskItemStatus
 }
 
 export interface SyncTaskSnapshot {
@@ -159,6 +166,7 @@ export interface SyncTaskSnapshot {
   readonly lastError: string | null
   readonly createdAt: number
   readonly updatedAt: number
+  readonly items?: readonly SyncTaskItemSnapshot[]
 }
 
 export interface StartSyncRequest {

@@ -6,7 +6,7 @@ import CommandPalette from './CommandPalette'
 import ShortcutHelp from './ShortcutHelp'
 import ToastContainer from './ToastContainer'
 import GlobalRunningIndicator from './GlobalRunningIndicator'
-import { FolderIcon, HistoryIcon, ServerIcon, SettingsIcon, TextIcon } from './Icons'
+import { FolderIcon, HistoryIcon, RefreshIcon, ServerIcon, SettingsIcon, TextIcon } from './Icons'
 
 interface LayoutProps {
   readonly children: ReactNode
@@ -23,6 +23,7 @@ const NAV_ITEMS: readonly NavItem[] = [
   { page: 'text', label: '文本对比', Icon: TextIcon },
   { page: 'ssh', label: 'SSH管理', Icon: ServerIcon },
   { page: 'history', label: '历史', Icon: HistoryIcon },
+  { page: 'sync', label: '同步任务', Icon: RefreshIcon },
   { page: 'settings', label: '设置', Icon: SettingsIcon },
 ]
 
@@ -94,7 +95,7 @@ export default function Layout({ children }: LayoutProps) {
   return (
     <div className="flex h-screen flex-col bg-neutral-900 text-neutral-100">
       <header className="app-drag-region flex h-11 shrink-0 items-center gap-3 border-b border-neutral-800 bg-neutral-850 px-3">
-        <nav className="flex items-center gap-0.5 pl-12">
+        <nav className="flex items-center gap-0.5">
           {NAV_ITEMS.map(({ page: itemPage, label, Icon }) => {
             const active = isNavItemActive(itemPage)
             return (

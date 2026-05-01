@@ -8,10 +8,15 @@ import { formatSize, formatTime, rowBg, shouldShowDirectorySpinner } from './tre
 import { useVisibleCompareNodes } from '../hooks/useVisibleCompareNodes'
 import { useCompareNodeInteractions, type CompareNodeInteractions } from '../hooks/useCompareNodeInteractions'
 import { useCompareStore } from '../stores/compare-store'
+import { useSSHStore } from '../stores/ssh-store'
 import StatusBadge from './StatusBadge'
 import ScrollGutter from './ScrollGutter'
 import FileContextMenu, { type ContextMenuAction } from './FileContextMenu'
 import { createExactPathFilter } from '@shared/path-filter'
+import { collectSyncEntriesForSelection, resolveCompareSelection, type CompareSelectionState } from '../utils/compare-selection'
+import { formatSourceTag, isSameSourceConfig } from '../utils/source-label'
+import { rememberSyncDirtyRoots } from '../hooks/useCompare'
+import { getSyncRecompareRootsFromEntries } from '../utils/sync-dirty'
 
 interface SplitTreeProps {
   readonly entries: readonly CompareEntry[]
@@ -26,25 +31,20 @@ type Side = 'left' | 'right'
 const ROW_HEIGHT = 40
 const OVERSCAN_ROWS = 12
 
-function canSyncEntryInDirection(entry: CompareEntry, direction: SyncDirection): boolean {
-  if (entry.isDirectory) {
-    return direction === 'left_to_right' ? entry.state === 'left_only' : entry.state === 'right_only'
+function canQueueSyncDirection(
+  syncTask: ReturnType<typeof useCompareStore.getState>['syncTask'],
+  leftSource: ReturnType<typeof useCompareStore.getState>['leftSource'],
+  rightSource: ReturnType<typeof useCompareStore.getState>['rightSource'],
+  direction: SyncDirection,
+): boolean {
+  if (!syncTask || !leftSource || !rightSource) {
+    return true
   }
 
-  if (entry.state === 'different') return true
-  return direction === 'left_to_right' ? entry.state === 'left_only' : entry.state === 'right_only'
-}
-
-function collectNodeSyncEntries(
-  entries: readonly CompareEntry[],
-  relativePath: string,
-  direction: SyncDirection,
-): readonly CompareEntry[] {
-  const prefix = relativePath === '' ? '' : `${relativePath}/`
-  return entries.filter((entry) => {
-    const inSubtree = entry.relativePath === relativePath || entry.relativePath.startsWith(prefix)
-    return inSubtree && canSyncEntryInDirection(entry, direction)
-  })
+  return syncTask.status === 'running'
+    && syncTask.direction === direction
+    && isSameSourceConfig(syncTask.leftSource, leftSource)
+    && isSameSourceConfig(syncTask.rightSource, rightSource)
 }
 
 // ─── Path Header ─────────────────────────────────────────────
@@ -56,9 +56,20 @@ function PathHeader({
   readonly side: Side
   readonly onSourcePathSubmit?: (side: Side, path: string) => void | Promise<void>
 }) {
+  const source = useCompareStore((s) => side === 'left' ? s.leftSource : s.rightSource)
+  const { configs, loadConfigs } = useSSHStore(useShallow((state) => ({
+    configs: state.configs,
+    loadConfigs: state.loadConfigs,
+  })))
   const sourcePath = useCompareStore((s) => side === 'left' ? s.leftPath : s.rightPath)
   const [editingPath, setEditingPath] = useState(false)
   const [pathInput, setPathInput] = useState(sourcePath)
+
+  useEffect(() => {
+    if (source?.type === 'sftp' && configs.length === 0) {
+      void loadConfigs()
+    }
+  }, [configs.length, loadConfigs, source])
 
   const handlePathEdit = useCallback(() => {
     setPathInput(sourcePath)
@@ -76,13 +87,17 @@ function PathHeader({
   const sideBadgeClass = side === 'left'
     ? 'bg-sky-500/15 text-sky-300'
     : 'bg-violet-500/15 text-violet-300'
+  const sourceTag = source ? formatSourceTag(source, configs) : side === 'left' ? '左侧' : '右侧'
 
   return (
     <div className="flex flex-1 flex-col overflow-hidden">
-      <div className="flex h-7 items-center gap-1.5 border-b border-neutral-800 bg-neutral-850 px-2">
-        <span className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase ${sideBadgeClass}`}>
-          {side === 'left' ? 'L' : 'R'}
-        </span>
+      <div className="border-b border-neutral-800 bg-neutral-850 px-2 py-1.5">
+        <div className="flex items-center gap-1.5">
+          <span className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase ${sideBadgeClass}`}>
+            {side === 'left' ? 'L' : 'R'}
+          </span>
+          <span className="truncate text-[11px] text-neutral-500">{sourceTag}</span>
+        </div>
         {editingPath ? (
           <input
             type="text"
@@ -94,12 +109,12 @@ function PathHeader({
               if (e.key === 'Escape') setEditingPath(false)
             }}
             autoFocus
-            className="flex-1 rounded-md border border-neutral-600 bg-neutral-900 px-1.5 py-0.5 font-mono text-xs text-neutral-200 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500/30"
+            className="mt-1 w-full rounded-md border border-neutral-600 bg-neutral-900 px-1.5 py-0.5 font-mono text-xs text-neutral-200 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500/30"
           />
         ) : (
           <button
             onClick={handlePathEdit}
-            className="flex-1 truncate rounded text-left font-mono text-xs text-neutral-400 transition-colors hover:text-neutral-200"
+            className="mt-1 block w-full truncate rounded text-left font-mono text-xs text-neutral-300 transition-colors hover:text-neutral-100"
             title={sourcePath}
           >
             {truncatePath(sourcePath, 88) || '—'}
@@ -130,6 +145,8 @@ interface SideTableProps {
   readonly topSpacerHeight: number
   readonly bottomSpacerHeight: number
   readonly emptyStateMessage: string
+  readonly selectedPaths: ReadonlySet<string>
+  readonly onSelectNode: (event: React.MouseEvent, node: TreeNode) => void
   readonly onExtensionFilterChange?: (filter: readonly string[]) => void | Promise<void>
 }
 
@@ -145,6 +162,8 @@ function SideTable({
   topSpacerHeight,
   bottomSpacerHeight,
   emptyStateMessage,
+  selectedPaths,
+  onSelectNode,
   onExtensionFilterChange,
 }: SideTableProps) {
   const {
@@ -182,10 +201,11 @@ function SideTable({
     return segments.length > 1 ? segments.slice(0, -1).join('/') : ''
   }
 
-  const handleCopyDirectory = useCallback(async (node: TreeNode, direction: SyncDirection) => {
-    if (!node.entry || !node.isDirectory || !leftSource || !rightSource || !compareDone || syncTask) return
+  const handleCopySelection = useCallback(async (paths: ReadonlySet<string>, direction: SyncDirection) => {
+    if (!leftSource || !rightSource || !compareDone) return
+    if (!canQueueSyncDirection(syncTask, leftSource, rightSource, direction)) return
 
-    const syncEntries = collectNodeSyncEntries(entries, node.relativePath, direction)
+    const syncEntries = collectSyncEntriesForSelection(entries, paths, direction)
     if (syncEntries.length === 0) return
 
     const response = await window.api.startSync({
@@ -196,6 +216,8 @@ function SideTable({
     })
 
     if (response.success) {
+      useCompareStore.getState().markDirtyPaths(Array.from(paths))
+      rememberSyncDirtyRoots(response.data?.id, getSyncRecompareRootsFromEntries(syncEntries))
       setSyncTask(response.data ?? null)
     }
   }, [compareDone, entries, leftSource, rightSource, setSyncTask, syncTask])
@@ -226,15 +248,20 @@ function SideTable({
     }
 
     const copyDirection = side === 'left' ? 'left_to_right' : 'right_to_left'
-    const copyLabel = side === 'left' ? '复制到右边' : '复制到左边'
-    const syncEntries = node.isDirectory
-      ? collectNodeSyncEntries(entries, node.relativePath, copyDirection)
-      : []
-    const copyAction = node.isDirectory && compareDone && !syncTask && syncEntries.length > 0
+    const effectiveSelectedPaths = selectedPaths.has(node.relativePath)
+      ? selectedPaths
+      : new Set([node.relativePath])
+    const syncEntries = collectSyncEntriesForSelection(entries, effectiveSelectedPaths, copyDirection)
+    const copyLabel = effectiveSelectedPaths.size > 1
+      ? `${side === 'left' ? '复制所选到右边' : '复制所选到左边'} (${effectiveSelectedPaths.size})`
+      : side === 'left'
+        ? '复制到右边'
+        : '复制到左边'
+    const copyAction = compareDone && syncEntries.length > 0 && canQueueSyncDirection(syncTask, leftSource, rightSource, copyDirection)
       ? [{
           label: copyLabel,
           onClick: () => {
-            void handleCopyDirectory(node, copyDirection)
+            void handleCopySelection(effectiveSelectedPaths, copyDirection)
           },
         } satisfies ContextMenuAction]
       : []
@@ -318,9 +345,11 @@ function SideTable({
               key={node.relativePath}
               node={node}
               side={side}
+              selected={selectedPaths.has(node.relativePath)}
               expanded={nodeInteractions.isExpanded(node)}
               loading={nodeInteractions.isLoading(node)}
               dirty={dirtyDisplayPaths.has('') || dirtyDisplayPaths.has(node.relativePath)}
+              onClick={(event) => onSelectNode(event, node)}
               onToggle={() => nodeInteractions.toggleNode(node)}
               onDoubleClick={() => nodeInteractions.openNode(node)}
               onContextMenu={(e) => handleContextMenu(e, node)}
@@ -356,9 +385,11 @@ function SideTable({
 interface SideRowProps {
   readonly node: TreeNode
   readonly side: Side
+  readonly selected: boolean
   readonly expanded: boolean
   readonly loading: boolean
   readonly dirty: boolean
+  readonly onClick: (e: React.MouseEvent) => void
   readonly onToggle: () => void
   readonly onDoubleClick: () => void
   readonly onContextMenu: (e: React.MouseEvent) => void
@@ -369,7 +400,7 @@ interface SideRowProps {
   readonly onRenameCancel: () => void
 }
 
-function SideRow({ node, side, expanded, loading, dirty, onToggle, onDoubleClick, onContextMenu, renaming, renameValue, onRenameChange, onRenameSubmit, onRenameCancel }: SideRowProps) {
+function SideRow({ node, side, selected, expanded, loading, dirty, onClick, onToggle, onDoubleClick, onContextMenu, renaming, renameValue, onRenameChange, onRenameSubmit, onRenameCancel }: SideRowProps) {
   const entry = node.entry
   if (!entry) return null
 
@@ -379,7 +410,8 @@ function SideRow({ node, side, expanded, loading, dirty, onToggle, onDoubleClick
 
   return (
     <tr
-      className={`h-10 border-b border-neutral-800 select-none ${rowBg(entry.state)} ${missingOnSide ? '' : 'cursor-pointer hover:bg-neutral-800/50'}`}
+      className={`h-10 border-b border-neutral-800 select-none ${selected ? 'bg-blue-500/12 ring-1 ring-inset ring-blue-500/30' : rowBg(entry.state)} ${missingOnSide ? '' : 'cursor-pointer hover:bg-neutral-800/50'}`}
+      onClick={missingOnSide ? undefined : onClick}
       onDoubleClick={missingOnSide ? undefined : onDoubleClick}
       onContextMenu={missingOnSide ? undefined : onContextMenu}
     >
@@ -436,12 +468,33 @@ export default function SplitTree({ entries, filter, onDoubleClickFile, emptySta
   const syncing = useRef(false)
   const [scrollTop, setScrollTop] = useState(0)
   const [viewportHeight, setViewportHeight] = useState(0)
+  const [selection, setSelection] = useState<CompareSelectionState>({ selectedPaths: new Set(), anchorPath: null })
   const visibleNodes = useVisibleCompareNodes({ entries, filter })
   const nodeInteractions = useCompareNodeInteractions(onDoubleClickFile)
-  const { leftSource, rightSource } = useCompareStore(useShallow((s) => ({
+  const { leftSource, rightSource, compareDone, syncTask, setSyncTask } = useCompareStore(useShallow((s) => ({
     leftSource: s.leftSource,
     rightSource: s.rightSource,
+    compareDone: s.done,
+    syncTask: s.syncTask,
+    setSyncTask: s.setSyncTask,
   })))
+
+  useEffect(() => {
+    const visiblePathSet = new Set(visibleNodes.map((node) => node.relativePath))
+    setSelection((current) => {
+      const nextSelectedPaths = new Set(Array.from(current.selectedPaths).filter((path) => visiblePathSet.has(path)))
+      const nextAnchorPath = current.anchorPath && visiblePathSet.has(current.anchorPath) ? current.anchorPath : null
+
+      if (nextSelectedPaths.size === current.selectedPaths.size && nextAnchorPath === current.anchorPath) {
+        return current
+      }
+
+      return {
+        selectedPaths: nextSelectedPaths,
+        anchorPath: nextAnchorPath,
+      }
+    })
+  }, [visibleNodes])
 
   useEffect(() => {
     const element = leftRef.current
@@ -489,6 +542,55 @@ export default function SplitTree({ entries, filter, onDoubleClickFile, emptySta
     }
   }, [scrollTop, viewportHeight, visibleNodes.length])
 
+  const orderedPaths = useMemo(() => visibleNodes.map((node) => node.relativePath), [visibleNodes])
+  const handleSelectNode = useCallback((event: React.MouseEvent, node: TreeNode) => {
+    setSelection((current) => resolveCompareSelection(current, {
+      orderedPaths,
+      clickedPath: node.relativePath,
+      shiftKey: event.shiftKey,
+      metaKey: event.metaKey,
+      ctrlKey: event.ctrlKey,
+    }))
+  }, [orderedPaths])
+
+  const selectedCount = selection.selectedPaths.size
+  const leftSelectionEntries = useMemo(
+    () => collectSyncEntriesForSelection(entries, selection.selectedPaths, 'left_to_right'),
+    [entries, selection.selectedPaths],
+  )
+  const rightSelectionEntries = useMemo(
+    () => collectSyncEntriesForSelection(entries, selection.selectedPaths, 'right_to_left'),
+    [entries, selection.selectedPaths],
+  )
+
+  const handleBatchSync = useCallback(async (direction: SyncDirection) => {
+    if (!leftSource || !rightSource || !compareDone) {
+      return
+    }
+
+    if (!canQueueSyncDirection(syncTask, leftSource, rightSource, direction)) {
+      return
+    }
+
+    const syncEntries = direction === 'left_to_right' ? leftSelectionEntries : rightSelectionEntries
+    if (syncEntries.length === 0) {
+      return
+    }
+
+    const response = await window.api.startSync({
+      leftSource,
+      rightSource,
+      direction,
+      entries: syncEntries,
+    })
+
+    if (response.success) {
+      useCompareStore.getState().markDirtyPaths(Array.from(selection.selectedPaths))
+      rememberSyncDirtyRoots(response.data?.id, getSyncRecompareRootsFromEntries(syncEntries))
+      setSyncTask(response.data ?? null)
+    }
+  }, [compareDone, leftSelectionEntries, leftSource, rightSelectionEntries, rightSource, selection.selectedPaths, setSyncTask, syncTask])
+
   return (
     <div className="flex h-full flex-col">
       {/* Fixed headers */}
@@ -497,6 +599,40 @@ export default function SplitTree({ entries, filter, onDoubleClickFile, emptySta
         <div className="w-4 shrink-0 border-x border-neutral-600 bg-neutral-700" />
         <PathHeader side="right" onSourcePathSubmit={onSourcePathSubmit} />
       </div>
+
+      {selectedCount > 0 && (
+        <div className="flex shrink-0 items-center justify-between gap-3 border-b border-neutral-800 bg-neutral-900/50 px-3 py-2 text-xs text-neutral-400">
+          <div className="min-w-0 truncate">
+            已选 {selectedCount} 项，可按 Shift 连选、按 Cmd/Ctrl 增减选择
+          </div>
+          <div className="flex shrink-0 flex-wrap items-center gap-2">
+            <button
+              onClick={() => {
+                void handleBatchSync('left_to_right')
+              }}
+              disabled={leftSelectionEntries.length === 0 || !canQueueSyncDirection(syncTask, leftSource, rightSource, 'left_to_right')}
+              className="inline-flex items-center rounded-md bg-emerald-600 px-2.5 py-1 text-xs font-medium text-white transition-colors hover:bg-emerald-500 disabled:cursor-not-allowed disabled:bg-neutral-700 disabled:text-neutral-500"
+            >
+              复制所选到右边
+            </button>
+            <button
+              onClick={() => {
+                void handleBatchSync('right_to_left')
+              }}
+              disabled={rightSelectionEntries.length === 0 || !canQueueSyncDirection(syncTask, leftSource, rightSource, 'right_to_left')}
+              className="inline-flex items-center rounded-md bg-cyan-600 px-2.5 py-1 text-xs font-medium text-white transition-colors hover:bg-cyan-500 disabled:cursor-not-allowed disabled:bg-neutral-700 disabled:text-neutral-500"
+            >
+              复制所选到左边
+            </button>
+            <button
+              onClick={() => setSelection({ selectedPaths: new Set(), anchorPath: null })}
+              className="inline-flex items-center rounded-md border border-neutral-700 bg-neutral-800/70 px-2.5 py-1 text-xs font-medium text-neutral-200 transition-colors hover:border-neutral-600 hover:bg-neutral-800"
+            >
+              清除选择
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Two panels with synchronized scroll */}
       <div className="flex flex-1 overflow-hidden">
@@ -513,6 +649,8 @@ export default function SplitTree({ entries, filter, onDoubleClickFile, emptySta
             topSpacerHeight={topSpacerHeight}
             bottomSpacerHeight={bottomSpacerHeight}
             emptyStateMessage={emptyStateMessage}
+            selectedPaths={selection.selectedPaths}
+            onSelectNode={handleSelectNode}
             onExtensionFilterChange={onExtensionFilterChange}
           />
         </div>
@@ -530,6 +668,8 @@ export default function SplitTree({ entries, filter, onDoubleClickFile, emptySta
             topSpacerHeight={topSpacerHeight}
             bottomSpacerHeight={bottomSpacerHeight}
             emptyStateMessage={emptyStateMessage}
+            selectedPaths={selection.selectedPaths}
+            onSelectNode={handleSelectNode}
             onExtensionFilterChange={onExtensionFilterChange}
           />
         </div>

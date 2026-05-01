@@ -10,6 +10,7 @@ import { useAppStore } from '../stores/app-store'
 import { useSettingsStore } from '../stores/settings-store'
 import { openCompareTab, openSyncTaskView } from '../utils/compare-session-navigation'
 import { formatSyncProgress } from '../utils/format-sync-progress'
+import { isFilterAdditionOnly } from '../utils/filter-change'
 import type { StrategyName } from '../../../shared/types'
 import { ArrowRightIcon, PlayIcon, SwapIcon } from '../components/Icons'
 
@@ -83,7 +84,17 @@ export default function HomePage() {
   }
 
   const handleSessionFilterChange = async (patterns: readonly string[]) => {
+    const previousFilters = useCompareStore.getState().extensionFilter
     setExtensionFilter(patterns)
+    const activeTabId = useAppStore.getState().activeCompareTabId
+    if (activeTabId) {
+      useAppStore.getState().updateCompareTabSnapshot(activeTabId, () => useCompareStore.getState().createSnapshot())
+    }
+
+    if (isFilterAdditionOnly(previousFilters, patterns)) {
+      return
+    }
+
     await rerunActiveSessionIfRunning()
   }
 

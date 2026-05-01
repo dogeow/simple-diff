@@ -3,7 +3,7 @@ import { createJSONStorage, persist } from 'zustand/middleware'
 import type { SourceConfig, TextDiffResult } from '../../../shared/types'
 import { sanitizePersistedCompareSessionSnapshot, type CompareSessionSnapshot } from './compare-store'
 
-export type Page = 'home' | 'compare' | 'text' | 'ssh' | 'history' | 'settings'
+export type Page = 'home' | 'compare' | 'text' | 'ssh' | 'history' | 'sync' | 'settings'
 
 export interface DiffTab {
   readonly id: string

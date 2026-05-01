@@ -271,4 +271,84 @@ describe('SyncManager', () => {
       totalItems: entries.length,
     })
   })
+
+  it('appends another directory to the running sync task when sources and direction match', async () => {
+    const leftSourceConfig: SourceConfig = { type: 'local', path: '/left' }
+    const rightSourceConfig: SourceConfig = { type: 'local', path: '/right' }
+
+    let releaseFirstFile: (() => void) | null = null
+    const sourceFs = createFileSourceMock({
+      list: vi.fn(async (dirPath: string) => {
+        if (dirPath === '/left/books') {
+          return [createFileEntry('book.txt', false)]
+        }
+        if (dirPath === '/left/images') {
+          return [createFileEntry('cover.png', false)]
+        }
+        return []
+      }),
+      readFileBuffer: vi.fn(async (filePath: string) => Buffer.from(`content:${filePath}`)),
+    })
+
+    const targetFs = createFileSourceMock({
+      writeFileBuffer: vi.fn(async (filePath: string, content: Buffer) => {
+        if (filePath === '/right/books/book.txt' && releaseFirstFile) {
+          await new Promise<void>((resolve) => {
+            releaseFirstFile = resolve
+          })
+        }
+
+        return Promise.resolve(content)
+      }),
+    })
+
+    mocks.createFileSource.mockImplementation(async (config: SourceConfig) => (
+      config.path === '/left' ? sourceFs : targetFs
+    ))
+
+    const { SyncManager } = await import('./sync-manager')
+    const manager = new SyncManager()
+
+    releaseFirstFile = () => undefined
+    const firstStart = manager.start({
+      leftSource: leftSourceConfig,
+      rightSource: rightSourceConfig,
+      direction: 'left_to_right',
+      entries: [createCompareDirEntry('books')],
+    })
+
+    await waitFor(() => manager.getSnapshot()?.currentPath === 'books/book.txt')
+
+    const appendedSnapshot = await manager.start({
+      leftSource: leftSourceConfig,
+      rightSource: rightSourceConfig,
+      direction: 'left_to_right',
+      entries: [createCompareDirEntry('images')],
+    })
+
+    expect(appendedSnapshot).toMatchObject({
+      status: 'running',
+      totalItems: 4,
+      completedItems: 1,
+    })
+
+    const resolveFirstFile = releaseFirstFile
+    releaseFirstFile = null
+    resolveFirstFile?.()
+
+    await firstStart
+    await waitFor(() => manager.getSnapshot()?.status === 'completed')
+
+    expect(sourceFs.list).toHaveBeenCalledWith('/left/books')
+    expect(sourceFs.list).toHaveBeenCalledWith('/left/images')
+    expect(targetFs.ensureDir).toHaveBeenCalledWith('/right/books')
+    expect(targetFs.ensureDir).toHaveBeenCalledWith('/right/images')
+    expect(targetFs.writeFileBuffer).toHaveBeenCalledWith('/right/books/book.txt', Buffer.from('content:/left/books/book.txt'))
+    expect(targetFs.writeFileBuffer).toHaveBeenCalledWith('/right/images/cover.png', Buffer.from('content:/left/images/cover.png'))
+    expect(manager.getSnapshot()).toMatchObject({
+      status: 'completed',
+      completedItems: 4,
+      totalItems: 4,
+    })
+  })
 })

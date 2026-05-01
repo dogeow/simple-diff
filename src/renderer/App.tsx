@@ -4,13 +4,17 @@ import ComparePage from './pages/ComparePage'
 import TextComparePage from './pages/TextComparePage'
 import SSHManagerPage from './pages/SSHManagerPage'
 import HistoryPage from './pages/HistoryPage'
+import SyncPage from './pages/SyncPage'
 import SettingsPage from './pages/SettingsPage'
 import { useAppStore } from './stores/app-store'
 import { useEffect, useMemo, useRef } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { applyDirtyPathsToSnapshot, sanitizePersistedCompareSessionSnapshot, useCompareStore } from './stores/compare-store'
 import { bindCompareEvents } from './utils/compare-events'
-import { useCompareActions } from './hooks/useCompare'
+import { refreshSyncedDirtyRoots, rememberSyncDirtyRoots, useCompareActions } from './hooks/useCompare'
+import { shouldShowSyncTaskInCompare } from './utils/sync-task-visibility'
+import { getSyncRecompareRootsFromItems } from './utils/sync-dirty'
+import type { SyncTaskSnapshot } from '../../shared/types'
 
 export default function App() {
   const page = useAppStore((s) => s.page)
@@ -29,6 +33,7 @@ export default function App() {
     entryCount: s.entries.length,
   })))
   const restoredCompareTabsRef = useRef(false)
+  const syncProgressTaskRef = useRef<SyncTaskSnapshot | null>(null)
   const { runCompare } = useCompareActions()
   const activeCompareTab = useMemo(
     () => activeCompareTabId ? compareTabs.find((tab) => tab.id === activeCompareTabId) ?? null : null,
@@ -87,6 +92,7 @@ export default function App() {
     void (async () => {
       const response = await window.api.getSyncStatus()
       if (!response.success || !response.data) return
+      syncProgressTaskRef.current = response.data
       setSyncTask(response.data)
 
       const state = useCompareStore.getState()
@@ -96,7 +102,29 @@ export default function App() {
     })()
 
     const unsubscribe = window.api.onSyncProgress((task) => {
+      const previousTask = syncProgressTaskRef.current
+      syncProgressTaskRef.current = task
       setSyncTask(task)
+
+      const compareState = useCompareStore.getState()
+      if (!shouldShowSyncTaskInCompare(task, compareState.leftSource, compareState.rightSource)) {
+        return
+      }
+
+      const activeDirtyPaths = [task.currentPath, task.lastCompletedPath].filter((path): path is string => Boolean(path))
+      if (activeDirtyPaths.length > 0) {
+        compareState.markDirtyPaths(activeDirtyPaths)
+      }
+
+      const roots = getSyncRecompareRootsFromItems(task.items)
+      if (roots.length > 0) {
+        rememberSyncDirtyRoots(task.id, roots)
+      }
+
+      const becameCompleted = task.status === 'completed' && (previousTask?.id !== task.id || previousTask.status !== 'completed')
+      if (becameCompleted) {
+        void refreshSyncedDirtyRoots(task.id)
+      }
     })
 
     return unsubscribe
@@ -173,6 +201,7 @@ export default function App() {
       {page === 'text' && <TextComparePage />}
       {page === 'ssh' && <SSHManagerPage />}
       {page === 'history' && <HistoryPage />}
+      {page === 'sync' && <SyncPage />}
       {page === 'settings' && <SettingsPage />}
     </Layout>
   )
