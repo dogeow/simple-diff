@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { formatPathFiltersForDisplay, mergeDisplayedPathFilters } from '@shared/path-filter'
 import { useCompareActions } from '../hooks/useCompare'
 import { useSettingsStore } from '../stores/settings-store'
@@ -9,11 +9,15 @@ export default function SettingsPage() {
   const globalPathFilters = useSettingsStore((s) => s.globalPathFilters)
   const setGlobalPathFilters = useSettingsStore((s) => s.setGlobalPathFilters)
   const { rerunActiveSessionIfRunning } = useCompareActions()
-  const [input, setInput] = useState(formatPathFiltersForDisplay(globalPathFilters).join('\n'))
+  const formattedGlobalPathFilters = useMemo(
+    () => formatPathFiltersForDisplay(globalPathFilters),
+    [globalPathFilters],
+  )
+  const [input, setInput] = useState(formattedGlobalPathFilters.join('\n'))
 
   useEffect(() => {
-    setInput(formatPathFiltersForDisplay(globalPathFilters).join('\n'))
-  }, [globalPathFilters])
+    setInput(formattedGlobalPathFilters.join('\n'))
+  }, [formattedGlobalPathFilters])
 
   const handleSave = async () => {
     const merged = mergeDisplayedPathFilters(input.split('\n'), globalPathFilters)
@@ -60,10 +64,22 @@ export default function SettingsPage() {
             一行一个；支持目录名（如 <code className="rounded bg-neutral-800 px-1 py-0.5 font-mono text-[11px]">node_modules</code>）或路径规则。
           </p>
 
+          {formattedGlobalPathFilters.length > 0 && (
+            <div className="mb-2 flex flex-wrap gap-1.5 text-[11px] text-neutral-500">
+              {formattedGlobalPathFilters.map((filter) => (
+                <span
+                  key={filter}
+                  className="rounded-full border border-neutral-700 bg-neutral-800/70 px-2 py-0.5 font-mono text-neutral-300"
+                >
+                  {filter}
+                </span>
+              ))}
+            </div>
+          )}
+
           <textarea
             value={input}
             onChange={(event) => setInput(event.target.value)}
-            placeholder={'node_modules\n.git\ndist'}
             rows={10}
             spellCheck={false}
             className="mb-3 w-full resize-y rounded-md border border-neutral-700 bg-neutral-900 px-3 py-2 font-mono text-sm leading-6 text-neutral-100 outline-none transition-colors hover:border-neutral-600 focus:border-blue-500 focus:ring-1 focus:ring-blue-500/30"

@@ -11,9 +11,20 @@ const STATE_STYLES: Record<CompareState, { bg: string; text: string; ring: strin
 
 interface StatusBadgeProps {
   readonly state: CompareState
+  readonly dirty?: boolean
 }
 
-export default function StatusBadge({ state }: StatusBadgeProps) {
+export default function StatusBadge({ state, dirty = false }: StatusBadgeProps) {
+  if (dirty) {
+    return (
+      <span
+        className="inline-flex items-center justify-center whitespace-nowrap rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] font-medium text-amber-300 ring-1 ring-inset ring-amber-500/30"
+      >
+        脏
+      </span>
+    )
+  }
+
   const style = STATE_STYLES[state]
   return (
     <span

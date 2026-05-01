@@ -139,9 +139,18 @@ export default function FileDiffView({ tab }: FileDiffViewProps) {
         return
       }
 
-      if (event.key === 'F7') {
+      const shouldGoNext = (event.metaKey || event.ctrlKey)
+        && event.altKey
+        && !event.shiftKey
+        && event.key === 'ArrowDown'
+      const shouldGoPrev = (event.metaKey || event.ctrlKey)
+        && event.altKey
+        && !event.shiftKey
+        && event.key === 'ArrowUp'
+
+      if (shouldGoNext || shouldGoPrev) {
         event.preventDefault()
-        scrollToDiff(event.shiftKey ? 'prev' : 'next')
+        scrollToDiff(shouldGoPrev ? 'prev' : 'next')
       }
     }
 
@@ -301,10 +310,14 @@ export default function FileDiffView({ tab }: FileDiffViewProps) {
           </span>
         )}
         <span className="ml-auto inline-flex items-center gap-1 text-[10px] text-neutral-600">
-          <kbd className="rounded border border-neutral-700 bg-neutral-800 px-1.5 py-0.5 font-mono text-[10px] text-neutral-400">Shift+F7</kbd>
+          <kbd className="rounded border border-neutral-700 bg-neutral-800 px-1.5 py-0.5 font-mono text-[10px] text-neutral-400">⌘/Ctrl</kbd>
+          <kbd className="rounded border border-neutral-700 bg-neutral-800 px-1.5 py-0.5 font-mono text-[10px] text-neutral-400">⌥/Alt</kbd>
+          <kbd className="rounded border border-neutral-700 bg-neutral-800 px-1.5 py-0.5 font-mono text-[10px] text-neutral-400">↑</kbd>
           上一个
           <span className="mx-1 text-neutral-700">·</span>
-          <kbd className="rounded border border-neutral-700 bg-neutral-800 px-1.5 py-0.5 font-mono text-[10px] text-neutral-400">F7</kbd>
+          <kbd className="rounded border border-neutral-700 bg-neutral-800 px-1.5 py-0.5 font-mono text-[10px] text-neutral-400">⌘/Ctrl</kbd>
+          <kbd className="rounded border border-neutral-700 bg-neutral-800 px-1.5 py-0.5 font-mono text-[10px] text-neutral-400">⌥/Alt</kbd>
+          <kbd className="rounded border border-neutral-700 bg-neutral-800 px-1.5 py-0.5 font-mono text-[10px] text-neutral-400">↓</kbd>
           下一个
         </span>
       </div>

@@ -35,6 +35,7 @@ export interface CompareSessionSnapshot {
   readonly duration: number
   readonly leftSource: SourceConfig | null
   readonly rightSource: SourceConfig | null
+  readonly dirtyPaths: readonly string[]
   readonly loadingDirs: readonly string[]
   readonly filter: CompareFilter
   readonly expandedDirs: readonly string[]
@@ -64,6 +65,8 @@ interface CompareStore {
   readonly duration: number
   readonly leftSource: SourceConfig | null
   readonly rightSource: SourceConfig | null
+  readonly dirtyPaths: ReadonlySet<string>
+  readonly dirtyDisplayPaths: ReadonlySet<string>
   readonly loadingDirs: ReadonlySet<string>
 
   readonly filter: CompareFilter
@@ -89,9 +92,12 @@ interface CompareStore {
   setScanEntries: (compareId: string, entries: readonly CompareEntry[]) => void
   updateEntries: (compareId: string, entries: readonly CompareEntry[]) => void
   finishCompare: (compareId: string, result: CompareResult) => void
+  applyPartialCompareResult: (roots: readonly string[], entries: readonly CompareEntry[]) => void
   pauseCompare: (compareId?: string) => void
   removeEntry: (relativePath: string) => void
   refreshDir: (relativePath: string) => Promise<void>
+  markDirtyPaths: (paths: readonly string[]) => void
+  clearDirtyPaths: (roots?: readonly string[]) => void
   setError: (error: string | null, compareId?: string) => void
   setFilter: (filter: CompareFilter) => void
   hydrateSourceInputs: (left: SourceConfig, right: SourceConfig) => void
@@ -128,6 +134,7 @@ export function sanitizePersistedCompareSessionSnapshot(snapshot: CompareSession
     ...snapshot,
     scanning: false,
     comparing: false,
+    dirtyPaths: [],
     loadingDirs: [],
     activeCompareId: null,
   }
@@ -320,6 +327,118 @@ function createEmptyCompareEntrySummary(): CompareEntrySummary {
   }
 }
 
+function normalizeDirtyPath(relativePath: string): string {
+  const trimmed = relativePath.trim()
+  if (!trimmed || trimmed === '.' || trimmed === '/') {
+    return ''
+  }
+
+  return trimmed.split(/[\\/]+/).filter(Boolean).join('/')
+}
+
+function cloneDirtyPaths(dirtyPaths: ReadonlySet<string>): readonly string[] {
+  return Array.from(dirtyPaths).sort((a, b) => a.length - b.length || a.localeCompare(b))
+}
+
+function buildDirtyDisplayPaths(dirtyPaths: ReadonlySet<string>): ReadonlySet<string> {
+  const displayPaths = new Set<string>()
+
+  for (const dirtyPath of dirtyPaths) {
+    if (!dirtyPath) {
+      displayPaths.add('')
+      continue
+    }
+
+    const segments = dirtyPath.split('/')
+    let currentPath = ''
+    for (const segment of segments) {
+      currentPath = currentPath ? `${currentPath}/${segment}` : segment
+      displayPaths.add(currentPath)
+    }
+  }
+
+  return displayPaths
+}
+
+function mergeDirtyPathSet(
+  currentDirtyPaths: ReadonlySet<string>,
+  incomingPaths: readonly string[],
+): { readonly dirtyPaths: ReadonlySet<string>; readonly dirtyDisplayPaths: ReadonlySet<string> } {
+  const nextDirtyPaths = new Set(currentDirtyPaths)
+
+  for (const path of incomingPaths) {
+    nextDirtyPaths.add(normalizeDirtyPath(path))
+  }
+
+  return {
+    dirtyPaths: nextDirtyPaths,
+    dirtyDisplayPaths: buildDirtyDisplayPaths(nextDirtyPaths),
+  }
+}
+
+function isPathInsideRoot(root: string, candidatePath: string): boolean {
+  if (!root) {
+    return true
+  }
+
+  return candidatePath === root || candidatePath.startsWith(`${root}/`)
+}
+
+function clearDirtyPathSet(
+  currentDirtyPaths: ReadonlySet<string>,
+  roots?: readonly string[],
+): { readonly dirtyPaths: ReadonlySet<string>; readonly dirtyDisplayPaths: ReadonlySet<string> } {
+  if (!roots || roots.length === 0) {
+    return {
+      dirtyPaths: new Set<string>(),
+      dirtyDisplayPaths: new Set<string>(),
+    }
+  }
+
+  const normalizedRoots = roots.map(normalizeDirtyPath)
+  if (normalizedRoots.includes('')) {
+    return {
+      dirtyPaths: new Set<string>(),
+      dirtyDisplayPaths: new Set<string>(),
+    }
+  }
+
+  const nextDirtyPaths = new Set<string>()
+  for (const dirtyPath of currentDirtyPaths) {
+    if (normalizedRoots.some((root) => isPathInsideRoot(root, dirtyPath))) {
+      continue
+    }
+    nextDirtyPaths.add(dirtyPath)
+  }
+
+  return {
+    dirtyPaths: nextDirtyPaths,
+    dirtyDisplayPaths: buildDirtyDisplayPaths(nextDirtyPaths),
+  }
+}
+
+export function applyDirtyPathsToSnapshot(
+  snapshot: CompareSessionSnapshot,
+  paths: readonly string[],
+): CompareSessionSnapshot {
+  const mergedDirtyPaths = mergeDirtyPathSet(new Set(snapshot.dirtyPaths ?? []), paths)
+  return {
+    ...snapshot,
+    dirtyPaths: cloneDirtyPaths(mergedDirtyPaths.dirtyPaths),
+  }
+}
+
+export function clearDirtyPathsFromSnapshot(
+  snapshot: CompareSessionSnapshot,
+  roots?: readonly string[],
+): CompareSessionSnapshot {
+  const clearedDirtyPaths = clearDirtyPathSet(new Set(snapshot.dirtyPaths ?? []), roots)
+  return {
+    ...snapshot,
+    dirtyPaths: cloneDirtyPaths(clearedDirtyPaths.dirtyPaths),
+  }
+}
+
 function adjustCompareEntrySummary(
   summary: CompareEntrySummary,
   entry: CompareEntry,
@@ -363,6 +482,8 @@ const compareInitial = {
   duration: 0,
   leftSource: null as SourceConfig | null,
   rightSource: null as SourceConfig | null,
+  dirtyPaths: new Set<string>() as ReadonlySet<string>,
+  dirtyDisplayPaths: new Set<string>() as ReadonlySet<string>,
   loadingDirs: new Set<string>() as ReadonlySet<string>,
   filter: 'all' as const,
   expandedDirs: new Set<string>() as ReadonlySet<string>,
@@ -479,6 +600,27 @@ function replaceDirectoryChildren(
   return upsertEntries(preserved, incomingChildren)
 }
 
+function replaceEntriesForRoots(
+  existing: readonly CompareEntry[],
+  roots: readonly string[],
+  incomingEntries: readonly CompareEntry[],
+): readonly CompareEntry[] {
+  const normalizedRoots = roots.map(normalizeDirtyPath)
+  if (normalizedRoots.length === 0) {
+    return existing
+  }
+
+  if (normalizedRoots.includes('')) {
+    return upsertEntries([], incomingEntries)
+  }
+
+  const preservedEntries = existing.filter((entry) => {
+    return !normalizedRoots.some((root) => entry.relativePath.startsWith(`${root}/`))
+  })
+
+  return upsertEntries(preservedEntries, incomingEntries)
+}
+
 function deriveSourceState(source: SourceConfig): {
   sourceType: 'local' | 'sftp'
   path: string
@@ -524,6 +666,7 @@ function createCompareSessionSnapshot(state: CompareStore): CompareSessionSnapsh
     duration: state.duration,
     leftSource: state.leftSource,
     rightSource: state.rightSource,
+    dirtyPaths: cloneDirtyPaths(state.dirtyPaths),
     loadingDirs: [...state.loadingDirs],
     filter: state.filter,
     expandedDirs: [...state.expandedDirs],
@@ -667,6 +810,8 @@ const compareStore = create<CompareStore>((set, get) => ({
         scanning: true,
         comparing: true,
         paused: false,
+        dirtyPaths: compareInitial.dirtyPaths,
+        dirtyDisplayPaths: compareInitial.dirtyDisplayPaths,
       }
     })
   },
@@ -713,8 +858,26 @@ const compareStore = create<CompareStore>((set, get) => ({
         done: true,
         error: null,
         duration: result.duration,
+        dirtyPaths: compareInitial.dirtyPaths,
+        dirtyDisplayPaths: compareInitial.dirtyDisplayPaths,
         loadingDirs: new Set(),
         activeCompareId: null,
+      }
+    })
+  },
+
+  applyPartialCompareResult: (roots, incomingEntries) => {
+    set((state) => {
+      const entries = replaceEntriesForRoots(state.entries, roots, incomingEntries)
+      const clearedDirtyPaths = clearDirtyPathSet(state.dirtyPaths, roots)
+
+      return {
+        entries,
+        entrySummary: summarizeCompareEntries(entries),
+        dirtyPaths: clearedDirtyPaths.dirtyPaths,
+        dirtyDisplayPaths: clearedDirtyPaths.dirtyDisplayPaths,
+        error: null,
+        done: true,
       }
     })
   },
@@ -774,6 +937,30 @@ const compareStore = create<CompareStore>((set, get) => ({
       doneLoading.delete(path)
       set({ loadingDirs: doneLoading })
     }
+  },
+
+  markDirtyPaths: (paths) => {
+    if (paths.length === 0) {
+      return
+    }
+
+    set((state) => {
+      const mergedDirtyPaths = mergeDirtyPathSet(state.dirtyPaths, paths)
+      return {
+        dirtyPaths: mergedDirtyPaths.dirtyPaths,
+        dirtyDisplayPaths: mergedDirtyPaths.dirtyDisplayPaths,
+      }
+    })
+  },
+
+  clearDirtyPaths: (roots) => {
+    set((state) => {
+      const clearedDirtyPaths = clearDirtyPathSet(state.dirtyPaths, roots)
+      return {
+        dirtyPaths: clearedDirtyPaths.dirtyPaths,
+        dirtyDisplayPaths: clearedDirtyPaths.dirtyDisplayPaths,
+      }
+    })
   },
 
   setError: (error, compareId) => {
@@ -910,6 +1097,8 @@ const compareStore = create<CompareStore>((set, get) => ({
       duration: restoredSnapshot.duration,
       leftSource: restoredSnapshot.leftSource,
       rightSource: restoredSnapshot.rightSource,
+      dirtyPaths: new Set(restoredSnapshot.dirtyPaths ?? []),
+      dirtyDisplayPaths: buildDirtyDisplayPaths(new Set(restoredSnapshot.dirtyPaths ?? [])),
       loadingDirs: new Set(restoredSnapshot.loadingDirs),
       filter: restoredSnapshot.filter,
       expandedDirs: new Set(restoredSnapshot.expandedDirs),

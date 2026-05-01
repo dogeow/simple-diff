@@ -321,6 +321,50 @@ describe('compareDirectories', () => {
     ])
   })
 
+  it('supports relative roots for subtree recompare while keeping session-relative paths', async () => {
+    const leftSource = createMockSource({
+      type: 'local',
+      listings: {
+        '/left/src': [
+          createFileEntry('nested', { isDirectory: true, size: 0 }),
+          createFileEntry('app.ts', { size: 10, mtime: 100 }),
+        ],
+        '/left/src/nested': [
+          createFileEntry('child.ts', { size: 5, mtime: 100 }),
+        ],
+      },
+    })
+    const rightSource = createMockSource({
+      type: 'local',
+      listings: {
+        '/right/src': [
+          createFileEntry('nested', { isDirectory: true, size: 0 }),
+          createFileEntry('app.ts', { size: 20, mtime: 100 }),
+        ],
+        '/right/src/nested': [
+          createFileEntry('child.ts', { size: 5, mtime: 100 }),
+        ],
+      },
+    })
+
+    const result = await compareDirectories({
+      leftSource,
+      rightSource,
+      leftRoot: '/left',
+      rightRoot: '/right',
+      relativeRoots: ['src'],
+      strategies: ['size'],
+    })
+
+    expect(leftSource.list.mock.calls.map(([dirPath]) => dirPath)).toEqual(['/left/src', '/left/src/nested'])
+    expect(rightSource.list.mock.calls.map(([dirPath]) => dirPath)).toEqual(['/right/src', '/right/src/nested'])
+    expect(result.entries.map((entry) => [entry.relativePath, entry.state])).toEqual([
+      ['src/app.ts', 'different'],
+      ['src/nested', 'equal'],
+      ['src/nested/child.ts', 'equal'],
+    ])
+  })
+
   it('aborts when the signal is cancelled after a scan batch is emitted', async () => {
     const controller = new AbortController()
     const leftSource = createMockSource({

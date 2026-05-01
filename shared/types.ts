@@ -98,6 +98,26 @@ export interface CompareRequest {
   readonly previousEntries?: readonly CompareCacheEntry[]
 }
 
+export interface ComparePartialRequest {
+  readonly left: SourceConfig
+  readonly right: SourceConfig
+  readonly strategies: readonly StrategyName[]
+  readonly extensionFilter?: readonly string[]
+  readonly previousEntries?: readonly CompareCacheEntry[]
+  readonly relativeRoots: readonly string[]
+}
+
+export interface CompareLocalWatchRequest {
+  readonly sessionId: string
+  readonly left: SourceConfig
+  readonly right: SourceConfig
+}
+
+export interface CompareLocalDirtyEvent {
+  readonly sessionId: string
+  readonly paths: readonly string[]
+}
+
 export interface CompareStats {
   readonly total: number
   readonly equal: number
@@ -192,10 +212,14 @@ export const IPC_CHANNELS = {
   FILE_READ_TEXT: 'file:read-text',
   FILE_WRITE_TEXT: 'file:write-text',
   COMPARE_RUN: 'compare:run',
+  COMPARE_RUN_PARTIAL: 'compare:run-partial',
   COMPARE_CANCEL: 'compare:cancel',
   COMPARE_PROGRESS: 'compare:progress',
   COMPARE_SCAN_COMPLETE: 'compare:scan-complete',
   COMPARE_ENTRY_UPDATE: 'compare:entry-update',
+  COMPARE_LOCAL_WATCH_START: 'compare:local-watch:start',
+  COMPARE_LOCAL_WATCH_STOP: 'compare:local-watch:stop',
+  COMPARE_LOCAL_DIRTY: 'compare:local-dirty',
   LOG: 'app:log',
   TEXT_DIFF: 'text:diff',
   SSH_LIST_CONFIGS: 'ssh:list-configs',

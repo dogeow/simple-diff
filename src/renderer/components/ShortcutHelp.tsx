@@ -22,7 +22,6 @@ const GROUPS: readonly ShortcutGroup[] = [
   {
     title: '目录对比',
     items: [
-      { keys: ['⌘', 'Enter'], label: '从主页触发对比' },
       { keys: ['右键'], label: '在文件 / 目录上打开操作菜单' },
       { keys: ['双击'], label: '展开目录 / 打开文件 Diff' },
     ],
@@ -30,8 +29,8 @@ const GROUPS: readonly ShortcutGroup[] = [
   {
     title: '文件 Diff',
     items: [
-      { keys: ['F7'], label: '跳到下一个差异' },
-      { keys: ['Shift', 'F7'], label: '跳到上一个差异' },
+      { keys: ['⌘/Ctrl', '⌥/Alt', '↓'], label: '跳到下一个差异' },
+      { keys: ['⌘/Ctrl', '⌥/Alt', '↑'], label: '跳到上一个差异' },
       { keys: ['鼠标悬停'], label: '显示行 / 块应用按钮' },
     ],
   },

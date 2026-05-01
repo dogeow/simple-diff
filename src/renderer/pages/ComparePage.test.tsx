@@ -314,6 +314,20 @@ describe('ComparePage renderer interactions', () => {
     expect(screen.queryByText('当前结果未完成，需先重新对比后才能执行同步。')).toBeNull()
   })
 
+  it('shows compare errors in the compare page UI', () => {
+    resetStores()
+    useCompareStore.setState({
+      error: '左侧目录不可访问：/Volumes/未命名2/迅雷下载/书籍。可能是硬盘未插入、未挂载，或路径已变更。',
+      done: false,
+      scanning: false,
+      comparing: false,
+    })
+
+    render(<ComparePage />)
+
+    expect(screen.getByRole('alert').textContent).toContain('左侧目录不可访问：/Volumes/未命名2/迅雷下载/书籍。可能是硬盘未插入、未挂载，或路径已变更。')
+  })
+
   it('shows dot files by default instead of hiding them', () => {
     resetStores()
     useCompareStore.setState({

@@ -70,6 +70,20 @@ function CompareStatusIndicator() {
   )
 }
 
+function CompareErrorBanner() {
+  const error = useCompareStore((s) => s.error)
+
+  if (!error) {
+    return null
+  }
+
+  return (
+    <div className="mx-3 mt-2 rounded-md border border-rose-900/60 bg-rose-950/40 px-3 py-2 text-sm text-rose-300" role="alert">
+      {error}
+    </div>
+  )
+}
+
 interface CompareContentProps {
   readonly onDoubleClickFile: (entry: CompareEntry) => void
   readonly onRerunCompare: () => Promise<void>
@@ -462,6 +476,8 @@ export default function ComparePage() {
         {/* Status indicator */}
         <CompareStatusIndicator />
       </div>
+
+      <CompareErrorBanner />
 
       <DiffTabStrip />
 

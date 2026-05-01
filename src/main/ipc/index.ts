@@ -15,6 +15,7 @@ import { connectionManager } from '../ssh/connection-manager'
 import { getConfigInternal } from '../ssh/config-store'
 import * as historyStore from '../history/history-store'
 import { syncManager } from '../sync/sync-manager'
+import { localCompareWatchManager } from '../compare/local-watch-manager'
 
 const compareLogger = logger.child('compare')
 const ENTRY_UPDATE_FLUSH_INTERVAL_MS = 100
@@ -245,9 +246,48 @@ function registerCompareHandlers(): void {
     }),
   )
 
+  ipcMain.handle(IPC_CHANNELS.COMPARE_RUN_PARTIAL, (_event, request) =>
+    wrapHandler(async () => {
+      compareLogger.info(`[partial] 开始局部重比对 roots=${request.relativeRoots.join('、') || '.'}`)
+
+      const leftSource = await createFileSource(request.left)
+      const rightSource = await createFileSource(request.right)
+
+      try {
+        return await compareDirectories({
+          leftSource,
+          rightSource,
+          leftRoot: request.left.path,
+          rightRoot: request.right.path,
+          relativeRoots: request.relativeRoots,
+          strategies: request.strategies,
+          extensionFilter: request.extensionFilter,
+          previousEntries: request.previousEntries,
+        })
+      } finally {
+        await leftSource.dispose()
+        await rightSource.dispose()
+      }
+    }),
+  )
+
   ipcMain.handle(IPC_CHANNELS.TEXT_DIFF, (_event, leftText: string, rightText: string) =>
     wrapHandler(async () => {
       return computeTextDiff(leftText, rightText)
+    }),
+  )
+}
+
+function registerCompareLocalWatchHandlers(): void {
+  ipcMain.handle(IPC_CHANNELS.COMPARE_LOCAL_WATCH_START, (event, request) =>
+    wrapHandler(async () => {
+      await localCompareWatchManager.start(event.sender, request)
+    }),
+  )
+
+  ipcMain.handle(IPC_CHANNELS.COMPARE_LOCAL_WATCH_STOP, (event, sessionId?: string) =>
+    wrapHandler(async () => {
+      await localCompareWatchManager.stop(event.sender, sessionId)
     }),
   )
 }
@@ -386,6 +426,7 @@ function registerFileOperationHandlers(): void {
 export function registerAllHandlers(): void {
   registerFileHandlers()
   registerCompareHandlers()
+  registerCompareLocalWatchHandlers()
   registerSSHHandlers()
   registerHistoryHandlers()
   registerSyncHandlers()

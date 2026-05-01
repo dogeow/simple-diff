@@ -64,6 +64,50 @@ function createCompareCacheEntries(entries: readonly CompareEntry[]): readonly C
   return cacheEntries
 }
 
+function normalizeDirtyPath(relativePath: string): string {
+  const trimmed = relativePath.trim()
+  if (!trimmed || trimmed === '.' || trimmed === '/') {
+    return ''
+  }
+
+  return trimmed.split(/[\\/]+/).filter(Boolean).join('/')
+}
+
+function getDirtyRecompareRoots(dirtyPaths: ReadonlySet<string>): readonly string[] {
+  if (dirtyPaths.size === 0) {
+    return []
+  }
+
+  const roots = new Set<string>()
+
+  for (const dirtyPath of dirtyPaths) {
+    const normalizedPath = normalizeDirtyPath(dirtyPath)
+    if (!normalizedPath) {
+      return ['']
+    }
+
+    const lastSlashIndex = normalizedPath.lastIndexOf('/')
+    roots.add(lastSlashIndex >= 0 ? normalizedPath.slice(0, lastSlashIndex) : '')
+  }
+
+  if (roots.has('')) {
+    return ['']
+  }
+
+  const sortedRoots = Array.from(roots).sort((a, b) => a.length - b.length || a.localeCompare(b))
+  const minimizedRoots: string[] = []
+
+  for (const root of sortedRoots) {
+    if (minimizedRoots.some((candidate) => root === candidate || root.startsWith(`${candidate}/`))) {
+      continue
+    }
+
+    minimizedRoots.push(root)
+  }
+
+  return minimizedRoots
+}
+
 function formatCompareTabTitle(leftPath: string, rightPath: string): string {
   const getLabel = (path: string) => {
     const normalized = path.replace(/[\\/]+$/g, '')
@@ -72,6 +116,26 @@ function formatCompareTabTitle(leftPath: string, rightPath: string): string {
   }
 
   return `${getLabel(leftPath) || leftPath || '左侧'} ↔ ${getLabel(rightPath) || rightPath || '右侧'}`
+}
+
+export function formatCompareErrorForUi(rawError: string): string {
+  const message = rawError.trim()
+  if (!message) {
+    return '对比失败'
+  }
+
+  const isMissingPathError = /ENOENT|no such file or directory/i.test(message)
+  const isListDirError = /无法列出目录|scandir/i.test(message)
+  if (!isMissingPathError || !isListDirError) {
+    return message
+  }
+
+  const side = /\[(left|right)\]/i.exec(message)?.[1]?.toLowerCase()
+  const sideLabel = side === 'left' ? '左侧' : side === 'right' ? '右侧' : '所选'
+  const path = /scandir\s+['"]([^'"]+)['"]/i.exec(message)?.[1]
+  const target = path ?? '目录'
+
+  return `${sideLabel}目录不可访问：${target}。可能是硬盘未插入、未挂载，或路径已变更。`
 }
 
 interface RunCompareOptions {
@@ -263,7 +327,7 @@ export function useCompareActions() {
         }
       } else {
         const pauseRequested = pauseRequestedCompareIds.delete(compareId)
-        const message = response.error ?? '对比失败'
+        const message = formatCompareErrorForUi(response.error ?? '对比失败')
         addRendererLog('compare', 'error', `compare:run 返回失败 compareId=${compareId} error=${message}`)
         flushBufferedCompareEvents(compareId)
         if (useCompareStore.getState().activeCompareId === compareId) {
@@ -292,7 +356,8 @@ export function useCompareActions() {
       }
     } catch (error) {
       const pauseRequested = pauseRequestedCompareIds.delete(compareId)
-      const message = error instanceof Error ? error.message : '对比失败'
+      const rawMessage = error instanceof Error ? error.message : '对比失败'
+      const message = formatCompareErrorForUi(rawMessage)
       addRendererLog('compare', 'error', `compare:run 抛异常 compareId=${compareId} error=${message}`)
       flushBufferedCompareEvents(compareId)
       if (useCompareStore.getState().activeCompareId === compareId) {
@@ -386,11 +451,52 @@ export function useCompareActions() {
     })
   }, [runCompare])
 
+  const recompareDirtyPaths = useCallback(async () => {
+    const compareState = useCompareStore.getState()
+    const activeCompareTabId = useAppStore.getState().activeCompareTabId
+    const globalPathFilters = useSettingsStore.getState().globalPathFilters
+
+    if (!activeCompareTabId || !compareState.leftSource || !compareState.rightSource) {
+      return false
+    }
+
+    const relativeRoots = getDirtyRecompareRoots(compareState.dirtyPaths)
+    if (relativeRoots.length === 0) {
+      return false
+    }
+
+    const effectivePathFilters = mergePathFilters(globalPathFilters, compareState.extensionFilter)
+    const previousEntries = createCompareCacheEntries(compareState.entries)
+
+    addRendererLog('compare', 'info', `开始局部重比对 roots=${relativeRoots.join('、') || '.'}`)
+    const response = await window.api.runPartialCompare({
+      left: compareState.leftSource,
+      right: compareState.rightSource,
+      strategies: [...compareState.strategies],
+      extensionFilter: effectivePathFilters.length > 0 ? effectivePathFilters : undefined,
+      previousEntries: previousEntries.length > 0 ? previousEntries : undefined,
+      relativeRoots,
+    })
+
+    if (!response.success || !response.data) {
+      const message = formatCompareErrorForUi(response.error ?? '局部重比对失败')
+      addRendererLog('compare', 'error', `局部重比对失败 error=${message}`)
+      useCompareStore.getState().setError(message)
+      return false
+    }
+
+    useCompareStore.getState().applyPartialCompareResult(relativeRoots, response.data.entries)
+    syncCurrentCompareTabSnapshot(activeCompareTabId)
+    addRendererLog('compare', 'info', `局部重比对完成 roots=${relativeRoots.join('、') || '.'} total=${response.data.stats.total}`)
+    return true
+  }, [])
+
   return {
     runCompare,
     rerunActiveSessionIfRunning,
     pauseCompare,
     resumeCompare,
     restartCompare,
+    recompareDirtyPaths,
   }
 }

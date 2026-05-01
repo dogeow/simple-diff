@@ -2,7 +2,9 @@ import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import { IPC_CHANNELS } from '../../shared/types'
 import type {
   CompareEntry,
+  CompareLocalWatchRequest,
   CompareRequest,
+  ComparePartialRequest,
   CompareResult,
   LogEntry,
   SourceConfig,
@@ -31,8 +33,17 @@ const api = {
   runCompare: (request: CompareRequest): Promise<IpcResult<CompareResult>> =>
     ipcRenderer.invoke(IPC_CHANNELS.COMPARE_RUN, request),
 
+  runPartialCompare: (request: ComparePartialRequest): Promise<IpcResult<CompareResult>> =>
+    ipcRenderer.invoke(IPC_CHANNELS.COMPARE_RUN_PARTIAL, request),
+
   cancelCompare: (compareId?: string): Promise<IpcResult<void>> =>
     ipcRenderer.invoke(IPC_CHANNELS.COMPARE_CANCEL, compareId),
+
+  startLocalCompareWatch: (request: CompareLocalWatchRequest): Promise<IpcResult<void>> =>
+    ipcRenderer.invoke(IPC_CHANNELS.COMPARE_LOCAL_WATCH_START, request),
+
+  stopLocalCompareWatch: (sessionId?: string): Promise<IpcResult<void>> =>
+    ipcRenderer.invoke(IPC_CHANNELS.COMPARE_LOCAL_WATCH_STOP, sessionId),
 
   startSync: (request: StartSyncRequest): Promise<IpcResult<SyncTaskSnapshot>> =>
     ipcRenderer.invoke(IPC_CHANNELS.SYNC_START, request),
@@ -64,6 +75,15 @@ const api = {
     ipcRenderer.on(IPC_CHANNELS.COMPARE_ENTRY_UPDATE, listener)
     return () => {
       ipcRenderer.removeListener(IPC_CHANNELS.COMPARE_ENTRY_UPDATE, listener)
+    }
+  },
+
+  onCompareLocalDirty: (callback: (sessionId: string, paths: readonly string[]) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, sessionId: string, paths: readonly string[]) =>
+      callback(sessionId, paths)
+    ipcRenderer.on(IPC_CHANNELS.COMPARE_LOCAL_DIRTY, listener)
+    return () => {
+      ipcRenderer.removeListener(IPC_CHANNELS.COMPARE_LOCAL_DIRTY, listener)
     }
   },
 

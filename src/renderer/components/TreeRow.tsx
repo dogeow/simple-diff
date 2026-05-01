@@ -7,12 +7,13 @@ interface TreeRowProps {
   readonly node: TreeNode
   readonly expanded: boolean
   readonly loading: boolean
+  readonly dirty?: boolean
   readonly onToggle: () => void
   readonly onDoubleClick: () => void
   readonly onContextMenu?: (event: React.MouseEvent<HTMLTableRowElement>) => void
 }
 
-export default function TreeRow({ node, expanded, loading, onToggle, onDoubleClick, onContextMenu }: TreeRowProps) {
+export default function TreeRow({ node, expanded, loading, dirty = false, onToggle, onDoubleClick, onContextMenu }: TreeRowProps) {
   const entry = node.entry
   if (!entry) return null
 
@@ -43,7 +44,7 @@ export default function TreeRow({ node, expanded, loading, onToggle, onDoubleCli
       </td>
       {/* Status */}
       <td className="px-2 py-1.5 text-center">
-        <StatusBadge state={entry.state} />
+        <StatusBadge state={entry.state} dirty={dirty} />
       </td>
       {/* Right size */}
       <td className="border-l border-neutral-800/50 px-2 py-1.5 text-right text-xs text-neutral-400">

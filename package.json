@@ -24,6 +24,7 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "chokidar": "^5.0.0",
     "electron-store": "^11.0.2",
     "node-ssh": "^13.2.1",
     "react": "^19.2.4",

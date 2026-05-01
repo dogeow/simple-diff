@@ -156,6 +156,7 @@ function SideTable({
     setSyncTask,
     extensionFilter,
     setExtensionFilter,
+    dirtyDisplayPaths,
   } = useCompareStore(useShallow((s) => ({
     refreshDir: s.refreshDir,
     leftSource: s.leftSource,
@@ -165,6 +166,7 @@ function SideTable({
     setSyncTask: s.setSyncTask,
     extensionFilter: s.extensionFilter,
     setExtensionFilter: s.setExtensionFilter,
+    dirtyDisplayPaths: s.dirtyDisplayPaths,
   })))
   const [ctxMenu, setCtxMenu] = useState<ContextMenuState | null>(null)
   const [renaming, setRenaming] = useState<string | null>(null)
@@ -318,6 +320,7 @@ function SideTable({
               side={side}
               expanded={nodeInteractions.isExpanded(node)}
               loading={nodeInteractions.isLoading(node)}
+              dirty={dirtyDisplayPaths.has('') || dirtyDisplayPaths.has(node.relativePath)}
               onToggle={() => nodeInteractions.toggleNode(node)}
               onDoubleClick={() => nodeInteractions.openNode(node)}
               onContextMenu={(e) => handleContextMenu(e, node)}
@@ -355,6 +358,7 @@ interface SideRowProps {
   readonly side: Side
   readonly expanded: boolean
   readonly loading: boolean
+  readonly dirty: boolean
   readonly onToggle: () => void
   readonly onDoubleClick: () => void
   readonly onContextMenu: (e: React.MouseEvent) => void
@@ -365,7 +369,7 @@ interface SideRowProps {
   readonly onRenameCancel: () => void
 }
 
-function SideRow({ node, side, expanded, loading, onToggle, onDoubleClick, onContextMenu, renaming, renameValue, onRenameChange, onRenameSubmit, onRenameCancel }: SideRowProps) {
+function SideRow({ node, side, expanded, loading, dirty, onToggle, onDoubleClick, onContextMenu, renaming, renameValue, onRenameChange, onRenameSubmit, onRenameCancel }: SideRowProps) {
   const entry = node.entry
   if (!entry) return null
 
@@ -412,7 +416,7 @@ function SideRow({ node, side, expanded, loading, onToggle, onDoubleClick, onCon
         )}
       </td>
       <td className="px-2 py-1 text-center whitespace-nowrap">
-        {!missingOnSide && <StatusBadge state={entry.state} />}
+        {!missingOnSide && <StatusBadge state={entry.state} dirty={dirty} />}
       </td>
       <td className="px-2 py-1 text-right text-xs text-neutral-400 whitespace-nowrap tabular-nums">
         {missingOnSide ? '' : fileInfo && !entry.isDirectory ? formatSize(fileInfo.size) : '—'}

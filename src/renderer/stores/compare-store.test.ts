@@ -558,6 +558,42 @@ describe('compare-store', () => {
     expect(nestedDir?.state).toBe('pending')
   })
 
+  it('marks dirty paths and clears them after applying partial compare results', () => {
+    useCompareStore.setState({
+      entries: [
+        createCompareEntry('src', {
+          isDirectory: true,
+          state: 'equal',
+          left: createFileEntry('src', { path: 'src', isDirectory: true }),
+          right: createFileEntry('src', { path: 'src', isDirectory: true }),
+        }),
+        createCompareEntry('src/old.txt', { state: 'equal' }),
+        createCompareEntry('docs/readme.md', { state: 'equal' }),
+      ],
+    })
+
+    const store = useCompareStore.getState()
+    store.markDirtyPaths(['src/old.txt'])
+
+    const dirtyState = useCompareStore.getState()
+    expect(dirtyState.dirtyPaths.has('src/old.txt')).toBe(true)
+    expect(dirtyState.dirtyDisplayPaths.has('src')).toBe(true)
+    expect(dirtyState.dirtyDisplayPaths.has('src/old.txt')).toBe(true)
+
+    store.applyPartialCompareResult(['src'], [
+      createCompareEntry('src/new.txt', { state: 'different' }),
+    ])
+
+    const state = useCompareStore.getState()
+    expect(state.dirtyPaths.size).toBe(0)
+    expect(state.dirtyDisplayPaths.size).toBe(0)
+    expect(state.entries.map((entry) => entry.relativePath)).toEqual([
+      'src',
+      'docs/readme.md',
+      'src/new.txt',
+    ])
+  })
+
   it('clears the active compare id when a compare finishes', () => {
     const store = useCompareStore.getState()
     store.startScanning('compare-1')

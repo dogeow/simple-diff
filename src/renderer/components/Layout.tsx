@@ -6,7 +6,7 @@ import CommandPalette from './CommandPalette'
 import ShortcutHelp from './ShortcutHelp'
 import ToastContainer from './ToastContainer'
 import GlobalRunningIndicator from './GlobalRunningIndicator'
-import { CompareIcon, FolderIcon, HistoryIcon, ServerIcon, SettingsIcon, TextIcon } from './Icons'
+import { FolderIcon, HistoryIcon, ServerIcon, SettingsIcon, TextIcon } from './Icons'
 
 interface LayoutProps {
   readonly children: ReactNode
@@ -94,13 +94,7 @@ export default function Layout({ children }: LayoutProps) {
   return (
     <div className="flex h-screen flex-col bg-neutral-900 text-neutral-100">
       <header className="app-drag-region flex h-11 shrink-0 items-center gap-3 border-b border-neutral-800 bg-neutral-850 px-3">
-        <div className="flex items-center gap-2 pl-12 pr-1 text-sm font-semibold text-neutral-200">
-          <span className="flex h-6 w-6 items-center justify-center rounded-md bg-gradient-to-br from-blue-500 to-blue-700 text-white shadow-sm">
-            <CompareIcon width={14} height={14} />
-          </span>
-          <span className="tracking-tight">Simple Diff</span>
-        </div>
-        <nav className="flex items-center gap-0.5">
+        <nav className="flex items-center gap-0.5 pl-12">
           {NAV_ITEMS.map(({ page: itemPage, label, Icon }) => {
             const active = isNavItemActive(itemPage)
             return (
@@ -124,7 +118,7 @@ export default function Layout({ children }: LayoutProps) {
           <button
             onClick={() => setPaletteOpen(true)}
             title="命令面板 (⌘K)"
-            className="inline-flex items-center gap-1.5 rounded-md border border-neutral-700 bg-neutral-800/60 px-2 py-1 text-[11px] text-neutral-400 transition-colors hover:border-neutral-600 hover:bg-neutral-800 hover:text-neutral-200"
+            className="inline-flex h-8 items-center gap-1.5 rounded-md border border-neutral-700 bg-neutral-800/60 px-3 text-[11px] text-neutral-400 transition-colors hover:border-neutral-600 hover:bg-neutral-800 hover:text-neutral-200"
           >
             <span>跳转</span>
             <kbd className="rounded border border-neutral-700 bg-neutral-900 px-1 py-0.5 font-mono text-[10px] text-neutral-400">⌘K</kbd>
@@ -133,7 +127,7 @@ export default function Layout({ children }: LayoutProps) {
             onClick={() => setShortcutsOpen(true)}
             title="快捷键帮助 (?)"
             aria-label="快捷键帮助"
-            className="inline-flex h-6 w-6 items-center justify-center rounded-md border border-neutral-700 bg-neutral-800/60 text-[11px] font-semibold text-neutral-400 transition-colors hover:border-neutral-600 hover:bg-neutral-800 hover:text-neutral-200"
+            className="inline-flex h-8 min-w-8 items-center justify-center rounded-md border border-neutral-700 bg-neutral-800/60 px-2.5 text-[11px] font-semibold text-neutral-400 transition-colors hover:border-neutral-600 hover:bg-neutral-800 hover:text-neutral-200"
           >
             ?
           </button>

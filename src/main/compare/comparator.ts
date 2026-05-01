@@ -45,6 +45,7 @@ export interface ComparatorOptions {
   readonly rightSource: FileSource
   readonly leftRoot: string
   readonly rightRoot: string
+  readonly relativeRoots?: readonly string[]
   readonly compareId?: string
   readonly strategies: readonly StrategyName[]
   readonly extensionFilter?: readonly string[]
@@ -178,12 +179,59 @@ function incrementStats(stats: MutableCompareStats, state: CompareState): void {
   else if (state === 'right_only') stats.rightOnly++
 }
 
+function normalizeRelativeRoot(relativeRoot: string): string {
+  const trimmed = relativeRoot.trim()
+  if (!trimmed || trimmed === '.' || trimmed === '/') {
+    return ''
+  }
+
+  return trimmed.split(/[\\/]+/).filter(Boolean).join('/')
+}
+
+function normalizeRelativeRoots(relativeRoots: readonly string[] | undefined): readonly string[] {
+  if (!relativeRoots || relativeRoots.length === 0) {
+    return ['']
+  }
+
+  const normalized = new Set(relativeRoots.map(normalizeRelativeRoot))
+  if (normalized.has('')) {
+    return ['']
+  }
+
+  const sorted = Array.from(normalized).sort((a, b) => a.length - b.length || a.localeCompare(b))
+  const minimized: string[] = []
+
+  for (const candidate of sorted) {
+    if (minimized.some((root) => candidate === root || candidate.startsWith(`${root}/`))) {
+      continue
+    }
+    minimized.push(candidate)
+  }
+
+  return minimized.length > 0 ? minimized : ['']
+}
+
+function buildInitialPendingDirectoryScans(
+  leftSource: FileSource,
+  rightSource: FileSource,
+  leftRoot: string,
+  rightRoot: string,
+  relativeRoots: readonly string[] | undefined,
+): readonly PendingDirectoryScan[] {
+  return normalizeRelativeRoots(relativeRoots).map((relativeRoot) => ({
+    rel: relativeRoot,
+    leftAbs: joinPath(leftSource, leftRoot, relativeRoot),
+    rightAbs: joinPath(rightSource, rightRoot, relativeRoot),
+  }))
+}
+
 export async function compareDirectories(options: ComparatorOptions): Promise<CompareResult> {
   const {
     leftSource,
     rightSource,
     leftRoot,
     rightRoot,
+    relativeRoots,
     compareId,
     strategies,
     extensionFilter,
@@ -213,9 +261,13 @@ export async function compareDirectories(options: ComparatorOptions): Promise<Co
   let scannedDirCount = 0
   let directorySummaryLogCount = 0
 
-  let currentLevel: readonly PendingDirectoryScan[] = [
-    { rel: '', leftAbs: leftRoot, rightAbs: rightRoot },
-  ]
+  let currentLevel: readonly PendingDirectoryScan[] = buildInitialPendingDirectoryScans(
+    leftSource,
+    rightSource,
+    leftRoot,
+    rightRoot,
+    relativeRoots,
+  )
 
   while (currentLevel.length > 0) {
     const nextLevel: PendingDirectoryScan[] = []

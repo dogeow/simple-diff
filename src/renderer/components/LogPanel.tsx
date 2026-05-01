@@ -1,10 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLogStore } from '../stores/log-store'
-import { useAppStore } from '../stores/app-store'
 import type { LogLevel, LogScope } from '../../../shared/types'
 import { ChevronDownIcon, ChevronRightIcon, TrashIcon } from './Icons'
 
-type LogScopeFilter = 'current' | 'all' | LogScope
+type LogScopeFilter = 'all' | LogScope
 
 function formatTs(ts: number): string {
   const d = new Date(ts)
@@ -31,19 +30,12 @@ const SCOPE_STYLE: Record<LogScope, string> = {
 }
 
 const FILTER_OPTIONS: ReadonlyArray<{ value: LogScopeFilter; label: string }> = [
-  { value: 'current', label: '当前' },
   { value: 'all', label: '全部' },
   { value: 'compare', label: '对比' },
   { value: 'sync', label: '同步' },
   { value: 'ssh', label: 'SSH' },
   { value: 'app', label: '系统' },
 ]
-
-function resolveCurrentScope(page: ReturnType<typeof useAppStore.getState>['page']): LogScope {
-  if (page === 'compare') return 'compare'
-  if (page === 'ssh') return 'ssh'
-  return 'app'
-}
 
 export default function LogPanel() {
   const logs = useLogStore((s) => s.logs)
@@ -52,9 +44,8 @@ export default function LogPanel() {
   const toggleVisible = useLogStore((s) => s.toggleVisible)
   const setHeight = useLogStore((s) => s.setHeight)
   const clear = useLogStore((s) => s.clear)
-  const page = useAppStore((s) => s.page)
   const scrollRef = useRef<HTMLDivElement>(null)
-  const [activeFilter, setActiveFilter] = useState<LogScopeFilter>('current')
+  const [activeFilter, setActiveFilter] = useState<LogScopeFilter>('all')
   const [resizing, setResizing] = useState(false)
 
   const handleResizeStart = useCallback((startEvent: React.MouseEvent) => {
@@ -77,12 +68,10 @@ export default function LogPanel() {
     document.addEventListener('mouseup', handleUp)
   }, [height, setHeight])
 
-  const currentScope = resolveCurrentScope(page)
   const filteredLogs = useMemo(() => {
     if (activeFilter === 'all') return logs
-    const scope = activeFilter === 'current' ? currentScope : activeFilter
-    return logs.filter((entry) => entry.scope === scope)
-  }, [activeFilter, currentScope, logs])
+    return logs.filter((entry) => entry.scope === activeFilter)
+  }, [activeFilter, logs])
 
   // Listen for log events from main process
   useEffect(() => {

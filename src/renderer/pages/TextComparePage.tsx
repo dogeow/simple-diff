@@ -164,6 +164,7 @@ export default function TextComparePage() {
     () => (displayResult && charLevel ? buildInlineSegments(displayResult.leftLines, displayResult.rightLines) : null),
     [charLevel, displayResult],
   )
+  const hasText = leftText.length > 0 || rightText.length > 0
 
   const leftAlignedLines = useMemo(
     () => new Set(manualAlignments.map((alignment) => alignment.leftLineNumber)),
@@ -185,7 +186,7 @@ export default function TextComparePage() {
     if (manualAlignments.length > 0) {
       return `已启用 ${manualAlignments.length} 组手动对齐，按 Cmd/Ctrl+Shift+L 可继续添加`
     }
-    return '手动对齐：将光标放到某行后按 Cmd/Ctrl+Shift+L，再点击另一侧行'
+    return '未启用手动对齐'
   }, [manualAlignRequest, manualAlignments.length])
 
   const startManualAlign = (side: ManualAlignRequest['side'], lineNumber: number | null) => {
@@ -254,13 +255,15 @@ export default function TextComparePage() {
       <div className="flex shrink-0 flex-wrap items-center gap-1.5">
         <button
           onClick={swap}
-          className="inline-flex items-center gap-1.5 rounded-md border border-neutral-700 bg-neutral-800/70 px-3 py-1.5 text-sm text-neutral-200 transition-colors hover:border-neutral-600 hover:bg-neutral-800"
+          disabled={!hasText}
+          className="inline-flex items-center gap-1.5 rounded-md border border-neutral-700 bg-neutral-800/70 px-3 py-1.5 text-sm text-neutral-200 transition-colors hover:border-neutral-600 hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-neutral-700 disabled:hover:bg-neutral-800/70"
         >
           交换 ⇄
         </button>
         <button
           onClick={clear}
-          className="inline-flex items-center gap-1.5 rounded-md border border-neutral-700 bg-neutral-800/70 px-3 py-1.5 text-sm text-neutral-200 transition-colors hover:border-neutral-600 hover:bg-neutral-800"
+          disabled={!hasText}
+          className="inline-flex items-center gap-1.5 rounded-md border border-neutral-700 bg-neutral-800/70 px-3 py-1.5 text-sm text-neutral-200 transition-colors hover:border-neutral-600 hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-neutral-700 disabled:hover:bg-neutral-800/70"
         >
           清空
         </button>

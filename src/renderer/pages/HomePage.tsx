@@ -1,7 +1,8 @@
-import { useEffect } from 'react'
+import { useState } from 'react'
 import SourceSelector from '../components/SourceSelector'
 import FilterModal from '../components/FilterModal'
 import CompareSessionTabs from '../components/CompareSessionTabs'
+import Modal from '../components/Modal'
 import { useShallow } from 'zustand/react/shallow'
 import { useCompareStore } from '../stores/compare-store'
 import { useCompareActions } from '../hooks/useCompare'
@@ -27,6 +28,7 @@ const SYNC_STATUS_TONE: Record<string, string> = {
 }
 
 export default function HomePage() {
+  const [strategyDetailsOpen, setStrategyDetailsOpen] = useState(false)
   const {
     syncTask,
     leftSourceType,
@@ -104,23 +106,6 @@ export default function HomePage() {
   const ctaLabel = compareTabs.length > 0 ? '开始新的对比' : '开始对比'
   const showWelcome = !leftPath && !rightPath && compareTabs.length === 0
 
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      const target = event.target as HTMLElement | null
-      if (target && (target.tagName === 'TEXTAREA' || target.isContentEditable)) {
-        return
-      }
-      if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
-        if (!ctaDisabled) {
-          event.preventDefault()
-          handleCompare()
-        }
-      }
-    }
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [ctaDisabled])
-
   return (
     <div className="flex h-full flex-col">
       <div className="border-b border-neutral-800 bg-neutral-850 px-3 py-2">
@@ -135,11 +120,8 @@ export default function HomePage() {
 
       <div className="flex-1 overflow-auto">
         <div className="mx-auto flex max-w-3xl flex-col gap-5 px-6 pt-8 pb-10">
-          <header className="flex flex-col gap-1.5">
+          <header>
             <h2 className="text-xl font-semibold tracking-tight text-neutral-100">目录对比</h2>
-            <p className="text-xs text-neutral-500">
-              选择左右两侧目录后开始对比；支持本地与 SFTP 远程，可拖拽文件夹至输入框。
-            </p>
           </header>
 
           {showWelcome && (
@@ -161,7 +143,7 @@ export default function HomePage() {
                 </li>
                 <li className="flex items-start gap-2">
                   <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-neutral-800 text-[10px] font-semibold text-neutral-300">3</span>
-                  <span>按 <kbd className="rounded border border-neutral-700 bg-neutral-800 px-1 py-0 font-mono text-[10px] text-neutral-300">⌘ Enter</kbd> 触发</span>
+                  <span>点击开始对比</span>
                 </li>
               </ol>
               <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px] text-neutral-500">
@@ -176,7 +158,6 @@ export default function HomePage() {
           <div className="rounded-lg border border-neutral-800 bg-neutral-900/40 p-4">
             <div className="mb-3 flex items-center gap-2">
               <span className="text-xs font-medium text-neutral-400">数据源</span>
-              <span className="text-[11px] text-neutral-600">本地 ↔ 本地、本地 ↔ SFTP、SFTP ↔ SFTP</span>
               <button
                 onClick={() => {
                   const tmpType = leftSourceType
@@ -221,7 +202,18 @@ export default function HomePage() {
 
           <div className="rounded-lg border border-neutral-800 bg-neutral-900/40 p-4">
             <div className="mb-3 flex items-center justify-between gap-3">
-              <span className="text-xs font-medium text-neutral-400">对比策略</span>
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-medium text-neutral-400">对比策略</span>
+                <button
+                  type="button"
+                  onClick={() => setStrategyDetailsOpen(true)}
+                  aria-label="查看对比策略实现细节"
+                  title="查看对比策略实现细节"
+                  className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-neutral-700 bg-neutral-800/60 text-[11px] font-semibold text-neutral-400 transition-colors hover:border-neutral-600 hover:bg-neutral-800 hover:text-neutral-200"
+                >
+                  ?
+                </button>
+              </div>
               {strategies.length === 0 && (
                 <span className="text-[11px] text-amber-300">至少选择一个策略</span>
               )}
@@ -272,10 +264,6 @@ export default function HomePage() {
               <PlayIcon width={14} height={14} />
               {ctaLabel}
             </button>
-            <span className="text-[11px] text-neutral-500">
-              <kbd className="rounded border border-neutral-700 bg-neutral-800 px-1.5 py-0.5 font-mono text-[10px] text-neutral-400">⌘ Enter</kbd>
-              <span className="ml-1">快速触发</span>
-            </span>
           </div>
 
           {compareTabs.length > 0 && (
@@ -335,6 +323,49 @@ export default function HomePage() {
           )}
         </div>
       </div>
+
+      <Modal
+        open={strategyDetailsOpen}
+        onClose={() => setStrategyDetailsOpen(false)}
+        ariaLabel="对比策略实现细节"
+        maxWidth="max-w-3xl"
+      >
+        <div className="border-b border-neutral-700 px-5 py-4">
+          <div className="text-sm font-semibold text-neutral-100">对比策略实现细节</div>
+          <div className="mt-1 text-xs text-neutral-500">
+            当前实现会按你勾选的顺序执行所有策略，并汇总全部命中原因，不会在首个差异处提前停止。
+          </div>
+        </div>
+        <div className="grid gap-3 px-5 py-4 sm:grid-cols-2">
+          <section className="rounded-lg border border-neutral-800 bg-neutral-900/40 p-3">
+            <div className="text-sm font-medium text-neutral-100">文件大小</div>
+            <div className="mt-1 text-xs leading-5 text-neutral-400">
+              直接比较两侧文件字节数。只要大小不同，就会记录为差异；速度最快，但无法识别同大小不同内容的文件。
+            </div>
+          </section>
+          <section className="rounded-lg border border-neutral-800 bg-neutral-900/40 p-3">
+            <div className="text-sm font-medium text-neutral-100">修改时间</div>
+            <div className="mt-1 text-xs leading-5 text-neutral-400">
+              比较最后修改时间，内部带 2 秒容差，用来兼容不同文件系统或传输链路的时间精度偏差。
+            </div>
+          </section>
+          <section className="rounded-lg border border-neutral-800 bg-neutral-900/40 p-3">
+            <div className="text-sm font-medium text-neutral-100">快速内容签名</div>
+            <div className="mt-1 text-xs leading-5 text-neutral-400">
+              小文件直接取全量范围，大文件只读取首尾各 64 KB 计算签名。只要一侧是 SFTP，会改成顺序读取，避免远程随机读放大延迟。
+            </div>
+          </section>
+          <section className="rounded-lg border border-neutral-800 bg-neutral-900/40 p-3">
+            <div className="text-sm font-medium text-neutral-100">内容哈希</div>
+            <div className="mt-1 text-xs leading-5 text-neutral-400">
+              对整文件计算完整哈希。准确性最高，但本地大文件和远程文件都会有更高读取成本。
+            </div>
+          </section>
+        </div>
+        <div className="border-t border-neutral-700 px-5 py-3 text-xs leading-5 text-neutral-500">
+          历史结果复用只会在路径、目录类型、文件大小和修改时间都一致时跳过重复计算；它是重扫后的缓存复用，不是实时监听。
+        </div>
+      </Modal>
     </div>
   )
 }

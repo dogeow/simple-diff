@@ -30,6 +30,7 @@ const STAT_TONES = {
   leftOnly: 'text-sky-300',
   rightOnly: 'text-violet-300',
   pending: 'text-neutral-500',
+  dirty: 'text-amber-300',
 } as const
 
 const STAT_DOTS = {
@@ -39,6 +40,7 @@ const STAT_DOTS = {
   leftOnly: 'bg-sky-400',
   rightOnly: 'bg-violet-400',
   pending: 'bg-neutral-600',
+  dirty: 'bg-amber-400',
 } as const
 
 interface CompareToolbarProps {
@@ -62,9 +64,11 @@ interface CompareToolbarProps {
   readonly comparePaused: boolean
   readonly compareDone: boolean
   readonly hasComparedResult: boolean
+  readonly dirtyCount: number
   readonly onPauseCompare: () => void | Promise<void>
   readonly onResumeCompare: () => void | Promise<void>
   readonly onRestartCompare: () => void | Promise<void>
+  readonly onRecompareDirtyPaths: () => void | Promise<void>
   readonly hasGlobalSyncTask: boolean
   readonly syncTask: SyncTaskSnapshot | null
   readonly onStartSync: (direction: 'left_to_right' | 'right_to_left') => void
@@ -105,9 +109,11 @@ export default function CompareToolbar({
   comparePaused,
   compareDone,
   hasComparedResult,
+  dirtyCount,
   onPauseCompare,
   onResumeCompare,
   onRestartCompare,
+  onRecompareDirtyPaths,
   hasGlobalSyncTask,
   syncTask,
   onStartSync,
@@ -229,6 +235,7 @@ export default function CompareToolbar({
             <StatChip tone="leftOnly" label="仅左" value={stats.leftOnly} />
             <StatChip tone="rightOnly" label="仅右" value={stats.rightOnly} />
             {pendingCount > 0 && <StatChip tone="pending" label="待比" value={pendingCount} />}
+            {dirtyCount > 0 && <StatChip tone="dirty" label="待重比" value={dirtyCount} />}
           </div>
 
           <div className="flex flex-wrap gap-1">
@@ -341,6 +348,17 @@ export default function CompareToolbar({
           >
             {hasComparedResult ? <RefreshIcon width={10} height={10} /> : <PlayIcon width={10} height={10} />}
             {compareActionLabel}
+          </button>
+        )}
+
+        {dirtyCount > 0 && !compareLoading && (
+          <button
+            onClick={onRecompareDirtyPaths}
+            disabled={strategies.length === 0}
+            className={`${COMPACT_BTN} border border-amber-500/40 bg-amber-500/10 text-amber-300 hover:bg-amber-500/15 disabled:cursor-not-allowed disabled:opacity-50`}
+          >
+            <RefreshIcon width={10} height={10} />
+            重比对脏节点
           </button>
         )}
 

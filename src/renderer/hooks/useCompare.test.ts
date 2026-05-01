@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { CompareSessionSnapshot } from '../stores/compare-store'
 import type { CompareTab } from '../stores/app-store'
-import { createRunningCompareTabSnapshot, resolveReusableCompareId } from './useCompare'
+import { createRunningCompareTabSnapshot, formatCompareErrorForUi, resolveReusableCompareId } from './useCompare'
 
 function createSnapshot(overrides: Partial<CompareSessionSnapshot> = {}): CompareSessionSnapshot {
   return {
@@ -105,5 +105,19 @@ describe('createRunningCompareTabSnapshot', () => {
     })
 
     expect(createRunningCompareTabSnapshot(snapshot)).toEqual(snapshot)
+  })
+})
+
+describe('formatCompareErrorForUi', () => {
+  it('returns a friendly disk-not-mounted message for directory ENOENT errors', () => {
+    expect(
+      formatCompareErrorForUi("[left] 无法列出目录 .: ENOENT: no such file or directory, scandir '/Volumes/未命名2/迅雷下载/书籍'"),
+    ).toBe('左侧目录不可访问：/Volumes/未命名2/迅雷下载/书籍。可能是硬盘未插入、未挂载，或路径已变更。')
+  })
+
+  it('keeps non-ENOENT errors unchanged', () => {
+    expect(formatCompareErrorForUi('[left] 无法列出目录 .: EACCES: permission denied')).toBe(
+      '[left] 无法列出目录 .: EACCES: permission denied',
+    )
   })
 })

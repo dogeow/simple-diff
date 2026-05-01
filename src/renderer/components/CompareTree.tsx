@@ -55,6 +55,7 @@ function CompareTreeTable({
 }: CompareTreeTableProps) {
   const tableRef = useRef<HTMLDivElement>(null)
   const nodeInteractions = useCompareNodeInteractions(onDoubleClickFile)
+  const dirtyDisplayPaths = useCompareStore((state) => state.dirtyDisplayPaths)
   const [ctxMenu, setCtxMenu] = useState<ContextMenuState | null>(null)
   const [scrollTop, setScrollTop] = useState(0)
   const [viewportHeight, setViewportHeight] = useState(0)
@@ -160,6 +161,7 @@ function CompareTreeTable({
                 node={node}
                 expanded={nodeInteractions.isExpanded(node)}
                 loading={nodeInteractions.isLoading(node)}
+                dirty={dirtyDisplayPaths.has('') || dirtyDisplayPaths.has(node.relativePath)}
                 onToggle={() => nodeInteractions.toggleNode(node)}
                 onDoubleClick={() => nodeInteractions.openNode(node)}
                 onContextMenu={(event) => {
@@ -192,7 +194,7 @@ function CompareTreeTable({
 export default function CompareTree({ entries, filter, onFilterChange, onDoubleClickFile, toolbarOnly = false, emptyStateMessage = '无匹配项', onRerunCompare, onExtensionFilterChange }: CompareTreeProps) {
   const clearDiffTabs = useAppStore((s) => s.clearDiffTabs)
   const setActiveDiffTab = useAppStore((s) => s.setActiveDiffTab)
-  const { pauseCompare, resumeCompare, restartCompare } = useCompareActions()
+  const { pauseCompare, resumeCompare, restartCompare, recompareDirtyPaths } = useCompareActions()
   const {
     expandedDirs,
     expandAll,
@@ -215,6 +217,7 @@ export default function CompareTree({ entries, filter, onFilterChange, onDoubleC
     setSyncTask,
     compareDone,
     entrySummary,
+    dirtyCount,
   } = useCompareStore(useShallow((s) => ({
     expandedDirs: s.expandedDirs,
     expandAll: s.expandAll,
@@ -237,6 +240,7 @@ export default function CompareTree({ entries, filter, onFilterChange, onDoubleC
     setSyncTask: s.setSyncTask,
     compareDone: s.done,
     entrySummary: s.entrySummary,
+    dirtyCount: s.dirtyPaths.size,
   })))
 
   const { stats, pendingCount, allDirCount } = entrySummary
@@ -286,6 +290,12 @@ export default function CompareTree({ entries, filter, onFilterChange, onDoubleC
     setActiveDiffTab(null)
     await resumeCompare()
   }, [clearDiffTabs, resumeCompare, setActiveDiffTab])
+
+  const handleRecompareDirtyPaths = useCallback(async () => {
+    clearDiffTabs()
+    setActiveDiffTab(null)
+    await recompareDirtyPaths()
+  }, [clearDiffTabs, recompareDirtyPaths, setActiveDiffTab])
 
   const handleExtensionFilterChange = useCallback(async (nextFilters: readonly string[]) => {
     if (onExtensionFilterChange) {
@@ -347,9 +357,11 @@ export default function CompareTree({ entries, filter, onFilterChange, onDoubleC
         comparePaused={paused}
         compareDone={compareDone}
         hasComparedResult={hasComparedResult}
+        dirtyCount={dirtyCount}
         onPauseCompare={handlePauseCompare}
         onResumeCompare={handleResumeCompare}
         onRestartCompare={handleRestartCompare}
+        onRecompareDirtyPaths={handleRecompareDirtyPaths}
         hasGlobalSyncTask={syncTask !== null}
         syncTask={visibleSyncTask}
         onStartSync={handleStartSync}
