@@ -3,6 +3,8 @@ import type { CompareTab } from '../stores/app-store'
 import { CloseIcon, PlusIcon } from './Icons'
 import FileContextMenu, { type ContextMenuAction } from './FileContextMenu'
 
+const ACTIVE_TAB_ACCENT = 'shadow-[inset_0_2px_0_rgba(245,158,11,0.72)]'
+
 interface CompareSessionTabsProps {
   readonly compareTabs: readonly CompareTab[]
   readonly activeCompareTabId: string | null
@@ -63,9 +65,9 @@ export default function CompareSessionTabs({
     <div className="flex min-w-0 flex-1 items-center gap-1.5">
       <button
         onClick={onSelectNewCompare}
-        className={`inline-flex shrink-0 items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
+        className={`inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md px-3 text-xs font-medium transition-colors ${
           newCompareActive
-            ? 'bg-blue-600 text-white shadow-sm'
+            ? `bg-neutral-800 text-white ${ACTIVE_TAB_ACCENT}`
             : 'border border-neutral-700 bg-neutral-800/60 text-neutral-300 hover:border-neutral-600 hover:bg-neutral-800'
         }`}
       >
@@ -78,7 +80,7 @@ export default function CompareSessionTabs({
           const isActive = !newCompareActive && activeCompareTabId === tab.id
 
           return (
-            <div key={tab.id} className="group flex shrink-0 items-center">
+            <div key={tab.id} className="group flex h-8 shrink-0 items-stretch">
               <button
                 onClick={() => onSelectCompareTab(tab.id)}
                 onContextMenu={(event) => {
@@ -87,15 +89,12 @@ export default function CompareSessionTabs({
                   setMenu({ x: event.clientX, y: event.clientY, tabId: tab.id })
                 }}
                 title={tab.title}
-                className={`relative max-w-56 truncate px-3 py-1 text-xs font-medium transition-colors ${
+                className={`relative inline-flex h-8 max-w-56 items-center truncate px-3 text-xs font-medium transition-colors ${
                   isActive
-                    ? 'bg-neutral-800 text-white'
+                    ? `bg-neutral-800 text-white ${ACTIVE_TAB_ACCENT}`
                     : 'bg-neutral-800/60 text-neutral-400 hover:bg-neutral-800 hover:text-neutral-200'
                 } ${onCloseCompareTab ? 'rounded-l-md' : 'rounded-md'}`}
               >
-                {isActive && (
-                  <span className="absolute inset-x-2 top-0 h-[2px] rounded-b-full bg-blue-500" aria-hidden="true" />
-                )}
                 {tab.title}
               </button>
 
@@ -105,7 +104,7 @@ export default function CompareSessionTabs({
                     event.stopPropagation()
                     onCloseCompareTab(tab.id)
                   }}
-                  className={`inline-flex h-[26px] items-center justify-center rounded-r-md px-1.5 text-xs transition-colors ${
+                  className={`inline-flex h-8 w-8 items-center justify-center rounded-r-md text-xs transition-colors ${
                     isActive
                       ? 'bg-neutral-800 text-neutral-400 hover:bg-neutral-700 hover:text-neutral-100'
                       : 'bg-neutral-800/60 text-neutral-500 hover:bg-neutral-800 hover:text-neutral-200'

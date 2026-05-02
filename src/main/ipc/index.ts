@@ -19,7 +19,7 @@ import { localCompareWatchManager } from '../compare/local-watch-manager'
 
 const compareLogger = logger.child('compare')
 const ENTRY_UPDATE_FLUSH_INTERVAL_MS = 100
-const ENTRY_UPDATE_FLUSH_THRESHOLD = 1000
+const ENTRY_UPDATE_FLUSH_THRESHOLD = 200
 const SCAN_BATCH_LOG_LIMIT = 20
 const SCAN_BATCH_LOG_INTERVAL = 200
 const ENTRY_UPDATE_LOG_LIMIT = 20

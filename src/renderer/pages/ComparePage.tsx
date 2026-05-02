@@ -17,6 +17,11 @@ import { openCompareTab, openDirectoryCompareHome } from '../utils/compare-sessi
 import { useLogStore } from '../stores/log-store'
 import { formatComparePairLabel } from '../utils/source-label'
 import { isFilterAdditionOnly } from '../utils/filter-change'
+import { loadDiffTabContents } from '../utils/diff-tab-loader'
+import { showToast } from '../stores/toast-store'
+import { CloseIcon } from '../components/Icons'
+
+const ACTIVE_TAB_ACCENT = 'shadow-[inset_0_2px_0_rgba(245,158,11,0.68)]'
 
 function createDiffTabSessionId(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -262,9 +267,9 @@ function DiffTabStrip() {
       <div className="flex gap-1 overflow-x-auto">
         <button
           onClick={() => setActiveDiffTab(null)}
-          className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1 text-xs font-medium transition-colors ${
+          className={`inline-flex h-8 items-center gap-1.5 rounded-md px-3 text-xs font-medium transition-colors ${
             activeDiffTabId === null
-              ? 'bg-neutral-700/70 text-white shadow-inner'
+              ? `bg-neutral-700/70 text-white ${ACTIVE_TAB_ACCENT}`
               : 'border border-neutral-700 bg-neutral-800/60 text-neutral-300 hover:border-neutral-600 hover:bg-neutral-800'
           }`}
         >
@@ -274,7 +279,7 @@ function DiffTabStrip() {
           const isActive = activeDiffTabId === tab.id
           const isModified = tab.leftContent !== tab.originalLeftContent || tab.rightContent !== tab.originalRightContent
           return (
-            <div key={tab.id} className="group flex items-center">
+            <div key={tab.id} className="group flex h-8 items-stretch">
               <button
                 onClick={() => setActiveDiffTab(tab.id)}
                 onContextMenu={(event) => {
@@ -282,9 +287,9 @@ function DiffTabStrip() {
                   setMenu({ x: event.clientX, y: event.clientY, tabId: tab.id })
                 }}
                 title={tab.fileName}
-                className={`inline-flex max-w-56 items-center gap-1.5 rounded-l-md px-3 py-1 text-xs font-medium transition-colors ${
+                className={`inline-flex h-8 max-w-56 items-center gap-1.5 rounded-l-md px-3 text-xs font-medium transition-colors ${
                   isActive
-                    ? 'bg-neutral-700/70 text-white'
+                    ? `bg-neutral-700/70 text-white ${ACTIVE_TAB_ACCENT}`
                     : 'border border-r-0 border-neutral-700 bg-neutral-800/60 text-neutral-300 hover:border-neutral-600 hover:bg-neutral-800'
                 }`}
               >
@@ -299,13 +304,13 @@ function DiffTabStrip() {
                   handleCloseTab(tab.id)
                 }}
                 aria-label={`关闭 ${tab.fileName}`}
-                className={`inline-flex h-[26px] w-[22px] items-center justify-center rounded-r-md text-neutral-400 transition-colors ${
+                className={`inline-flex h-8 w-8 items-center justify-center rounded-r-md text-neutral-400 transition-colors ${
                   isActive
                     ? 'bg-neutral-700/70 hover:bg-neutral-700 hover:text-white'
                     : 'border border-l-0 border-neutral-700 bg-neutral-800/60 hover:bg-neutral-800 hover:text-white'
                 }`}
               >
-                <span aria-hidden="true">×</span>
+                <CloseIcon width={11} height={11} />
               </button>
             </div>
           )
@@ -452,6 +457,8 @@ export default function ComparePage() {
         sessionId,
         relativePath: entry.relativePath,
         fileName: entry.name,
+        hasLeftFile: Boolean(entry.left),
+        hasRightFile: Boolean(entry.right),
         leftSource: leftSource ?? null,
         rightSource: rightSource ?? null,
         leftFullPath,
@@ -461,39 +468,41 @@ export default function ComparePage() {
         originalLeftContent: '',
         originalRightContent: '',
         diffResult: null,
+        loadError: null,
         loading: true,
       }
       addDiffTab(newTab)
 
-      // Read file contents
-      let leftContent = ''
-      let rightContent = ''
-
-      if (entry.left && leftSource) {
-        const res = await window.api.readText(leftSource, leftFullPath)
-        if (res.success && res.data != null) leftContent = res.data
-      }
-
-      if (entry.right && rightSource) {
-        const res = await window.api.readText(rightSource, rightFullPath)
-        if (res.success && res.data != null) rightContent = res.data
-      }
-
-      // Compute diff
-      const diffRes = await window.api.textDiff(leftContent, rightContent)
+      const loaded = await loadDiffTabContents({
+        leftSource: leftSource ?? null,
+        rightSource: rightSource ?? null,
+        leftFullPath,
+        rightFullPath,
+        readLeft: Boolean(entry.left && leftSource),
+        readRight: Boolean(entry.right && rightSource),
+      })
 
       if (!useAppStore.getState().hasDiffTabSession(tabId, sessionId)) {
         return
       }
 
       updateDiffTab(tabId, {
-        leftContent,
-        rightContent,
-        originalLeftContent: leftContent,
-        originalRightContent: rightContent,
-        diffResult: diffRes.success ? diffRes.data : null,
+        leftContent: loaded.leftContent,
+        rightContent: loaded.rightContent,
+        originalLeftContent: loaded.leftContent,
+        originalRightContent: loaded.rightContent,
+        diffResult: loaded.diffResult,
+        loadError: loaded.loadError,
         loading: false,
       })
+
+      if (loaded.loadError) {
+        showToast({
+          tone: 'error',
+          message: '文件内容读取失败',
+          description: entry.name,
+        })
+      }
     },
     [leftSource, rightSource, addDiffTab, updateDiffTab],
   )

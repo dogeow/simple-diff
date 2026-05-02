@@ -27,21 +27,17 @@ function now(): number {
   return Date.now()
 }
 
-function buildTaskItemSnapshots(task: PersistedSyncTask): readonly SyncTaskItemSnapshot[] {
-  const allItems = task.allItems ?? task.pendingItems
-
-  return allItems.map((item, index) => ({
-    relativePath: item.relativePath,
-    kind: item.kind,
-    status: index < task.completedItems
-      ? 'completed'
-      : task.status === 'running' && task.currentPath === item.relativePath
-        ? 'running'
-        : 'pending',
-  }))
+function statusForItem(
+  index: number,
+  item: SyncItem,
+  task: Pick<PersistedSyncTask, 'completedItems' | 'status' | 'currentPath'>,
+): SyncTaskItemSnapshot['status'] {
+  if (index < task.completedItems) return 'completed'
+  if (task.status === 'running' && task.currentPath === item.relativePath) return 'running'
+  return 'pending'
 }
 
-function toSnapshot(task: PersistedSyncTask): SyncTaskSnapshot {
+function toSnapshot(task: PersistedSyncTask, items: readonly SyncTaskItemSnapshot[]): SyncTaskSnapshot {
   return {
     id: task.id,
     leftSource: task.leftSource,
@@ -55,7 +51,7 @@ function toSnapshot(task: PersistedSyncTask): SyncTaskSnapshot {
     lastError: task.lastError,
     createdAt: task.createdAt,
     updatedAt: task.updatedAt,
-    items: buildTaskItemSnapshots(task),
+    items,
   }
 }
 
@@ -103,6 +99,15 @@ export class SyncManager {
   private lastTaskPersistAt = 0
   private lastProgressLogAt = 0
 
+  // Cached SyncTaskItemSnapshot[] for the current allItems reference. Mutated in
+  // place across ticks so we don't reallocate N item objects every 250ms.
+  private snapshotItemsCache: SyncTaskItemSnapshot[] | null = null
+  private snapshotItemsAllItemsRef: readonly SyncItem[] | null = null
+  private snapshotItemsLookup: Map<string, number> | null = null
+  private snapshotItemsCompleted = 0
+  private snapshotItemsCurrentPath: string | null = null
+  private snapshotItemsStatus: PersistedSyncTask['status'] | null = null
+
   constructor() {
     if (this.task?.status === 'running') {
       this.task = {
@@ -117,7 +122,102 @@ export class SyncManager {
   }
 
   getSnapshot(): SyncTaskSnapshot | null {
-    return this.task ? toSnapshot(this.task) : null
+    return this.task ? this.snapshot(this.task) : null
+  }
+
+  private snapshot(task: PersistedSyncTask): SyncTaskSnapshot {
+    return toSnapshot(task, this.getCachedItemSnapshots(task))
+  }
+
+  private invalidateItemSnapshotCache(): void {
+    this.snapshotItemsCache = null
+    this.snapshotItemsAllItemsRef = null
+    this.snapshotItemsLookup = null
+  }
+
+  private getCachedItemSnapshots(task: PersistedSyncTask): readonly SyncTaskItemSnapshot[] {
+    const allItems = task.allItems ?? task.pendingItems
+
+    // Full rebuild when the underlying items reference changed (or first call).
+    if (this.snapshotItemsAllItemsRef !== allItems || this.snapshotItemsCache == null) {
+      const lookup = new Map<string, number>()
+      const cache: SyncTaskItemSnapshot[] = new Array(allItems.length)
+      for (let i = 0; i < allItems.length; i += 1) {
+        const item = allItems[i]
+        lookup.set(item.relativePath, i)
+        cache[i] = {
+          relativePath: item.relativePath,
+          kind: item.kind,
+          status: statusForItem(i, item, task),
+        }
+      }
+      this.snapshotItemsCache = cache
+      this.snapshotItemsAllItemsRef = allItems
+      this.snapshotItemsLookup = lookup
+      this.snapshotItemsCompleted = task.completedItems
+      this.snapshotItemsCurrentPath = task.currentPath
+      this.snapshotItemsStatus = task.status
+      return cache
+    }
+
+    const cache = this.snapshotItemsCache
+    const lookup = this.snapshotItemsLookup!
+    // allItems may be shorter than task.completedItems when hydration expands work
+    // beyond the originally-seeded items list (see mergeHydratedTask). Clamp loop
+    // bounds to cache.length so we don't read past it.
+    const cacheLength = cache.length
+    const prevCompletedClamped = Math.min(this.snapshotItemsCompleted, cacheLength)
+    const newCompletedClamped = Math.min(task.completedItems, cacheLength)
+
+    // Newly completed slots → mark 'completed'. Resume rewind → reset to 'pending'.
+    if (newCompletedClamped > prevCompletedClamped) {
+      for (let i = prevCompletedClamped; i < newCompletedClamped; i += 1) {
+        const slot = cache[i]
+        if (slot.status !== 'completed') {
+          cache[i] = { ...slot, status: 'completed' }
+        }
+      }
+    } else if (newCompletedClamped < prevCompletedClamped) {
+      for (let i = newCompletedClamped; i < prevCompletedClamped; i += 1) {
+        const slot = cache[i]
+        if (slot.status !== 'pending') {
+          cache[i] = { ...slot, status: 'pending' }
+        }
+      }
+    }
+
+    const prevCurrent = this.snapshotItemsCurrentPath
+    const newCurrent = task.currentPath
+    const prevRunning = this.snapshotItemsStatus === 'running'
+    const newRunning = task.status === 'running'
+
+    if (prevCurrent !== newCurrent || prevRunning !== newRunning) {
+      // Reset old running slot back to its base status.
+      if (prevCurrent != null && prevRunning) {
+        const idx = lookup.get(prevCurrent)
+        if (idx != null && idx >= newCompletedClamped && idx < cacheLength) {
+          const slot = cache[idx]
+          if (slot.status === 'running') {
+            cache[idx] = { ...slot, status: 'pending' }
+          }
+        }
+      }
+      // Mark new running slot.
+      if (newCurrent != null && newRunning) {
+        const idx = lookup.get(newCurrent)
+        if (idx != null && idx >= newCompletedClamped && idx < cacheLength) {
+          const slot = cache[idx]
+          if (slot.status !== 'running') {
+            cache[idx] = { ...slot, status: 'running' }
+          }
+        }
+      }
+    }
+
+    this.snapshotItemsCompleted = newCompleted
+    this.snapshotItemsCurrentPath = newCurrent
+    this.snapshotItemsStatus = task.status
+    return cache
   }
 
   subscribe(listener: Listener): () => void {
@@ -175,7 +275,7 @@ export class SyncManager {
       this.ensureLoop()
     }
 
-    return toSnapshot(this.task)
+    return this.snapshot(this.task)
   }
 
   private async appendToRunningTask(request: StartSyncRequest): Promise<SyncTaskSnapshot> {
@@ -185,7 +285,7 @@ export class SyncManager {
 
     const seeded = seedSyncQueues(request.entries, request.direction)
     if (seeded.pendingItems.length === 0) {
-      return toSnapshot(this.task)
+      return this.snapshot(this.task)
     }
 
     const incomingTask: PersistedSyncTask = {
@@ -206,24 +306,34 @@ export class SyncManager {
     }
 
     const hydratedIncomingTask = await this.hydrateTaskItems(incomingTask)
-    const remainingItems = this.activeSyncQueue
-      ? this.activeSyncQueue.slice(this.activeSyncIndex)
-      : this.task.pendingItems
-    const existingItemKeys = new Set(remainingItems.map(syncItemKey))
+    // Build the dedup set without copying the active queue tail (was: activeSyncQueue.slice(...).map(syncItemKey)).
+    const existingItemKeys = new Set<string>()
+    if (this.activeSyncQueue) {
+      for (let i = this.activeSyncIndex; i < this.activeSyncQueue.length; i += 1) {
+        existingItemKeys.add(syncItemKey(this.activeSyncQueue[i]))
+      }
+    } else {
+      for (const item of this.task.pendingItems) {
+        existingItemKeys.add(syncItemKey(item))
+      }
+    }
     const appendedItems = hydratedIncomingTask.pendingItems.filter((item) => !existingItemKeys.has(syncItemKey(item)))
 
     if (appendedItems.length === 0) {
-      return toSnapshot(this.task)
+      return this.snapshot(this.task)
     }
 
     if (this.activeSyncQueue) {
       this.activeSyncQueue = [...this.activeSyncQueue, ...appendedItems]
     }
 
+    const remainingItems = this.activeSyncQueue
+      ? this.activeSyncQueue.slice(this.activeSyncIndex)
+      : this.task.pendingItems
     this.task = {
       ...this.task,
       allItems: [...(this.task.allItems ?? remainingItems), ...appendedItems],
-      pendingItems: [...remainingItems, ...appendedItems],
+      pendingItems: remainingItems,
       pendingDirs: [],
       totalItems: this.task.totalItems + appendedItems.length,
       updatedAt: now(),
@@ -231,7 +341,7 @@ export class SyncManager {
     this.commitTaskChange()
     this.ensureLoop()
     syncLogger.info(`追加同步项: ${appendedItems.length} 项`)
-    return toSnapshot(this.task)
+    return this.snapshot(this.task)
   }
 
   async pause(): Promise<SyncTaskSnapshot | null> {
@@ -279,6 +389,7 @@ export class SyncManager {
       throw new Error('同步进行中，无法清除任务')
     }
     this.task = null
+    this.invalidateItemSnapshotCache()
     this.commitTaskChange()
   }
 
@@ -550,7 +661,7 @@ export class SyncManager {
 
     if (!options.notify) return
 
-    const snapshot = this.task ? toSnapshot(this.task) : null
+    const snapshot = this.task ? this.snapshot(this.task) : null
     for (const listener of this.listeners) {
       listener(snapshot)
     }

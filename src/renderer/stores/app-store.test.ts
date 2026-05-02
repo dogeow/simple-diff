@@ -8,6 +8,8 @@ function createDiffTab(overrides: Partial<DiffTab> = {}): DiffTab {
     sessionId: 'session-1',
     relativePath: 'src/file.txt',
     fileName: 'file.txt',
+    hasLeftFile: true,
+    hasRightFile: true,
     leftSource: { type: 'local', path: '/left' },
     rightSource: { type: 'local', path: '/right' },
     leftFullPath: '/left/src/file.txt',
@@ -17,6 +19,7 @@ function createDiffTab(overrides: Partial<DiffTab> = {}): DiffTab {
     originalLeftContent: '',
     originalRightContent: '',
     diffResult: null,
+    loadError: null,
     loading: false,
     ...overrides,
   }

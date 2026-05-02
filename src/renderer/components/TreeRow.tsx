@@ -1,7 +1,8 @@
+import { memo } from 'react'
 import type { TreeNode } from '../utils/tree-utils'
 import TreeEntryCell from './TreeEntryCell'
 import StatusBadge from './StatusBadge'
-import { formatSize, formatTime, rowBg, shouldShowDirectorySpinner } from './tree-row-utils'
+import { formatSize, formatTime, rowBg, SELECTED_ROW_BG, shouldShowDirectorySpinner } from './tree-row-utils'
 import type { MouseEvent } from 'react'
 
 interface TreeRowProps {
@@ -16,7 +17,7 @@ interface TreeRowProps {
   readonly onContextMenu?: (event: MouseEvent<HTMLTableRowElement>) => void
 }
 
-export default function TreeRow({ node, expanded, loading, dirty = false, selected = false, onClick, onToggle, onDoubleClick, onContextMenu }: TreeRowProps) {
+function TreeRowImpl({ node, expanded, loading, dirty = false, selected = false, onClick, onToggle, onDoubleClick, onContextMenu }: TreeRowProps) {
   const entry = node.entry
   if (!entry) return null
 
@@ -24,7 +25,7 @@ export default function TreeRow({ node, expanded, loading, dirty = false, select
 
   return (
     <tr
-      className={`group/row cursor-pointer select-none border-b border-neutral-800/70 transition-colors hover:bg-neutral-800/60 ${selected ? 'bg-blue-500/12 ring-1 ring-inset ring-blue-500/30' : rowBg(entry.state)}`}
+      className={`group/row cursor-pointer select-none border-b border-neutral-800/70 transition-colors hover:bg-neutral-800/60 ${selected ? SELECTED_ROW_BG : rowBg(entry.state)}`}
       onClick={onClick}
       onDoubleClick={onDoubleClick}
       onContextMenu={onContextMenu}
@@ -61,3 +62,16 @@ export default function TreeRow({ node, expanded, loading, dirty = false, select
     </tr>
   )
 }
+
+// Skip re-render when display-relevant props are unchanged. Callbacks close over `node`
+// but only read primitives (relativePath, entry.state) inside, so callback identity drift
+// is harmless as long as node.entry/relativePath match.
+export default memo(TreeRowImpl, (prev, next) => {
+  if (prev.expanded !== next.expanded) return false
+  if (prev.loading !== next.loading) return false
+  if (prev.dirty !== next.dirty) return false
+  if (prev.selected !== next.selected) return false
+  if (prev.node.relativePath !== next.node.relativePath) return false
+  if (prev.node.entry !== next.node.entry) return false
+  return true
+})

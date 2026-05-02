@@ -31,6 +31,7 @@ export class SFTPSource implements FileSource {
   private sftp: SFTPWrapper | null = null
   private readonly onConnectionLost?: () => void
   private readonly opTimeoutMs: number
+  private readonly knownDirs = new Set<string>()
 
   constructor(private readonly ssh: NodeSSH, options: SFTPSourceOptions = {}) {
     this.onConnectionLost = options.onConnectionLost
@@ -212,18 +213,33 @@ export class SFTPSource implements FileSource {
   }
 
   async ensureDir(dirPath: string): Promise<void> {
+    const normalized = posix.normalize(dirPath)
+    if (this.knownDirs.has(normalized)) return
+
     await this.withSftpRetry(`确保目录 ${dirPath}`, async (sftp) => {
-      const normalized = posix.normalize(dirPath)
+      // Fast path: stat the full path once. If it already exists, mark all ancestors known and bail.
+      const fullExists = await new Promise<boolean>((resolve) => {
+        sftp.stat(normalized, (err) => resolve(!err))
+      })
+      if (fullExists) {
+        this.recordKnownAncestors(normalized)
+        return
+      }
+
       const segments = normalized.split('/').filter(Boolean)
       let current = normalized.startsWith('/') ? '/' : ''
 
       for (const segment of segments) {
         current = current === '/' ? `/${segment}` : (current ? `${current}/${segment}` : segment)
+        if (this.knownDirs.has(current)) continue
         // eslint-disable-next-line no-await-in-loop
         const exists = await new Promise<boolean>((resolve) => {
           sftp.stat(current, (err) => resolve(!err))
         })
-        if (exists) continue
+        if (exists) {
+          this.knownDirs.add(current)
+          continue
+        }
         // eslint-disable-next-line no-await-in-loop
         await new Promise<void>((resolve, reject) => {
           sftp.mkdir(current, (err) => {
@@ -232,8 +248,19 @@ export class SFTPSource implements FileSource {
             reject(err)
           })
         })
+        this.knownDirs.add(current)
       }
     })
+  }
+
+  private recordKnownAncestors(fullPath: string): void {
+    let current = fullPath
+    while (current.length > 0 && current !== '/' && !this.knownDirs.has(current)) {
+      this.knownDirs.add(current)
+      const slashIdx = current.lastIndexOf('/')
+      if (slashIdx <= 0) break
+      current = current.slice(0, slashIdx)
+    }
   }
 
   async dispose(): Promise<void> {

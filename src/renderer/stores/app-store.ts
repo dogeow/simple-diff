@@ -10,6 +10,8 @@ export interface DiffTab {
   readonly sessionId: string
   readonly relativePath: string
   readonly fileName: string
+  readonly hasLeftFile: boolean
+  readonly hasRightFile: boolean
   readonly leftSource: SourceConfig | null
   readonly rightSource: SourceConfig | null
   readonly leftFullPath: string
@@ -19,6 +21,7 @@ export interface DiffTab {
   readonly originalLeftContent: string
   readonly originalRightContent: string
   readonly diffResult: TextDiffResult | null
+  readonly loadError: string | null
   readonly loading: boolean
 }
 

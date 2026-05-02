@@ -1,10 +1,10 @@
-import { useState, useCallback, useEffect, useMemo, useRef } from 'react'
+import { memo, useState, useCallback, useEffect, useMemo, useRef } from 'react'
 import { joinSourcePath } from '@shared/source-path'
 import { useShallow } from 'zustand/react/shallow'
 import type { CompareEntry, CompareFilter, SyncDirection } from '../../../shared/types'
 import { truncatePath, type TreeNode } from '../utils/tree-utils'
 import TreeEntryCell from './TreeEntryCell'
-import { formatSize, formatTime, rowBg, shouldShowDirectorySpinner } from './tree-row-utils'
+import { formatSize, formatTime, rowBg, SELECTED_ROW_BG, shouldShowDirectorySpinner } from './tree-row-utils'
 import { useVisibleCompareNodes } from '../hooks/useVisibleCompareNodes'
 import { useCompareNodeInteractions, type CompareNodeInteractions } from '../hooks/useCompareNodeInteractions'
 import { useCompareStore } from '../stores/compare-store'
@@ -400,7 +400,7 @@ interface SideRowProps {
   readonly onRenameCancel: () => void
 }
 
-function SideRow({ node, side, selected, expanded, loading, dirty, onClick, onToggle, onDoubleClick, onContextMenu, renaming, renameValue, onRenameChange, onRenameSubmit, onRenameCancel }: SideRowProps) {
+function SideRowImpl({ node, side, selected, expanded, loading, dirty, onClick, onToggle, onDoubleClick, onContextMenu, renaming, renameValue, onRenameChange, onRenameSubmit, onRenameCancel }: SideRowProps) {
   const entry = node.entry
   if (!entry) return null
 
@@ -410,7 +410,7 @@ function SideRow({ node, side, selected, expanded, loading, dirty, onClick, onTo
 
   return (
     <tr
-      className={`h-10 border-b border-neutral-800 select-none ${selected ? 'bg-blue-500/12 ring-1 ring-inset ring-blue-500/30' : rowBg(entry.state)} ${missingOnSide ? '' : 'cursor-pointer hover:bg-neutral-800/50'}`}
+      className={`h-10 border-b border-neutral-800 select-none ${selected ? SELECTED_ROW_BG : rowBg(entry.state)} ${missingOnSide ? '' : 'cursor-pointer hover:bg-neutral-800/50'}`}
       onClick={missingOnSide ? undefined : onClick}
       onDoubleClick={missingOnSide ? undefined : onDoubleClick}
       onContextMenu={missingOnSide ? undefined : onContextMenu}
@@ -459,6 +459,21 @@ function SideRow({ node, side, selected, expanded, loading, dirty, onClick, onTo
     </tr>
   )
 }
+
+// Skip re-render when display-relevant props are unchanged. Callbacks close over `node`
+// but only read primitives inside, so callback identity drift is harmless.
+const SideRow = memo(SideRowImpl, (prev, next) => {
+  if (prev.side !== next.side) return false
+  if (prev.selected !== next.selected) return false
+  if (prev.expanded !== next.expanded) return false
+  if (prev.loading !== next.loading) return false
+  if (prev.dirty !== next.dirty) return false
+  if (prev.renaming !== next.renaming) return false
+  if (prev.renaming && prev.renameValue !== next.renameValue) return false
+  if (prev.node.relativePath !== next.node.relativePath) return false
+  if (prev.node.entry !== next.node.entry) return false
+  return true
+})
 
 // ─── Main Component ──────────────────────────────────────────
 

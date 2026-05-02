@@ -6,12 +6,14 @@ import type { FileEntry } from '@shared/types'
 import type { FileSource } from './types'
 import { logger } from '../utils/logger'
 
+const LIST_STAT_CONCURRENCY = 24
+
 export class LocalSource implements FileSource {
   readonly type = 'local' as const
 
   async list(dirPath: string): Promise<readonly FileEntry[]> {
     const entries = await readdir(dirPath, { withFileTypes: true })
-    const results = await mapConcurrent(entries, 64, async (entry) => {
+    const results = await mapConcurrent(entries, LIST_STAT_CONCURRENCY, async (entry) => {
       if (entry.isDirectory()) {
         return {
           name: entry.name,
@@ -127,7 +129,7 @@ export class LocalSource implements FileSource {
       return // skip unreadable directories
     }
 
-    const children = await mapConcurrent(entries, 64, async (entry) => {
+    const children = await mapConcurrent(entries, LIST_STAT_CONCURRENCY, async (entry) => {
       const fullPath = join(currentPath, entry.name)
       const relativePath = relative(rootPath, fullPath)
 

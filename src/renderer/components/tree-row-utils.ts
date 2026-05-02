@@ -2,6 +2,8 @@ import type { CompareEntry, CompareState } from '../../../shared/types'
 
 const UNRESOLVED_COMPARE_STATES = new Set<CompareState>(['pending', 'comparing'])
 
+export const SELECTED_ROW_BG = 'bg-neutral-800/85 ring-1 ring-inset ring-amber-500/20 shadow-[inset_2px_0_0_rgba(245,158,11,0.55)]'
+
 function addAncestorPaths(paths: Set<string>, relativePath: string): void {
   const segments = relativePath.split('/')
   for (let index = 1; index < segments.length; index += 1) {

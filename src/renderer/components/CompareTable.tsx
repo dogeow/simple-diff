@@ -1,3 +1,4 @@
+import { useMemo } from 'react'
 import type { CompareEntry, CompareFilter } from '../../../shared/types'
 import StatusBadge from './StatusBadge'
 import { matchesCompareFilter } from '../utils/tree-utils'
@@ -38,7 +39,10 @@ const FILTERS: { value: CompareFilter; label: string }[] = [
 ]
 
 export default function CompareTable({ entries, filter, onFilterChange }: CompareTableProps) {
-  const filtered = entries.filter((entry) => matchesCompareFilter(filter, entry))
+  const filtered = useMemo(
+    () => entries.filter((entry) => matchesCompareFilter(filter, entry)),
+    [entries, filter],
+  )
 
   return (
     <div className="flex flex-col gap-3">

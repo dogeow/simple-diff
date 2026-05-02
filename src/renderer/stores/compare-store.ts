@@ -534,6 +534,25 @@ function upsertEntries(
   return next
 }
 
+// Persistent path→index cache for the hot IPC upsert path. Reused across consecutive
+// setScanEntries / updateEntries calls so we don't rebuild a full Map on every batch.
+// Lazily invalidated: if the caller's `existing` doesn't match the array we last
+// indexed, we rebuild before mutating.
+let cachedIndexEntriesRef: readonly CompareEntry[] | null = null
+let cachedEntryIndex = new Map<string, number>()
+
+function getOrRebuildEntryIndex(entries: readonly CompareEntry[]): Map<string, number> {
+  if (cachedIndexEntriesRef === entries) {
+    return cachedEntryIndex
+  }
+  cachedEntryIndex = new Map()
+  for (let i = 0; i < entries.length; i += 1) {
+    cachedEntryIndex.set(entries[i].relativePath, i)
+  }
+  cachedIndexEntriesRef = entries
+  return cachedEntryIndex
+}
+
 function upsertEntriesWithSummary(
   existing: readonly CompareEntry[],
   incoming: readonly CompareEntry[],
@@ -547,7 +566,7 @@ function upsertEntriesWithSummary(
   }
 
   const next = [...existing]
-  const indexByPath = new Map(existing.map((entry, index) => [entry.relativePath, index]))
+  const indexByPath = getOrRebuildEntryIndex(existing)
   let nextSummary = currentSummary
 
   for (const entry of incoming) {
@@ -565,6 +584,7 @@ function upsertEntriesWithSummary(
     nextSummary = adjustCompareEntrySummary(nextSummary, entry, 1)
   }
 
+  cachedIndexEntriesRef = next
   return {
     entries: next,
     entrySummary: nextSummary,
@@ -697,9 +717,9 @@ function matchChildren(
     const relativePath = parentRelative ? `${parentRelative}/${name}` : name
 
     if (left && !right) {
-      entries.push({ relativePath, name, isDirectory: isDir, state: 'left_only', left: { ...left, path: relativePath }, reasons: [] })
+      entries.push({ relativePath, name, isDirectory: isDir, state: 'left_only', left, reasons: [] })
     } else if (!left && right) {
-      entries.push({ relativePath, name, isDirectory: isDir, state: 'right_only', right: { ...right, path: relativePath }, reasons: [] })
+      entries.push({ relativePath, name, isDirectory: isDir, state: 'right_only', right, reasons: [] })
     } else if (left && right) {
       // Simple size/mtime comparison for files
       if (!isDir) {
@@ -709,8 +729,8 @@ function matchChildren(
         const state = reasons.length > 0 ? 'different' : 'equal'
         entries.push({
           relativePath, name, isDirectory: isDir, state,
-          left: { ...left, path: relativePath },
-          right: { ...right, path: relativePath },
+          left,
+          right,
           reasons: reasons.map((reason) =>
             reason === 'size'
               ? { type: 'size', leftSize: left.size, rightSize: right.size }
@@ -720,8 +740,8 @@ function matchChildren(
       } else {
         entries.push({
           relativePath, name, isDirectory: isDir, state: 'pending',
-          left: { ...left, path: relativePath },
-          right: { ...right, path: relativePath },
+          left,
+          right,
           reasons: [],
         })
       }

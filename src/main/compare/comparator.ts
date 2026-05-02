@@ -98,9 +98,9 @@ function matchLevel(
     }
 
     if (left && !right) {
-      entries.push({ relativePath, name, isDirectory: isDir, state: 'left_only', left: { ...left, path: relativePath }, reasons: [] })
+      entries.push({ relativePath, name, isDirectory: isDir, state: 'left_only', left, reasons: [] })
     } else if (!left && right) {
-      entries.push({ relativePath, name, isDirectory: isDir, state: 'right_only', right: { ...right, path: relativePath }, reasons: [] })
+      entries.push({ relativePath, name, isDirectory: isDir, state: 'right_only', right, reasons: [] })
     } else if (left && right) {
       const reusableEntry = isDir ? undefined : getReusableEntry(relativePath, left, right, reusableEntries)
       if (reusableEntry) {
@@ -110,8 +110,8 @@ function matchLevel(
           name,
           isDirectory: false,
           state: reusableEntry.state,
-          left: { ...left, path: relativePath },
-          right: { ...right, path: relativePath },
+          left,
+          right,
           reasons: reusableEntry.reasons,
         })
         continue
@@ -119,8 +119,8 @@ function matchLevel(
 
       entries.push({
         relativePath, name, isDirectory: isDir, state: 'pending',
-        left: { ...left, path: relativePath },
-        right: { ...right, path: relativePath },
+        left,
+        right,
         reasons: [],
       })
     }

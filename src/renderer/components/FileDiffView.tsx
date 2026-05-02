@@ -8,6 +8,7 @@ import { showToast } from '../stores/toast-store'
 import ScrollGutter, { type GutterMarker } from './ScrollGutter'
 import { applyDiffRange, canApplyLine, groupIntoHunks, type Hunk } from './file-diff-utils'
 import { buildHunkMetrics, getVisibleHunkWindow } from './file-diff-window'
+import { loadDiffTabContents } from '../utils/diff-tab-loader'
 
 interface FileDiffViewProps {
   readonly tab: DiffTab
@@ -222,6 +223,44 @@ export default function FileDiffView({ tab }: FileDiffViewProps) {
     }
   }, [tab, hasDiffTabSession, updateDiffTab])
 
+  const handleReload = useCallback(async () => {
+    updateDiffTab(tab.id, {
+      loading: true,
+      loadError: null,
+    })
+
+    const loaded = await loadDiffTabContents({
+      leftSource: tab.leftSource,
+      rightSource: tab.rightSource,
+      leftFullPath: tab.leftFullPath,
+      rightFullPath: tab.rightFullPath,
+      readLeft: tab.hasLeftFile,
+      readRight: tab.hasRightFile,
+    })
+
+    if (!hasDiffTabSession(tab.id, tab.sessionId)) {
+      return
+    }
+
+    updateDiffTab(tab.id, {
+      leftContent: loaded.leftContent,
+      rightContent: loaded.rightContent,
+      originalLeftContent: loaded.leftContent,
+      originalRightContent: loaded.rightContent,
+      diffResult: loaded.diffResult,
+      loadError: loaded.loadError,
+      loading: false,
+    })
+
+    if (loaded.loadError) {
+      showToast({
+        tone: 'error',
+        message: '文件内容读取失败',
+        description: tab.fileName,
+      })
+    }
+  }, [hasDiffTabSession, tab, updateDiffTab])
+
   if (tab.loading) {
     return (
       <div className="flex h-full items-center justify-center gap-2 text-neutral-400">
@@ -232,6 +271,28 @@ export default function FileDiffView({ tab }: FileDiffViewProps) {
   }
 
   if (!tab.diffResult) {
+    if (tab.loadError) {
+      return (
+        <div className="flex h-full items-center justify-center px-6">
+          <div role="alert" className="w-full max-w-3xl rounded-lg border border-rose-900/60 bg-rose-950/25 p-4 text-rose-200 shadow-sm">
+            <div className="text-sm font-medium">文件内容读取失败</div>
+            <div className="mt-2 whitespace-pre-wrap font-mono text-xs leading-5 text-rose-200/90">{tab.loadError}</div>
+            <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-rose-100/80">
+              <button
+                onClick={() => {
+                  void handleReload()
+                }}
+                className="rounded-md bg-rose-500/15 px-2.5 py-1 font-medium text-rose-100 transition-colors hover:bg-rose-500/25"
+              >
+                重新读取
+              </button>
+              <span className="truncate">{tab.fileName}</span>
+            </div>
+          </div>
+        </div>
+      )
+    }
+
     return (
       <div className="flex h-full items-center justify-center text-neutral-500">
         无法加载文件内容

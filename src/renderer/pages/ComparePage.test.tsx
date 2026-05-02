@@ -139,6 +139,14 @@ function resetStores(compareTabs: readonly CompareTab[] = []): void {
 function installApiMock(overrides: Partial<Window['api']> = {}) {
   const api = {
     onLog: vi.fn(() => () => undefined),
+    readText: vi.fn(async () => ({ success: true, data: 'alpha' })),
+    textDiff: vi.fn(async () => ({
+      success: true,
+      data: {
+        leftLines: [{ type: 'equal', content: 'alpha', lineNumber: 1 }],
+        rightLines: [{ type: 'equal', content: 'alpha', lineNumber: 1 }],
+      },
+    })),
     runCompare: vi.fn(async () => ({
       success: true,
       data: {
@@ -281,6 +289,30 @@ describe('ComparePage renderer interactions', () => {
       expect(useCompareStore.getState().extensionFilter).toContain('path:config')
     })
     expect(api.runCompare).not.toHaveBeenCalled()
+  })
+
+  it('shows a file read error instead of treating a failed side as empty content', async () => {
+    const api = installApiMock({
+      readText: vi.fn(async (source) => {
+        if (source.path === '/var/old-left') {
+          return { success: false, error: 'channel closed' }
+        }
+
+        return { success: true, data: '<?php echo 1;' }
+      }),
+    })
+    resetStores()
+
+    const user = userEvent.setup()
+    render(<ComparePage />)
+
+    await user.dblClick(screen.getAllByText('app.ts')[0])
+
+    await waitFor(() => {
+      expect(screen.getByRole('alert').textContent).toContain('左侧本地文件读取失败')
+      expect(screen.getByRole('alert').textContent).toContain('读取过程已中断或超时')
+    })
+    expect(api.textDiff).not.toHaveBeenCalled()
   })
 
   it('shows exact path filters in the modal without the path prefix', async () => {

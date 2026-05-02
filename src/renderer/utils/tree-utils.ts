@@ -326,35 +326,6 @@ function prefilterEntries(
   return nextEntries ?? entries
 }
 
-function applyEffectiveDirectoryStates(entries: readonly CompareEntry[]): readonly CompareEntry[] {
-  const effectiveDirStates = computeEffectiveDirStates(entries)
-  if (effectiveDirStates.size === 0) {
-    return entries
-  }
-
-  let nextEntries: CompareEntry[] | null = null
-
-  for (let index = 0; index < entries.length; index += 1) {
-    const entry = entries[index]
-    const effective = entry.isDirectory ? effectiveDirStates.get(entry.relativePath) : undefined
-
-    if (!effective || effective === entry.state) {
-      if (nextEntries) {
-        nextEntries.push(entry)
-      }
-      continue
-    }
-
-    if (!nextEntries) {
-      nextEntries = entries.slice(0, index)
-    }
-
-    nextEntries.push({ ...entry, state: effective })
-  }
-
-  return nextEntries ?? entries
-}
-
 export function matchesCompareFilter(targetFilter: CompareFilter, entry: CompareEntry): boolean {
   if (targetFilter === 'all') return true
   if (targetFilter === 'paired') {
@@ -369,51 +340,122 @@ export function matchesCompareFilter(targetFilter: CompareFilter, entry: Compare
   return entry.state === targetFilter
 }
 
-function hasUnresolvedAncestor(
-  relativePath: string,
-  unresolvedDirs: ReadonlySet<string>,
+function matchesFilterWithState(
+  targetFilter: CompareFilter,
+  entry: CompareEntry,
+  effectiveState: CompareState,
 ): boolean {
-  const parts = relativePath.split('/')
-  for (let i = 1; i < parts.length; i++) {
-    if (unresolvedDirs.has(parts.slice(0, i).join('/'))) return true
+  if (targetFilter === 'all') return true
+  if (targetFilter === 'paired') {
+    return Boolean(entry.left && entry.right)
+  }
+  if (targetFilter === 'different') {
+    return effectiveState === 'different' || effectiveState === 'left_only' || effectiveState === 'right_only'
+  }
+  if (targetFilter === 'unresolved') {
+    return effectiveState === 'pending' || effectiveState === 'comparing'
+  }
+  return effectiveState === targetFilter
+}
+
+function hasAncestorIn(relativePath: string, set: ReadonlySet<string>): boolean {
+  let current = relativePath
+  let slashIdx = current.lastIndexOf('/')
+  while (slashIdx > 0) {
+    current = current.slice(0, slashIdx)
+    if (set.has(current)) return true
+    slashIdx = current.lastIndexOf('/')
   }
   return false
 }
 
-function filterEntriesByState(
+function addAncestorPaths(relativePath: string, set: Set<string>): void {
+  let current = relativePath
+  let slashIdx = current.lastIndexOf('/')
+  while (slashIdx > 0) {
+    current = current.slice(0, slashIdx)
+    set.add(current)
+    slashIdx = current.lastIndexOf('/')
+  }
+}
+
+/**
+ * Single combined pass that applies effective directory states and filters by state.
+ * Replaces three sequential passes (effective override, neededDirs collection, filter)
+ * with at most two passes — the second only when a state filter is active.
+ */
+function applyEffectiveAndFilter(
   entries: readonly CompareEntry[],
   targetFilter: CompareFilter,
 ): readonly CompareEntry[] {
-  if (targetFilter === 'all') return entries
+  const effectiveDirStates = computeEffectiveDirStates(entries)
+
+  if (targetFilter === 'all') {
+    if (effectiveDirStates.size === 0) return entries
+    let nextEntries: CompareEntry[] | null = null
+    for (let i = 0; i < entries.length; i += 1) {
+      const entry = entries[i]
+      const effective = entry.isDirectory ? effectiveDirStates.get(entry.relativePath) : undefined
+      if (!effective || effective === entry.state) {
+        if (nextEntries) nextEntries.push(entry)
+        continue
+      }
+      if (!nextEntries) nextEntries = entries.slice(0, i)
+      nextEntries.push({ ...entry, state: effective })
+    }
+    return nextEntries ?? entries
+  }
 
   if (targetFilter === 'equal') {
     const unresolvedDirs = new Set<string>()
     for (const entry of entries) {
-      if (entry.isDirectory && entry.state !== 'equal') {
-        unresolvedDirs.add(entry.relativePath)
+      if (!entry.isDirectory) continue
+      const effective = effectiveDirStates.get(entry.relativePath) ?? entry.state
+      if (effective !== 'equal') unresolvedDirs.add(entry.relativePath)
+    }
+    const result: CompareEntry[] = []
+    for (const entry of entries) {
+      const effective = entry.isDirectory
+        ? effectiveDirStates.get(entry.relativePath) ?? entry.state
+        : entry.state
+      if (effective !== 'equal') continue
+      if (hasAncestorIn(entry.relativePath, unresolvedDirs)) continue
+      if (entry.isDirectory && effective !== entry.state) {
+        result.push({ ...entry, state: effective })
+      } else {
+        result.push(entry)
       }
     }
-    return entries.filter((entry) => {
-      if (entry.state !== 'equal') return false
-      return !hasUnresolvedAncestor(entry.relativePath, unresolvedDirs)
-    })
+    return result
   }
 
+  // Other filters: dirs are kept iff a matching descendant exists or the dir itself matches.
   const neededDirs = new Set<string>()
   for (const entry of entries) {
-    if (!matchesCompareFilter(targetFilter, entry)) continue
-
-    const parts = entry.relativePath.split('/')
-    for (let i = 1; i < parts.length; i++) {
-      neededDirs.add(parts.slice(0, i).join('/'))
-    }
+    const effective = entry.isDirectory
+      ? effectiveDirStates.get(entry.relativePath) ?? entry.state
+      : entry.state
+    if (!matchesFilterWithState(targetFilter, entry, effective)) continue
+    addAncestorPaths(entry.relativePath, neededDirs)
     if (entry.isDirectory) neededDirs.add(entry.relativePath)
   }
 
-  return entries.filter((entry) => {
-    if (entry.isDirectory) return neededDirs.has(entry.relativePath)
-    return matchesCompareFilter(targetFilter, entry)
-  })
+  const result: CompareEntry[] = []
+  for (const entry of entries) {
+    if (entry.isDirectory) {
+      if (!neededDirs.has(entry.relativePath)) continue
+      const effective = effectiveDirStates.get(entry.relativePath)
+      if (effective && effective !== entry.state) {
+        result.push({ ...entry, state: effective })
+      } else {
+        result.push(entry)
+      }
+    } else {
+      if (!matchesFilterWithState(targetFilter, entry, entry.state)) continue
+      result.push(entry)
+    }
+  }
+  return result
 }
 
 export interface PrepareCompareEntriesOptions {
@@ -430,15 +472,14 @@ export function prepareCompareEntries(
 ): readonly CompareEntry[] {
   const { filter, pathFilter, hideDot, hideDotFilter, side } = options
 
-  let result = prefilterEntries(entries, {
+  const prefiltered = prefilterEntries(entries, {
     pathFilter,
     hideDot,
     hideDotFilter,
     side,
   })
 
-  result = applyEffectiveDirectoryStates(result)
-  return filterEntriesByState(result, filter)
+  return applyEffectiveAndFilter(prefiltered, filter)
 }
 
 const DIR_STATE_PRIORITY: CompareState[] = ['different', 'comparing', 'pending', 'equal']
@@ -454,16 +495,17 @@ export function computeEffectiveDirStates(entries: readonly CompareEntry[]): Rea
   for (const entry of entries) {
     entryByPath.set(entry.relativePath, entry)
 
-    const parts = entry.relativePath.split('/')
-    let ancestorPath = ''
-    for (let i = 0; i < parts.length - 1; i++) {
-      ancestorPath = ancestorPath ? `${ancestorPath}/${parts[i]}` : parts[i]
+    let ancestorPath = entry.relativePath
+    let slashIdx = ancestorPath.lastIndexOf('/')
+    while (slashIdx > 0) {
+      ancestorPath = ancestorPath.slice(0, slashIdx)
       let stateSet = dirStates.get(ancestorPath)
       if (!stateSet) {
         stateSet = new Set()
         dirStates.set(ancestorPath, stateSet)
       }
       stateSet.add(entry.state)
+      slashIdx = ancestorPath.lastIndexOf('/')
     }
   }
 
