@@ -3,10 +3,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import type { CompareEntry, FileEntry, SourceConfig } from '../../../shared/types'
+import type { CompareEntry, FileEntry, SourceConfig, SyncTaskSnapshot } from '../../../shared/types'
 import Layout from '../components/Layout'
 import ComparePage from './ComparePage'
-import { useAppStore, type CompareTab } from '../stores/app-store'
+import { useAppStore, type CompareTab, type DiffTab } from '../stores/app-store'
 import { useCompareStore, type CompareSessionSnapshot } from '../stores/compare-store'
 import { useLogStore } from '../stores/log-store'
 import { useSettingsStore } from '../stores/settings-store'
@@ -55,6 +55,60 @@ function createCompareDirectory(relativePath: string, state: CompareEntry['state
     left: createDirectoryEntry(name, `/left/${relativePath}`),
     right: createDirectoryEntry(name, `/right/${relativePath}`),
     reasons: [],
+  }
+}
+
+function createLeftOnlyDirectory(relativePath: string): CompareEntry {
+  const name = relativePath.split('/').at(-1) ?? relativePath
+
+  return {
+    relativePath,
+    name,
+    isDirectory: true,
+    state: 'left_only',
+    left: createDirectoryEntry(name, `/left/${relativePath}`),
+    reasons: [],
+  }
+}
+
+function createSyncTask(overrides: Partial<SyncTaskSnapshot> = {}): SyncTaskSnapshot {
+  return {
+    id: 'sync-task-1',
+    leftSource,
+    rightSource,
+    direction: 'left_to_right',
+    status: 'running',
+    totalItems: 10,
+    completedItems: 3,
+    currentPath: 'config',
+    lastCompletedPath: null,
+    lastError: null,
+    createdAt: 1,
+    updatedAt: 2,
+    ...overrides,
+  }
+}
+
+function createDiffTab(overrides: Partial<DiffTab> = {}): DiffTab {
+  return {
+    id: 'diff-tab-1',
+    sessionId: 'compare-tab-1',
+    relativePath: 'src/app.ts',
+    fileName: 'app.ts',
+    hasLeftFile: true,
+    hasRightFile: true,
+    leftSource,
+    rightSource,
+    leftFullPath: '/left/src/app.ts',
+    rightFullPath: '/right/src/app.ts',
+    leftContent: 'alpha',
+    rightContent: 'alpha',
+    originalLeftContent: 'alpha',
+    originalRightContent: 'alpha',
+    diffResult: null,
+    loadError: null,
+    loading: false,
+    ...overrides,
   }
 }
 
@@ -216,6 +270,34 @@ describe('ComparePage renderer interactions', () => {
     expect(useLogStore.getState().visible).toBe(true)
   })
 
+  it('styles the active compare tab like other blue buttons', () => {
+    resetStores([
+      {
+        id: 'compare-tab-1',
+        title: '当前对比',
+        snapshot: createSnapshot(),
+        diffTabs: [],
+        activeDiffTabId: null,
+      },
+    ])
+
+    render(<ComparePage />)
+
+    expect(screen.getByRole('button', { name: '当前对比' }).className).toContain('bg-blue-600')
+  })
+
+  it('styles the active directory diff tab like other blue buttons', () => {
+    resetStores()
+    useAppStore.setState({
+      diffTabs: [createDiffTab()],
+      activeDiffTabId: null,
+    })
+
+    render(<ComparePage />)
+
+    expect(screen.getByRole('button', { name: '目录树' }).className).toContain('bg-blue-600')
+  })
+
   it('shows 首次对比 after submitting a new source path with Enter', async () => {
     resetStores([
       {
@@ -232,9 +314,8 @@ describe('ComparePage renderer interactions', () => {
 
     expect(screen.getByRole('button', { name: '重启对比' })).toBeTruthy()
 
-    await user.click(screen.getByTitle('/var/old-left'))
-
-    const input = screen.getByDisplayValue('/var/old-left')
+  const input = screen.getByDisplayValue('/var/old-left') as HTMLInputElement
+  expect(input.className).not.toContain('focus:border-blue-500')
     await user.clear(input)
     await user.type(input, '/var/new-left{enter}')
 
@@ -245,6 +326,28 @@ describe('ComparePage renderer interactions', () => {
     expect(useCompareStore.getState().leftPath).toBe('/var/new-left')
     expect(useCompareStore.getState().done).toBe(false)
     expect(useCompareStore.getState().entries).toEqual([])
+  })
+
+  it('hides zero filter badges before compare starts', () => {
+    resetStores()
+    useCompareStore.setState({
+      entries: [],
+      done: false,
+      scanning: false,
+      comparing: false,
+      duration: 0,
+      entrySummary: {
+        stats: { total: 0, equal: 0, different: 0, leftOnly: 0, rightOnly: 0 },
+        pendingCount: 0,
+        allDirCount: 0,
+      },
+    })
+
+    render(<ComparePage />)
+
+    expect(screen.getByRole('button', { name: '全部' }).textContent?.replace(/\s+/g, '')).toBe('全部')
+    expect(screen.getByRole('button', { name: '双方' }).textContent?.replace(/\s+/g, '')).toBe('双方')
+    expect(screen.getByRole('button', { name: '不同' }).textContent?.replace(/\s+/g, '')).toBe('不同')
   })
 
   it('hides ignored exact-path entries from both split panes immediately', () => {
@@ -324,7 +427,9 @@ describe('ComparePage renderer interactions', () => {
 
     await user.click(screen.getByRole('button', { name: '过滤 (2)' }))
 
-    expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).toBe('bootstrap\nnode_modules')
+    const modalInput = screen.getAllByRole('textbox').find((element): element is HTMLTextAreaElement => element.tagName === 'TEXTAREA')
+
+    expect(modalInput?.value).toBe('bootstrap\nnode_modules')
   })
 
   it('shows file and directory names in ignore context menus', async () => {
@@ -344,6 +449,61 @@ describe('ComparePage renderer interactions', () => {
 
     fireEvent.contextMenu(screen.getByText('app.php').closest('tr')!)
     expect(await screen.findByRole('button', { name: '忽略文件：『app.php』' })).toBeTruthy()
+  })
+
+  it('disables selection copy actions until compare is finished but keeps the context action visible', async () => {
+    const api = installApiMock()
+    resetStores()
+    useCompareStore.setState({
+      done: false,
+      comparing: true,
+      entries: [createLeftOnlyDirectory('config')],
+    })
+
+    render(<ComparePage />)
+
+    fireEvent.click(screen.getByText('config').closest('tr')!)
+
+    const selectionCopyButton = screen.getByRole('button', { name: '复制所选到右边' }) as HTMLButtonElement
+    expect(selectionCopyButton.disabled).toBe(true)
+
+    fireEvent.contextMenu(screen.getByText('config').closest('tr')!)
+
+    const contextCopyButton = await screen.findByRole('button', { name: '复制到右边' }) as HTMLButtonElement
+    expect(contextCopyButton.disabled).toBe(true)
+
+    fireEvent.click(selectionCopyButton)
+    fireEvent.click(contextCopyButton)
+
+    expect(api.startSync).not.toHaveBeenCalled()
+  })
+
+  it('allows selection copy again after a completed sync task', async () => {
+    const api = installApiMock()
+    resetStores()
+    useCompareStore.setState({
+      entries: [createLeftOnlyDirectory('config')],
+      syncTask: createSyncTask({ status: 'completed' }),
+    })
+
+    const user = userEvent.setup()
+    render(<ComparePage />)
+
+    const configRow = screen.getAllByText('config')
+      .map((element) => element.closest('tr'))
+      .find((row): row is HTMLTableRowElement => row != null)
+
+    expect(configRow).toBeTruthy()
+    await user.click(configRow!)
+
+    const selectionCopyButton = screen.getByRole('button', { name: '复制所选到右边' }) as HTMLButtonElement
+    expect(selectionCopyButton.disabled).toBe(false)
+
+    await user.click(selectionCopyButton)
+
+    await waitFor(() => {
+      expect(api.startSync).toHaveBeenCalledTimes(1)
+    })
   })
 
   it('combines scanning and comparing into one header status and exposes the paired filter', () => {

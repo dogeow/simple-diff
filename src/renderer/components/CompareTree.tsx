@@ -40,12 +40,15 @@ function canQueueSyncDirection(
   rightSource: ReturnType<typeof useCompareStore.getState>['rightSource'],
   direction: SyncDirection,
 ): boolean {
-  if (!syncTask || !leftSource || !rightSource) {
+  if (!leftSource || !rightSource) {
+    return false
+  }
+
+  if (!syncTask || syncTask.status !== 'running') {
     return true
   }
 
-  return syncTask.status === 'running'
-    && syncTask.direction === direction
+  return syncTask.direction === direction
     && isSameSourceConfig(syncTask.leftSource, leftSource)
     && isSameSourceConfig(syncTask.rightSource, rightSource)
 }
@@ -210,21 +213,27 @@ function CompareTreeTable({
     const leftSyncEntries = collectSyncEntriesForSelection(entries, effectiveSelectedPaths, 'left_to_right')
     const rightSyncEntries = collectSyncEntriesForSelection(entries, effectiveSelectedPaths, 'right_to_left')
     const selectedSuffix = effectiveSelectedPaths.size > 1 ? ` (${effectiveSelectedPaths.size})` : ''
+    const canCopyToRight = compareDone && canQueueSyncDirection(syncTask, leftSource, rightSource, 'left_to_right')
+    const canCopyToLeft = compareDone && canQueueSyncDirection(syncTask, leftSource, rightSource, 'right_to_left')
     const actions: ContextMenuAction[] = []
 
-    if (compareDone && leftSyncEntries.length > 0 && canQueueSyncDirection(syncTask, leftSource, rightSource, 'left_to_right')) {
+    if (leftSyncEntries.length > 0) {
       actions.push({
         label: effectiveSelectedPaths.size > 1 ? `复制所选到右边${selectedSuffix}` : '复制到右边',
+        disabled: !canCopyToRight,
         onClick: () => {
+          if (!canCopyToRight) return
           void handleCopySelection(effectiveSelectedPaths, 'left_to_right')
         },
       })
     }
 
-    if (compareDone && rightSyncEntries.length > 0 && canQueueSyncDirection(syncTask, leftSource, rightSource, 'right_to_left')) {
+    if (rightSyncEntries.length > 0) {
       actions.push({
         label: effectiveSelectedPaths.size > 1 ? `复制所选到左边${selectedSuffix}` : '复制到左边',
+        disabled: !canCopyToLeft,
         onClick: () => {
+          if (!canCopyToLeft) return
           void handleCopySelection(effectiveSelectedPaths, 'right_to_left')
         },
       })
@@ -250,7 +259,7 @@ function CompareTreeTable({
               onClick={() => {
                 void handleCopySelection(selection.selectedPaths, 'left_to_right')
               }}
-              disabled={leftSelectionEntries.length === 0 || !canQueueSyncDirection(syncTask, leftSource, rightSource, 'left_to_right')}
+              disabled={!compareDone || leftSelectionEntries.length === 0 || !canQueueSyncDirection(syncTask, leftSource, rightSource, 'left_to_right')}
               className="inline-flex items-center rounded-md bg-emerald-600 px-2.5 py-1 text-xs font-medium text-white transition-colors hover:bg-emerald-500 disabled:cursor-not-allowed disabled:bg-neutral-700 disabled:text-neutral-500"
             >
               复制所选到右边
@@ -259,7 +268,7 @@ function CompareTreeTable({
               onClick={() => {
                 void handleCopySelection(selection.selectedPaths, 'right_to_left')
               }}
-              disabled={rightSelectionEntries.length === 0 || !canQueueSyncDirection(syncTask, leftSource, rightSource, 'right_to_left')}
+              disabled={!compareDone || rightSelectionEntries.length === 0 || !canQueueSyncDirection(syncTask, leftSource, rightSource, 'right_to_left')}
               className="inline-flex items-center rounded-md bg-cyan-600 px-2.5 py-1 text-xs font-medium text-white transition-colors hover:bg-cyan-500 disabled:cursor-not-allowed disabled:bg-neutral-700 disabled:text-neutral-500"
             >
               复制所选到左边

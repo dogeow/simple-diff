@@ -3,7 +3,8 @@ import type { CompareTab } from '../stores/app-store'
 import { CloseIcon, PlusIcon } from './Icons'
 import FileContextMenu, { type ContextMenuAction } from './FileContextMenu'
 
-const ACTIVE_TAB_ACCENT = 'shadow-[inset_0_2px_0_rgba(245,158,11,0.72)]'
+const ACTIVE_TAB_BUTTON = 'bg-blue-600 text-white hover:bg-blue-500'
+const ACTIVE_TAB_CLOSE = 'bg-blue-600 text-blue-100 hover:bg-blue-500 hover:text-white'
 
 interface CompareSessionTabsProps {
   readonly compareTabs: readonly CompareTab[]
@@ -67,7 +68,7 @@ export default function CompareSessionTabs({
         onClick={onSelectNewCompare}
         className={`inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md px-3 text-xs font-medium transition-colors ${
           newCompareActive
-            ? `bg-neutral-800 text-white ${ACTIVE_TAB_ACCENT}`
+            ? ACTIVE_TAB_BUTTON
             : 'border border-neutral-700 bg-neutral-800/60 text-neutral-300 hover:border-neutral-600 hover:bg-neutral-800'
         }`}
       >
@@ -91,7 +92,7 @@ export default function CompareSessionTabs({
                 title={tab.title}
                 className={`relative inline-flex h-8 max-w-56 items-center truncate px-3 text-xs font-medium transition-colors ${
                   isActive
-                    ? `bg-neutral-800 text-white ${ACTIVE_TAB_ACCENT}`
+                    ? ACTIVE_TAB_BUTTON
                     : 'bg-neutral-800/60 text-neutral-400 hover:bg-neutral-800 hover:text-neutral-200'
                 } ${onCloseCompareTab ? 'rounded-l-md' : 'rounded-md'}`}
               >
@@ -106,7 +107,7 @@ export default function CompareSessionTabs({
                   }}
                   className={`inline-flex h-8 w-8 items-center justify-center rounded-r-md text-xs transition-colors ${
                     isActive
-                      ? 'bg-neutral-800 text-neutral-400 hover:bg-neutral-700 hover:text-neutral-100'
+                      ? ACTIVE_TAB_CLOSE
                       : 'bg-neutral-800/60 text-neutral-500 hover:bg-neutral-800 hover:text-neutral-200'
                   }`}
                   aria-label={`关闭 ${tab.title}`}

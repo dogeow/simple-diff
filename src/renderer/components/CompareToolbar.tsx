@@ -160,7 +160,7 @@ export default function CompareToolbar({
               {f.label}
               {(() => {
                 const value = getFilterStatValue(f.statKey, stats, pendingCount)
-                if (value == null || (f.statKey === 'pending' && value === 0)) return null
+                if (value == null || (value === 0 && (!hasComparedResult || f.statKey === 'pending'))) return null
                 return (
                   <>
                     {' '}

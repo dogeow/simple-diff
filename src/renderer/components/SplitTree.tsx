@@ -2,7 +2,7 @@ import { memo, useState, useCallback, useEffect, useMemo, useRef } from 'react'
 import { joinSourcePath } from '@shared/source-path'
 import { useShallow } from 'zustand/react/shallow'
 import type { CompareEntry, CompareFilter, SyncDirection } from '../../../shared/types'
-import { truncatePath, type TreeNode } from '../utils/tree-utils'
+import { type TreeNode } from '../utils/tree-utils'
 import TreeEntryCell from './TreeEntryCell'
 import { formatSize, formatTime, rowBg, SELECTED_ROW_BG, shouldShowDirectorySpinner } from './tree-row-utils'
 import { useVisibleCompareNodes } from '../hooks/useVisibleCompareNodes'
@@ -37,12 +37,15 @@ function canQueueSyncDirection(
   rightSource: ReturnType<typeof useCompareStore.getState>['rightSource'],
   direction: SyncDirection,
 ): boolean {
-  if (!syncTask || !leftSource || !rightSource) {
+  if (!leftSource || !rightSource) {
+    return false
+  }
+
+  if (!syncTask || syncTask.status !== 'running') {
     return true
   }
 
-  return syncTask.status === 'running'
-    && syncTask.direction === direction
+  return syncTask.direction === direction
     && isSameSourceConfig(syncTask.leftSource, leftSource)
     && isSameSourceConfig(syncTask.rightSource, rightSource)
 }
@@ -62,7 +65,6 @@ function PathHeader({
     loadConfigs: state.loadConfigs,
   })))
   const sourcePath = useCompareStore((s) => side === 'left' ? s.leftPath : s.rightPath)
-  const [editingPath, setEditingPath] = useState(false)
   const [pathInput, setPathInput] = useState(sourcePath)
 
   useEffect(() => {
@@ -71,17 +73,20 @@ function PathHeader({
     }
   }, [configs.length, loadConfigs, source])
 
-  const handlePathEdit = useCallback(() => {
+  useEffect(() => {
     setPathInput(sourcePath)
-    setEditingPath(true)
   }, [sourcePath])
 
   const handlePathSubmit = useCallback(() => {
     const trimmed = pathInput.trim()
-    if (trimmed && trimmed !== sourcePath) {
+    if (!trimmed) {
+      setPathInput(sourcePath)
+      return
+    }
+
+    if (trimmed !== sourcePath) {
       void onSourcePathSubmit?.(side, trimmed)
     }
-    setEditingPath(false)
   }, [onSourcePathSubmit, pathInput, sourcePath, side])
 
   const sideBadgeClass = side === 'left'
@@ -90,15 +95,13 @@ function PathHeader({
   const sourceTag = source ? formatSourceTag(source, configs) : side === 'left' ? '左侧' : '右侧'
 
   return (
-    <div className="flex flex-1 flex-col overflow-hidden">
-      <div className="border-b border-neutral-800 bg-neutral-850 px-2 py-1.5">
-        <div className="flex items-center gap-1.5">
+    <div className="flex flex-1 overflow-hidden">
+      <div className="flex min-w-0 flex-1 border-b border-neutral-800 bg-neutral-850 px-2 py-1.5">
+        <div className="flex w-full min-w-0 items-center gap-2 overflow-hidden">
           <span className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase ${sideBadgeClass}`}>
             {side === 'left' ? 'L' : 'R'}
           </span>
-          <span className="truncate text-[11px] text-neutral-500">{sourceTag}</span>
-        </div>
-        {editingPath ? (
+          <span className="max-w-[10rem] shrink-0 truncate text-[11px] text-neutral-500">{sourceTag}</span>
           <input
             type="text"
             value={pathInput}
@@ -106,20 +109,15 @@ function PathHeader({
             onBlur={handlePathSubmit}
             onKeyDown={(e) => {
               if (e.key === 'Enter') handlePathSubmit()
-              if (e.key === 'Escape') setEditingPath(false)
+              if (e.key === 'Escape') {
+                setPathInput(sourcePath)
+                e.currentTarget.blur()
+              }
             }}
-            autoFocus
-            className="mt-1 w-full rounded-md border border-neutral-600 bg-neutral-900 px-1.5 py-0.5 font-mono text-xs text-neutral-200 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500/30"
+            className="min-w-0 flex-1 rounded-md border border-neutral-700 bg-neutral-900/80 px-2 py-1 font-mono text-xs text-neutral-200 outline-none transition-colors placeholder:text-neutral-600 focus:border-neutral-600"
+            spellCheck={false}
           />
-        ) : (
-          <button
-            onClick={handlePathEdit}
-            className="mt-1 block w-full truncate rounded text-left font-mono text-xs text-neutral-300 transition-colors hover:text-neutral-100"
-            title={sourcePath}
-          >
-            {truncatePath(sourcePath, 88) || '—'}
-          </button>
-        )}
+        </div>
       </div>
     </div>
   )
@@ -257,10 +255,13 @@ function SideTable({
       : side === 'left'
         ? '复制到右边'
         : '复制到左边'
-    const copyAction = compareDone && syncEntries.length > 0 && canQueueSyncDirection(syncTask, leftSource, rightSource, copyDirection)
+    const canCopySelection = compareDone && canQueueSyncDirection(syncTask, leftSource, rightSource, copyDirection)
+    const copyAction = syncEntries.length > 0
       ? [{
           label: copyLabel,
+          disabled: !canCopySelection,
           onClick: () => {
+            if (!canCopySelection) return
             void handleCopySelection(effectiveSelectedPaths, copyDirection)
           },
         } satisfies ContextMenuAction]
@@ -625,7 +626,7 @@ export default function SplitTree({ entries, filter, onDoubleClickFile, emptySta
               onClick={() => {
                 void handleBatchSync('left_to_right')
               }}
-              disabled={leftSelectionEntries.length === 0 || !canQueueSyncDirection(syncTask, leftSource, rightSource, 'left_to_right')}
+              disabled={!compareDone || leftSelectionEntries.length === 0 || !canQueueSyncDirection(syncTask, leftSource, rightSource, 'left_to_right')}
               className="inline-flex items-center rounded-md bg-emerald-600 px-2.5 py-1 text-xs font-medium text-white transition-colors hover:bg-emerald-500 disabled:cursor-not-allowed disabled:bg-neutral-700 disabled:text-neutral-500"
             >
               复制所选到右边
@@ -634,7 +635,7 @@ export default function SplitTree({ entries, filter, onDoubleClickFile, emptySta
               onClick={() => {
                 void handleBatchSync('right_to_left')
               }}
-              disabled={rightSelectionEntries.length === 0 || !canQueueSyncDirection(syncTask, leftSource, rightSource, 'right_to_left')}
+              disabled={!compareDone || rightSelectionEntries.length === 0 || !canQueueSyncDirection(syncTask, leftSource, rightSource, 'right_to_left')}
               className="inline-flex items-center rounded-md bg-cyan-600 px-2.5 py-1 text-xs font-medium text-white transition-colors hover:bg-cyan-500 disabled:cursor-not-allowed disabled:bg-neutral-700 disabled:text-neutral-500"
             >
               复制所选到左边

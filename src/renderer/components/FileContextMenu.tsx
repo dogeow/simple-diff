@@ -3,6 +3,7 @@ import { useState, useEffect, useRef } from 'react'
 export interface ContextMenuAction {
   readonly label: string
   readonly danger?: boolean
+  readonly disabled?: boolean
   readonly onClick: () => void
 }
 
@@ -63,11 +64,12 @@ export default function FileContextMenu({ x, y, actions, onClose }: FileContextM
           <div key={`${action.label}-${index}`}>
             {showSeparator && <div className="my-1 h-px bg-neutral-700/70" aria-hidden="true" />}
             <button
+              disabled={action.disabled}
               onClick={() => {
                 action.onClick()
                 onClose()
               }}
-              className={`block w-full whitespace-nowrap px-3 py-1.5 text-left text-xs transition-colors ${
+              className={`block w-full whitespace-nowrap px-3 py-1.5 text-left text-xs transition-colors disabled:cursor-not-allowed disabled:text-neutral-500 disabled:hover:bg-transparent ${
                 action.danger
                   ? 'text-rose-300 hover:bg-rose-500/15 hover:text-rose-200'
                   : 'text-neutral-200 hover:bg-neutral-700/70'

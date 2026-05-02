@@ -21,7 +21,8 @@ import { loadDiffTabContents } from '../utils/diff-tab-loader'
 import { showToast } from '../stores/toast-store'
 import { CloseIcon } from '../components/Icons'
 
-const ACTIVE_TAB_ACCENT = 'shadow-[inset_0_2px_0_rgba(245,158,11,0.68)]'
+const ACTIVE_DIFF_TAB_BUTTON = 'bg-blue-600 text-white hover:bg-blue-500'
+const ACTIVE_DIFF_TAB_CLOSE = 'bg-blue-600 text-blue-100 hover:bg-blue-500 hover:text-white'
 
 function createDiffTabSessionId(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -269,7 +270,7 @@ function DiffTabStrip() {
           onClick={() => setActiveDiffTab(null)}
           className={`inline-flex h-8 items-center gap-1.5 rounded-md px-3 text-xs font-medium transition-colors ${
             activeDiffTabId === null
-              ? `bg-neutral-700/70 text-white ${ACTIVE_TAB_ACCENT}`
+              ? ACTIVE_DIFF_TAB_BUTTON
               : 'border border-neutral-700 bg-neutral-800/60 text-neutral-300 hover:border-neutral-600 hover:bg-neutral-800'
           }`}
         >
@@ -289,7 +290,7 @@ function DiffTabStrip() {
                 title={tab.fileName}
                 className={`inline-flex h-8 max-w-56 items-center gap-1.5 rounded-l-md px-3 text-xs font-medium transition-colors ${
                   isActive
-                    ? `bg-neutral-700/70 text-white ${ACTIVE_TAB_ACCENT}`
+                    ? ACTIVE_DIFF_TAB_BUTTON
                     : 'border border-r-0 border-neutral-700 bg-neutral-800/60 text-neutral-300 hover:border-neutral-600 hover:bg-neutral-800'
                 }`}
               >
@@ -306,7 +307,7 @@ function DiffTabStrip() {
                 aria-label={`关闭 ${tab.fileName}`}
                 className={`inline-flex h-8 w-8 items-center justify-center rounded-r-md text-neutral-400 transition-colors ${
                   isActive
-                    ? 'bg-neutral-700/70 hover:bg-neutral-700 hover:text-white'
+                    ? ACTIVE_DIFF_TAB_CLOSE
                     : 'border border-l-0 border-neutral-700 bg-neutral-800/60 hover:bg-neutral-800 hover:text-white'
                 }`}
               >
