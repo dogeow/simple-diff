@@ -88,7 +88,7 @@ export function findCompareTabForSources(
 function persistActiveCompareTab(): void {
   const appState = useAppStore.getState()
   const compareState = useCompareStore.getState()
-  const currentSnapshot = compareState.createSnapshot()
+  const currentSnapshot = compareState.createTabSnapshot()
   const compareTabId = appState.activeCompareTabId
 
   if (!compareTabId || !hasCompareSessionContent(currentSnapshot)) {
@@ -167,7 +167,7 @@ export function openSyncTaskView(options?: { readonly expandLogs?: boolean }): b
 export function leaveComparePage(nextPage: Exclude<Page, 'compare'>): void {
   const appState = useAppStore.getState()
   const compareState = useCompareStore.getState()
-  const currentSnapshot = compareState.createSnapshot()
+  const currentSnapshot = compareState.createLightweightSnapshot()
   persistActiveCompareTab()
 
   appState.replaceDiffTabs([], null)

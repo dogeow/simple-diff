@@ -24,6 +24,7 @@ export interface SFTPSourceOptions {
   /** Called when the SFTP layer decides the underlying SSH connection is dead. */
   readonly onConnectionLost?: () => void
   readonly opTimeoutMs?: number
+  readonly disposeSshOnClose?: boolean
 }
 
 export class SFTPSource implements FileSource {
@@ -31,11 +32,13 @@ export class SFTPSource implements FileSource {
   private sftp: SFTPWrapper | null = null
   private readonly onConnectionLost?: () => void
   private readonly opTimeoutMs: number
+  private readonly disposeSshOnClose: boolean
   private readonly knownDirs = new Set<string>()
 
   constructor(private readonly ssh: NodeSSH, options: SFTPSourceOptions = {}) {
     this.onConnectionLost = options.onConnectionLost
     this.opTimeoutMs = options.opTimeoutMs ?? DEFAULT_SFTP_OP_TIMEOUT_MS
+    this.disposeSshOnClose = options.disposeSshOnClose ?? false
   }
 
   private async getSftp(): Promise<SFTPWrapper> {
@@ -265,7 +268,15 @@ export class SFTPSource implements FileSource {
 
   async dispose(): Promise<void> {
     this.sftp = null
-    // Don't close SSH here — ConnectionManager owns the connection
+    if (!this.disposeSshOnClose) {
+      return
+    }
+
+    try {
+      this.ssh.dispose()
+    } catch {
+      // ignore
+    }
   }
 
   private async walkDir(rootPath: string, currentPath: string, results: FileEntry[]): Promise<void> {

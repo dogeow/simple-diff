@@ -104,6 +104,10 @@ const api = {
     }
   },
 
+  writeLog: (entry: LogEntry): void => {
+    void ipcRenderer.invoke(IPC_CHANNELS.LOG_WRITE, entry).catch(() => undefined)
+  },
+
   // Text diff
   textDiff: (leftText: string, rightText: string): Promise<IpcResult<TextDiffResult>> =>
     ipcRenderer.invoke(IPC_CHANNELS.TEXT_DIFF, leftText, rightText),

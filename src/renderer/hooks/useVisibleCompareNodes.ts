@@ -4,7 +4,8 @@ import { useShallow } from 'zustand/react/shallow'
 import type { CompareEntry, CompareFilter } from '../../../shared/types'
 import { useCompareStore } from '../stores/compare-store'
 import { useSettingsStore } from '../stores/settings-store'
-import { buildVisibleNodes, prepareCompareEntries, type TreeNode, type TreeSide } from '../utils/tree-utils'
+import { addRendererLog } from '../stores/log-store'
+import { buildVisibleNodeList, prepareCompareEntries, type TreeSide, type VisibleTreeNodes } from '../utils/tree-utils'
 
 interface UseVisibleCompareNodesOptions {
   readonly entries: readonly CompareEntry[]
@@ -12,11 +13,30 @@ interface UseVisibleCompareNodesOptions {
   readonly side?: TreeSide
 }
 
+const HEAVY_ENTRIES_THRESHOLD = 50_000
+
+function formatBytes(value: number): string {
+  if (!Number.isFinite(value)) return '-'
+  return `${(value / 1024 / 1024).toFixed(1)}MB`
+}
+
+function rendererHeapSummary(): string {
+  const memory = (performance as Performance & {
+    readonly memory?: {
+      readonly usedJSHeapSize: number
+      readonly totalJSHeapSize: number
+      readonly jsHeapSizeLimit: number
+    }
+  }).memory
+  if (!memory) return 'heap=n/a'
+  return `heap=${formatBytes(memory.usedJSHeapSize)}/${formatBytes(memory.totalJSHeapSize)} limit=${formatBytes(memory.jsHeapSizeLimit)}`
+}
+
 export function useVisibleCompareNodes({
   entries,
   filter,
   side,
-}: UseVisibleCompareNodesOptions): readonly TreeNode[] {
+}: UseVisibleCompareNodesOptions): VisibleTreeNodes {
   const deferredEntries = useDeferredValue(entries)
   const { expandedDirs, extensionFilter, hideDot, hideDotFilter } = useCompareStore(useShallow((state) => ({
     expandedDirs: state.expandedDirs,
@@ -31,16 +51,48 @@ export function useVisibleCompareNodes({
   )
 
   const preparedEntries = useMemo(
-    () =>
-      prepareCompareEntries(deferredEntries, {
-        filter,
-        pathFilter,
-        hideDot,
-        hideDotFilter,
-        side,
-      }),
+    () => {
+      if (deferredEntries.length < HEAVY_ENTRIES_THRESHOLD) {
+        return prepareCompareEntries(deferredEntries, { filter, pathFilter, hideDot, hideDotFilter, side })
+      }
+      addRendererLog(
+        'compare',
+        'info',
+        `prepareCompareEntries:start side=${side ?? 'merged'} filter=${filter} entries=${deferredEntries.length} ${rendererHeapSummary()}`,
+      )
+      const startedAt = performance.now()
+      const result = prepareCompareEntries(deferredEntries, { filter, pathFilter, hideDot, hideDotFilter, side })
+      const elapsed = (performance.now() - startedAt).toFixed(1)
+      addRendererLog(
+        'compare',
+        'info',
+        `prepareCompareEntries side=${side ?? 'merged'} filter=${filter} entries=${deferredEntries.length} -> ${result.length} ${elapsed}ms ${rendererHeapSummary()}`,
+      )
+      return result
+    },
     [deferredEntries, filter, hideDot, hideDotFilter, pathFilter, side],
   )
 
-  return useMemo(() => buildVisibleNodes(preparedEntries, expandedDirs), [expandedDirs, preparedEntries])
+  return useMemo(
+    () => {
+      if (preparedEntries.length < HEAVY_ENTRIES_THRESHOLD) {
+        return buildVisibleNodeList(preparedEntries, expandedDirs)
+      }
+      addRendererLog(
+        'compare',
+        'info',
+        `buildVisibleNodeList:start side=${side ?? 'merged'} prepared=${preparedEntries.length} expanded=${expandedDirs.size} ${rendererHeapSummary()}`,
+      )
+      const startedAt = performance.now()
+      const result = buildVisibleNodeList(preparedEntries, expandedDirs)
+      const elapsed = (performance.now() - startedAt).toFixed(1)
+      addRendererLog(
+        'compare',
+        'info',
+        `buildVisibleNodeList side=${side ?? 'merged'} prepared=${preparedEntries.length} -> visible=${result.length} ${elapsed}ms ${rendererHeapSummary()}`,
+      )
+      return result
+    },
+    [expandedDirs, preparedEntries, side],
+  )
 }

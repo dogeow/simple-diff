@@ -214,7 +214,7 @@ export class SyncManager {
       }
     }
 
-    this.snapshotItemsCompleted = newCompleted
+    this.snapshotItemsCompleted = newCompletedClamped
     this.snapshotItemsCurrentPath = newCurrent
     this.snapshotItemsStatus = task.status
     return cache
@@ -405,8 +405,8 @@ export class SyncManager {
     if (!task || task.status !== 'running') return
 
     const { source, target } = sourceRootForDirection(task.direction, task.leftSource, task.rightSource)
-    const sourceFileSource = await createFileSource(source)
-    const targetFileSource = await createFileSource(target)
+    const sourceFileSource = await createFileSource(source, { connectionMode: 'isolated' })
+    const targetFileSource = await createFileSource(target, { connectionMode: 'isolated' })
     this.activeSyncQueue = task.pendingItems
     this.activeSyncIndex = 0
 
@@ -484,7 +484,7 @@ export class SyncManager {
     if (task.pendingDirs.length === 0) return task
 
     const { source } = sourceRootForDirection(task.direction, task.leftSource, task.rightSource)
-    const sourceFileSource = await createFileSource(source)
+    const sourceFileSource = await createFileSource(source, { connectionMode: 'isolated' })
 
     try {
       const pendingItems = await this.collectPendingItems(task.pendingItems, source, sourceFileSource)

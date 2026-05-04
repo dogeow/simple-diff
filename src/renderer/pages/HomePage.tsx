@@ -88,7 +88,7 @@ export default function HomePage() {
     setExtensionFilter(patterns)
     const activeTabId = useAppStore.getState().activeCompareTabId
     if (activeTabId) {
-      useAppStore.getState().updateCompareTabSnapshot(activeTabId, () => useCompareStore.getState().createSnapshot())
+      useAppStore.getState().updateCompareTabSnapshot(activeTabId, () => useCompareStore.getState().createTabSnapshot())
     }
 
     if (isFilterAdditionOnly(previousFilters, patterns)) {

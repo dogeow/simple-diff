@@ -170,6 +170,38 @@ describe('SyncManager', () => {
     })
   })
 
+  it('uses isolated file-source connections for sync hydration and execution', async () => {
+    const leftSourceConfig: SourceConfig = { type: 'sftp', configId: 'left-ssh', path: '/left' }
+    const rightSourceConfig: SourceConfig = { type: 'sftp', configId: 'right-ssh', path: '/right' }
+
+    const sourceFs = createFileSourceMock({
+      list: vi.fn(async () => []),
+    })
+    const targetFs = createFileSourceMock()
+
+    mocks.createFileSource.mockImplementation(async (config: SourceConfig) => (
+      config.path === '/left' ? sourceFs : targetFs
+    ))
+
+    const { SyncManager } = await import('./sync-manager')
+    const manager = new SyncManager()
+
+    await manager.start({
+      leftSource: leftSourceConfig,
+      rightSource: rightSourceConfig,
+      direction: 'left_to_right',
+      entries: [createCompareDirEntry('books')],
+    })
+
+    await waitFor(() => manager.getSnapshot()?.status === 'completed')
+
+    expect(mocks.createFileSource.mock.calls).toEqual([
+      [leftSourceConfig, { connectionMode: 'isolated' }],
+      [leftSourceConfig, { connectionMode: 'isolated' }],
+      [rightSourceConfig, { connectionMode: 'isolated' }],
+    ])
+  })
+
   it('rehydrates paused directory tasks before resume so totals do not keep growing', async () => {
     const leftSourceConfig: SourceConfig = { type: 'local', path: '/left' }
     const rightSourceConfig: SourceConfig = { type: 'local', path: '/right' }

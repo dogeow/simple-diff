@@ -93,22 +93,13 @@ export class ConnectionManager {
       return existing
     }
 
-    sshLogger.info(`SSH 正在连接: ${config.username}@${config.host}:${config.port}`)
-    const ssh = new NodeSSH()
-    const connectConfig = await buildConnectConfig(config)
-
-    try {
-      await ssh.connect(connectConfig)
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      const safeConfig = JSON.stringify(redactConnectConfig(connectConfig))
-      sshLogger.error(`SSH 连接失败: ${config.host}:${config.port} - ${message} (config=${safeConfig})`)
-      throw error
-    }
-
-    sshLogger.info(`SSH 连接成功: ${config.host}:${config.port}`)
+    const ssh = await this.openConnection(config)
     this.connections.set(config.id, ssh)
     return ssh
+  }
+
+  async connectIsolated(config: SSHConfigInternal): Promise<NodeSSH> {
+    return this.openConnection(config)
   }
 
   async disconnect(configId: string): Promise<void> {
@@ -155,6 +146,24 @@ export class ConnectionManager {
       ssh.dispose()
     }
     this.connections.clear()
+  }
+
+  private async openConnection(config: SSHConfigInternal): Promise<NodeSSH> {
+    sshLogger.info(`SSH 正在连接: ${config.username}@${config.host}:${config.port}`)
+    const ssh = new NodeSSH()
+    const connectConfig = await buildConnectConfig(config)
+
+    try {
+      await ssh.connect(connectConfig)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      const safeConfig = JSON.stringify(redactConnectConfig(connectConfig))
+      sshLogger.error(`SSH 连接失败: ${config.host}:${config.port} - ${message} (config=${safeConfig})`)
+      throw error
+    }
+
+    sshLogger.info(`SSH 连接成功: ${config.host}:${config.port}`)
+    return ssh
   }
 }
 

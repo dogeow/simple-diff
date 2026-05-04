@@ -65,10 +65,21 @@ export const useLogStore = create<LogStore>((set, get) => ({
 }))
 
 export function addRendererLog(scope: LogScope, level: LogLevel, message: string): void {
-  useLogStore.getState().addLog({
+  const entry: LogEntry = {
     timestamp: Date.now(),
     scope,
     level,
     message: `[renderer] ${message}`,
+  }
+  if (typeof window !== 'undefined') {
+    try {
+      window.api?.writeLog(entry)
+    } catch {
+      // logging must never break renderer behavior
+    }
+  }
+
+  queueMicrotask(() => {
+    useLogStore.getState().addLog(entry)
   })
 }

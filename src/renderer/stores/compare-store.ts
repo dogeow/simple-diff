@@ -111,6 +111,8 @@ interface CompareStore {
   invalidateCompareResult: () => void
   setSyncTask: (task: SyncTaskSnapshot | null) => void
   createSnapshot: () => CompareSessionSnapshot
+  createLightweightSnapshot: () => CompareSessionSnapshot
+  createTabSnapshot: () => CompareSessionSnapshot
   restoreSnapshot: (snapshot: CompareSessionSnapshot) => void
 }
 
@@ -139,7 +141,28 @@ export function sanitizePersistedCompareSessionSnapshot(snapshot: CompareSession
     activeCompareId: null,
   }
 
-  return clearInactiveIncompleteSnapshot(sanitizedSnapshot)
+  const inactiveSnapshot = clearInactiveIncompleteSnapshot(sanitizedSnapshot)
+  if (inactiveSnapshot.entries.length <= MAX_COMPARE_TAB_SNAPSHOT_ENTRIES) {
+    return inactiveSnapshot
+  }
+
+  return {
+    ...inactiveSnapshot,
+    entries: [],
+    loadingDirs: [],
+    expandedDirs: [],
+    done: false,
+    duration: 0,
+  }
+}
+
+export function createLightweightCompareSessionSnapshot(snapshot: CompareSessionSnapshot): CompareSessionSnapshot {
+  return {
+    ...snapshot,
+    entries: [],
+    loadingDirs: [],
+    expandedDirs: [],
+  }
 }
 
 function hasUnresolvedCompareEntries(entries: readonly CompareEntry[]): boolean {
@@ -665,7 +688,12 @@ function cloneEntries(entries: readonly CompareEntry[]): readonly CompareEntry[]
   return [...entries]
 }
 
-function createCompareSessionSnapshot(state: CompareStore): CompareSessionSnapshot {
+const MAX_COMPARE_TAB_SNAPSHOT_ENTRIES = 5000
+
+function createCompareSessionSnapshot(
+  state: CompareStore,
+  options: { readonly includeEntries: boolean } = { includeEntries: true },
+): CompareSessionSnapshot {
   return {
     leftPath: state.leftPath,
     rightPath: state.rightPath,
@@ -677,7 +705,7 @@ function createCompareSessionSnapshot(state: CompareStore): CompareSessionSnapsh
     extensionFilter: [...state.extensionFilter],
     hideDot: state.hideDot,
     hideDotFilter: state.hideDotFilter,
-    entries: cloneEntries(state.entries),
+    entries: options.includeEntries ? cloneEntries(state.entries) : [],
     scanning: state.scanning,
     comparing: state.comparing,
     paused: state.paused,
@@ -687,9 +715,9 @@ function createCompareSessionSnapshot(state: CompareStore): CompareSessionSnapsh
     leftSource: state.leftSource,
     rightSource: state.rightSource,
     dirtyPaths: cloneDirtyPaths(state.dirtyPaths),
-    loadingDirs: [...state.loadingDirs],
+    loadingDirs: options.includeEntries ? [...state.loadingDirs] : [],
     filter: state.filter,
-    expandedDirs: [...state.expandedDirs],
+    expandedDirs: options.includeEntries ? [...state.expandedDirs] : [],
     viewMode: state.viewMode,
     activeCompareId: state.activeCompareId,
   }
@@ -1091,6 +1119,13 @@ const compareStore = create<CompareStore>((set, get) => ({
   setSyncTask: (syncTask) => set({ syncTask }),
 
   createSnapshot: () => createCompareSessionSnapshot(get()),
+
+  createLightweightSnapshot: () => createCompareSessionSnapshot(get(), { includeEntries: false }),
+
+  createTabSnapshot: () => {
+    const state = get()
+    return createCompareSessionSnapshot(state, { includeEntries: state.entries.length <= MAX_COMPARE_TAB_SNAPSHOT_ENTRIES })
+  },
 
   restoreSnapshot: (snapshot) => {
     const { compareVersion } = get()

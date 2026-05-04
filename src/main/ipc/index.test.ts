@@ -22,6 +22,8 @@ const mocks = vi.hoisted(() => {
     loggerInfo: vi.fn(),
     loggerWarn: vi.fn(),
     loggerError: vi.fn(),
+    getLogFilePath: vi.fn(() => '/tmp/simple-diff.log'),
+    writeLogFile: vi.fn(),
     syncStart: vi.fn(),
     syncPause: vi.fn(),
     syncResume: vi.fn(),
@@ -77,6 +79,8 @@ vi.mock('../ssh/connection-manager', () => ({
 }))
 
 vi.mock('../utils/logger', () => ({
+  getLogFilePath: mocks.getLogFilePath,
+  writeLogFile: mocks.writeLogFile,
   logger: {
     info: mocks.loggerInfo,
     warn: mocks.loggerWarn,

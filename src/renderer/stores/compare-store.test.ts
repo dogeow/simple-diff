@@ -630,6 +630,32 @@ describe('compare-store', () => {
     expect(state.entrySummary.stats).toEqual({ total: 1, equal: 1, different: 0, leftOnly: 0, rightOnly: 0 })
   })
 
+  it('can create a lightweight snapshot without carrying entries', () => {
+    useCompareStore.setState({
+      entries: [createCompareEntry('huge/file.txt', { state: 'equal' })],
+      loadingDirs: new Set(['huge']),
+      expandedDirs: new Set(['huge']),
+      done: true,
+    })
+
+    const snapshot = useCompareStore.getState().createLightweightSnapshot()
+
+    expect(snapshot.entries).toEqual([])
+    expect(snapshot.loadingDirs).toEqual([])
+    expect(snapshot.expandedDirs).toEqual([])
+    expect(snapshot.done).toBe(true)
+  })
+
+  it('drops entries from tab snapshots once the result is very large', () => {
+    const entries = Array.from({ length: 5001 }, (_unused, index) => createCompareEntry(`file-${index}.txt`, { state: 'equal' }))
+    useCompareStore.setState({ entries, done: true })
+
+    const snapshot = useCompareStore.getState().createTabSnapshot()
+
+    expect(snapshot.entries).toEqual([])
+    expect(snapshot.done).toBe(true)
+  })
+
   it('writes paused compare errors even when the paused snapshot still keeps its compare id', () => {
     const store = useCompareStore.getState()
     store.startScanning('compare-1')

@@ -451,7 +451,7 @@ describe('ComparePage renderer interactions', () => {
     expect(await screen.findByRole('button', { name: '忽略文件：『app.php』' })).toBeTruthy()
   })
 
-  it('disables selection copy actions until compare is finished but keeps the context action visible', async () => {
+  it('allows copying the current selection before compare is finished', async () => {
     const api = installApiMock()
     resetStores()
     useCompareStore.setState({
@@ -460,22 +460,25 @@ describe('ComparePage renderer interactions', () => {
       entries: [createLeftOnlyDirectory('config')],
     })
 
+    const user = userEvent.setup()
     render(<ComparePage />)
 
-    fireEvent.click(screen.getByText('config').closest('tr')!)
+    await user.click(screen.getByText('config').closest('tr')!)
 
     const selectionCopyButton = screen.getByRole('button', { name: '复制所选到右边' }) as HTMLButtonElement
-    expect(selectionCopyButton.disabled).toBe(true)
+    expect(selectionCopyButton.disabled).toBe(false)
 
     fireEvent.contextMenu(screen.getByText('config').closest('tr')!)
 
     const contextCopyButton = await screen.findByRole('button', { name: '复制到右边' }) as HTMLButtonElement
-    expect(contextCopyButton.disabled).toBe(true)
+    expect(contextCopyButton.disabled).toBe(false)
 
-    fireEvent.click(selectionCopyButton)
-    fireEvent.click(contextCopyButton)
+    await user.click(contextCopyButton)
+    await user.click(selectionCopyButton)
 
-    expect(api.startSync).not.toHaveBeenCalled()
+    await waitFor(() => {
+      expect(api.startSync).toHaveBeenCalledTimes(2)
+    })
   })
 
   it('allows selection copy again after a completed sync task', async () => {

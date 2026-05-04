@@ -5,6 +5,7 @@ import {
   applyFinishCompareToSnapshot,
   applyPauseCompareToSnapshot,
   applyPausedCompareErrorToSnapshot,
+  createLightweightCompareSessionSnapshot,
   hasCompareSessionContent,
   type CompareSessionSnapshot,
   useCompareStore,
@@ -165,24 +166,42 @@ export function createRunningCompareTabSnapshot(snapshot: CompareSessionSnapshot
     return snapshot
   }
 
-  return {
-    ...snapshot,
-    entries: [],
-    loadingDirs: [],
-  }
+  return createLightweightCompareSessionSnapshot(snapshot)
 }
 
-function syncCurrentCompareTabSnapshot(compareTabId: string): void {
+function formatBytes(value: number): string {
+  if (!Number.isFinite(value)) return '-'
+  return `${(value / 1024 / 1024).toFixed(1)}MB`
+}
+
+function formatRendererMemoryUsage(): string {
+  const memory = (performance as Performance & {
+    readonly memory?: {
+      readonly usedJSHeapSize: number
+      readonly totalJSHeapSize: number
+      readonly jsHeapSizeLimit: number
+    }
+  }).memory
+
+  if (!memory) {
+    return 'heap=n/a'
+  }
+
+  return `heap=${formatBytes(memory.usedJSHeapSize)}/${formatBytes(memory.totalJSHeapSize)} limit=${formatBytes(memory.jsHeapSizeLimit)}`
+}
+
+function syncCurrentCompareTabSnapshot(compareTabId: string, options?: { readonly lightweight?: boolean }): void {
   const appStore = useAppStore.getState()
   const compareTab = appStore.compareTabs.find((tab) => tab.id === compareTabId)
   if (!compareTab) {
     return
   }
 
+  const compareState = useCompareStore.getState()
   appStore.saveCompareTab({
     id: compareTabId,
     title: compareTab.title,
-    snapshot: useCompareStore.getState().createSnapshot(),
+    snapshot: options?.lightweight ? compareState.createLightweightSnapshot() : compareState.createTabSnapshot(),
     diffTabs: appStore.diffTabs,
     activeDiffTabId: appStore.activeDiffTabId,
   })
@@ -323,7 +342,7 @@ export function useCompareActions() {
     appStore.saveCompareTab({
       id: compareTabId,
       title: formatCompareTabTitle(left, right),
-      snapshot: createRunningCompareTabSnapshot(useCompareStore.getState().createSnapshot()),
+      snapshot: createRunningCompareTabSnapshot(useCompareStore.getState().createLightweightSnapshot()),
       diffTabs: [],
       activeDiffTabId: null,
     })
@@ -352,8 +371,18 @@ export function useCompareActions() {
         )
         flushBufferedCompareEvents(compareId)
         if (useCompareStore.getState().activeCompareId === compareId) {
+          addRendererLog(
+            'compare',
+            'info',
+            `compare:完成前 entries=${useCompareStore.getState().entries.length} ${formatRendererMemoryUsage()}`,
+          )
           useCompareStore.getState().finishCompare(compareId, response.data)
-          syncCurrentCompareTabSnapshot(compareTabId)
+          addRendererLog(
+            'compare',
+            'info',
+            `compare:完成后 entries=${useCompareStore.getState().entries.length} tabSnapshot=lightweight ${formatRendererMemoryUsage()}`,
+          )
+          syncCurrentCompareTabSnapshot(compareTabId, { lightweight: true })
         } else {
           addRendererLog(
             'compare',

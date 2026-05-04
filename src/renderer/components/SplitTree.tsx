@@ -2,7 +2,7 @@ import { memo, useState, useCallback, useEffect, useMemo, useRef } from 'react'
 import { joinSourcePath } from '@shared/source-path'
 import { useShallow } from 'zustand/react/shallow'
 import type { CompareEntry, CompareFilter, SyncDirection } from '../../../shared/types'
-import { type TreeNode } from '../utils/tree-utils'
+import { type TreeNode, type VisibleTreeNodes } from '../utils/tree-utils'
 import TreeEntryCell from './TreeEntryCell'
 import { formatSize, formatTime, rowBg, SELECTED_ROW_BG, shouldShowDirectorySpinner } from './tree-row-utils'
 import { useVisibleCompareNodes } from '../hooks/useVisibleCompareNodes'
@@ -132,7 +132,7 @@ interface ContextMenuState {
 }
 
 interface SideTableProps {
-  readonly visibleNodes: readonly TreeNode[]
+  readonly visibleNodes: VisibleTreeNodes
   readonly entries: readonly CompareEntry[]
   readonly side: Side
   readonly sourcePath: string
@@ -168,7 +168,6 @@ function SideTable({
     refreshDir,
     leftSource,
     rightSource,
-    compareDone,
     syncTask,
     setSyncTask,
     extensionFilter,
@@ -178,7 +177,6 @@ function SideTable({
     refreshDir: s.refreshDir,
     leftSource: s.leftSource,
     rightSource: s.rightSource,
-    compareDone: s.done,
     syncTask: s.syncTask,
     setSyncTask: s.setSyncTask,
     extensionFilter: s.extensionFilter,
@@ -200,7 +198,7 @@ function SideTable({
   }
 
   const handleCopySelection = useCallback(async (paths: ReadonlySet<string>, direction: SyncDirection) => {
-    if (!leftSource || !rightSource || !compareDone) return
+    if (!leftSource || !rightSource) return
     if (!canQueueSyncDirection(syncTask, leftSource, rightSource, direction)) return
 
     const syncEntries = collectSyncEntriesForSelection(entries, paths, direction)
@@ -218,7 +216,7 @@ function SideTable({
       rememberSyncDirtyRoots(response.data?.id, getSyncRecompareRootsFromEntries(syncEntries))
       setSyncTask(response.data ?? null)
     }
-  }, [compareDone, entries, leftSource, rightSource, setSyncTask, syncTask])
+  }, [entries, leftSource, rightSource, setSyncTask, syncTask])
 
   const handleContextMenu = useCallback((e: React.MouseEvent, node: TreeNode) => {
     e.preventDefault()
@@ -255,7 +253,7 @@ function SideTable({
       : side === 'left'
         ? '复制到右边'
         : '复制到左边'
-    const canCopySelection = compareDone && canQueueSyncDirection(syncTask, leftSource, rightSource, copyDirection)
+    const canCopySelection = canQueueSyncDirection(syncTask, leftSource, rightSource, copyDirection)
     const copyAction = syncEntries.length > 0
       ? [{
           label: copyLabel,
@@ -487,19 +485,17 @@ export default function SplitTree({ entries, filter, onDoubleClickFile, emptySta
   const [selection, setSelection] = useState<CompareSelectionState>({ selectedPaths: new Set(), anchorPath: null })
   const visibleNodes = useVisibleCompareNodes({ entries, filter })
   const nodeInteractions = useCompareNodeInteractions(onDoubleClickFile)
-  const { leftSource, rightSource, compareDone, syncTask, setSyncTask } = useCompareStore(useShallow((s) => ({
+  const { leftSource, rightSource, syncTask, setSyncTask } = useCompareStore(useShallow((s) => ({
     leftSource: s.leftSource,
     rightSource: s.rightSource,
-    compareDone: s.done,
     syncTask: s.syncTask,
     setSyncTask: s.setSyncTask,
   })))
 
   useEffect(() => {
-    const visiblePathSet = new Set(visibleNodes.map((node) => node.relativePath))
     setSelection((current) => {
-      const nextSelectedPaths = new Set(Array.from(current.selectedPaths).filter((path) => visiblePathSet.has(path)))
-      const nextAnchorPath = current.anchorPath && visiblePathSet.has(current.anchorPath) ? current.anchorPath : null
+      const nextSelectedPaths = new Set(Array.from(current.selectedPaths).filter((path) => visibleNodes.hasPath(path)))
+      const nextAnchorPath = current.anchorPath && visibleNodes.hasPath(current.anchorPath) ? current.anchorPath : null
 
       if (nextSelectedPaths.size === current.selectedPaths.size && nextAnchorPath === current.anchorPath) {
         return current
@@ -558,16 +554,15 @@ export default function SplitTree({ entries, filter, onDoubleClickFile, emptySta
     }
   }, [scrollTop, viewportHeight, visibleNodes.length])
 
-  const orderedPaths = useMemo(() => visibleNodes.map((node) => node.relativePath), [visibleNodes])
   const handleSelectNode = useCallback((event: React.MouseEvent, node: TreeNode) => {
     setSelection((current) => resolveCompareSelection(current, {
-      orderedPaths,
+      orderedPaths: event.shiftKey ? visibleNodes.toPathArray() : [],
       clickedPath: node.relativePath,
       shiftKey: event.shiftKey,
       metaKey: event.metaKey,
       ctrlKey: event.ctrlKey,
     }))
-  }, [orderedPaths])
+  }, [visibleNodes])
 
   const selectedCount = selection.selectedPaths.size
   const leftSelectionEntries = useMemo(
@@ -580,7 +575,7 @@ export default function SplitTree({ entries, filter, onDoubleClickFile, emptySta
   )
 
   const handleBatchSync = useCallback(async (direction: SyncDirection) => {
-    if (!leftSource || !rightSource || !compareDone) {
+    if (!leftSource || !rightSource) {
       return
     }
 
@@ -605,7 +600,7 @@ export default function SplitTree({ entries, filter, onDoubleClickFile, emptySta
       rememberSyncDirtyRoots(response.data?.id, getSyncRecompareRootsFromEntries(syncEntries))
       setSyncTask(response.data ?? null)
     }
-  }, [compareDone, leftSelectionEntries, leftSource, rightSelectionEntries, rightSource, selection.selectedPaths, setSyncTask, syncTask])
+  }, [leftSelectionEntries, leftSource, rightSelectionEntries, rightSource, selection.selectedPaths, setSyncTask, syncTask])
 
   return (
     <div className="flex h-full flex-col">
@@ -626,7 +621,7 @@ export default function SplitTree({ entries, filter, onDoubleClickFile, emptySta
               onClick={() => {
                 void handleBatchSync('left_to_right')
               }}
-              disabled={!compareDone || leftSelectionEntries.length === 0 || !canQueueSyncDirection(syncTask, leftSource, rightSource, 'left_to_right')}
+              disabled={leftSelectionEntries.length === 0 || !canQueueSyncDirection(syncTask, leftSource, rightSource, 'left_to_right')}
               className="inline-flex items-center rounded-md bg-emerald-600 px-2.5 py-1 text-xs font-medium text-white transition-colors hover:bg-emerald-500 disabled:cursor-not-allowed disabled:bg-neutral-700 disabled:text-neutral-500"
             >
               复制所选到右边
@@ -635,7 +630,7 @@ export default function SplitTree({ entries, filter, onDoubleClickFile, emptySta
               onClick={() => {
                 void handleBatchSync('right_to_left')
               }}
-              disabled={!compareDone || rightSelectionEntries.length === 0 || !canQueueSyncDirection(syncTask, leftSource, rightSource, 'right_to_left')}
+              disabled={rightSelectionEntries.length === 0 || !canQueueSyncDirection(syncTask, leftSource, rightSource, 'right_to_left')}
               className="inline-flex items-center rounded-md bg-cyan-600 px-2.5 py-1 text-xs font-medium text-white transition-colors hover:bg-cyan-500 disabled:cursor-not-allowed disabled:bg-neutral-700 disabled:text-neutral-500"
             >
               复制所选到左边

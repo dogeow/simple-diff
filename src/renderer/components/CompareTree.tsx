@@ -77,11 +77,10 @@ function CompareTreeTable({
 }: CompareTreeTableProps) {
   const tableRef = useRef<HTMLDivElement>(null)
   const nodeInteractions = useCompareNodeInteractions(onDoubleClickFile)
-  const { dirtyDisplayPaths, leftSource, rightSource, compareDone, syncTask, setSyncTask } = useCompareStore(useShallow((state) => ({
+  const { dirtyDisplayPaths, leftSource, rightSource, syncTask, setSyncTask } = useCompareStore(useShallow((state) => ({
     dirtyDisplayPaths: state.dirtyDisplayPaths,
     leftSource: state.leftSource,
     rightSource: state.rightSource,
-    compareDone: state.done,
     syncTask: state.syncTask,
     setSyncTask: state.setSyncTask,
   })))
@@ -120,7 +119,6 @@ function CompareTreeTable({
     () => visibleNodes.slice(renderedWindow.startIndex, renderedWindow.endIndex),
     [renderedWindow.endIndex, renderedWindow.startIndex, visibleNodes],
   )
-  const orderedPaths = useMemo(() => visibleNodes.map((node) => node.relativePath), [visibleNodes])
   const selectedCount = selection.selectedPaths.size
   const leftSelectionEntries = useMemo(
     () => collectSyncEntriesForSelection(entries, selection.selectedPaths, 'left_to_right'),
@@ -132,10 +130,9 @@ function CompareTreeTable({
   )
 
   useEffect(() => {
-    const visiblePathSet = new Set(visibleNodes.map((node) => node.relativePath))
     setSelection((current) => {
-      const nextSelectedPaths = new Set(Array.from(current.selectedPaths).filter((path) => visiblePathSet.has(path)))
-      const nextAnchorPath = current.anchorPath && visiblePathSet.has(current.anchorPath) ? current.anchorPath : null
+      const nextSelectedPaths = new Set(Array.from(current.selectedPaths).filter((path) => visibleNodes.hasPath(path)))
+      const nextAnchorPath = current.anchorPath && visibleNodes.hasPath(current.anchorPath) ? current.anchorPath : null
 
       if (nextSelectedPaths.size === current.selectedPaths.size && nextAnchorPath === current.anchorPath) {
         return current
@@ -176,16 +173,16 @@ function CompareTreeTable({
 
   const handleSelectNode = useCallback((event: React.MouseEvent, node: TreeNode) => {
     setSelection((current) => resolveCompareSelection(current, {
-      orderedPaths,
+      orderedPaths: event.shiftKey ? visibleNodes.toPathArray() : [],
       clickedPath: node.relativePath,
       shiftKey: event.shiftKey,
       metaKey: event.metaKey,
       ctrlKey: event.ctrlKey,
     }))
-  }, [orderedPaths])
+  }, [visibleNodes])
 
   const handleCopySelection = useCallback(async (paths: ReadonlySet<string>, direction: SyncDirection) => {
-    if (!leftSource || !rightSource || !compareDone) return
+    if (!leftSource || !rightSource) return
     if (!canQueueSyncDirection(syncTask, leftSource, rightSource, direction)) return
 
     const syncEntries = collectSyncEntriesForSelection(entries, paths, direction)
@@ -203,7 +200,7 @@ function CompareTreeTable({
       rememberSyncDirtyRoots(response.data?.id, getSyncRecompareRootsFromEntries(syncEntries))
       setSyncTask(response.data ?? null)
     }
-  }, [compareDone, entries, leftSource, rightSource, setSyncTask, syncTask])
+  }, [entries, leftSource, rightSource, setSyncTask, syncTask])
 
   const getContextActions = useCallback((node: TreeNode): readonly ContextMenuAction[] => {
     if (!node.entry) return []
@@ -213,8 +210,8 @@ function CompareTreeTable({
     const leftSyncEntries = collectSyncEntriesForSelection(entries, effectiveSelectedPaths, 'left_to_right')
     const rightSyncEntries = collectSyncEntriesForSelection(entries, effectiveSelectedPaths, 'right_to_left')
     const selectedSuffix = effectiveSelectedPaths.size > 1 ? ` (${effectiveSelectedPaths.size})` : ''
-    const canCopyToRight = compareDone && canQueueSyncDirection(syncTask, leftSource, rightSource, 'left_to_right')
-    const canCopyToLeft = compareDone && canQueueSyncDirection(syncTask, leftSource, rightSource, 'right_to_left')
+    const canCopyToRight = canQueueSyncDirection(syncTask, leftSource, rightSource, 'left_to_right')
+    const canCopyToLeft = canQueueSyncDirection(syncTask, leftSource, rightSource, 'right_to_left')
     const actions: ContextMenuAction[] = []
 
     if (leftSyncEntries.length > 0) {
@@ -245,7 +242,7 @@ function CompareTreeTable({
     })
 
     return actions
-  }, [compareDone, entries, handleCopySelection, handleIgnoreNode, leftSource, rightSource, selection.selectedPaths, syncTask])
+  }, [entries, handleCopySelection, handleIgnoreNode, leftSource, rightSource, selection.selectedPaths, syncTask])
 
   return (
     <>
@@ -259,7 +256,7 @@ function CompareTreeTable({
               onClick={() => {
                 void handleCopySelection(selection.selectedPaths, 'left_to_right')
               }}
-              disabled={!compareDone || leftSelectionEntries.length === 0 || !canQueueSyncDirection(syncTask, leftSource, rightSource, 'left_to_right')}
+              disabled={leftSelectionEntries.length === 0 || !canQueueSyncDirection(syncTask, leftSource, rightSource, 'left_to_right')}
               className="inline-flex items-center rounded-md bg-emerald-600 px-2.5 py-1 text-xs font-medium text-white transition-colors hover:bg-emerald-500 disabled:cursor-not-allowed disabled:bg-neutral-700 disabled:text-neutral-500"
             >
               复制所选到右边
@@ -268,7 +265,7 @@ function CompareTreeTable({
               onClick={() => {
                 void handleCopySelection(selection.selectedPaths, 'right_to_left')
               }}
-              disabled={!compareDone || rightSelectionEntries.length === 0 || !canQueueSyncDirection(syncTask, leftSource, rightSource, 'right_to_left')}
+              disabled={rightSelectionEntries.length === 0 || !canQueueSyncDirection(syncTask, leftSource, rightSource, 'right_to_left')}
               className="inline-flex items-center rounded-md bg-cyan-600 px-2.5 py-1 text-xs font-medium text-white transition-colors hover:bg-cyan-500 disabled:cursor-not-allowed disabled:bg-neutral-700 disabled:text-neutral-500"
             >
               复制所选到左边

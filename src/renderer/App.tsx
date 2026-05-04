@@ -15,6 +15,9 @@ import { refreshSyncedDirtyRoots, rememberSyncDirtyRoots, useCompareActions } fr
 import { shouldShowSyncTaskInCompare } from './utils/sync-task-visibility'
 import { getSyncRecompareRootsFromItems } from './utils/sync-dirty'
 import type { SyncTaskSnapshot } from '../../shared/types'
+import { addRendererLog } from './stores/log-store'
+
+const MAX_LIVE_LOCAL_WATCH_ENTRIES = 50_000
 
 export default function App() {
   const page = useAppStore((s) => s.page)
@@ -52,6 +55,7 @@ export default function App() {
         scanning,
         comparing,
         hasEntries: entryCount > 0,
+        entryCount,
       }
     }
 
@@ -67,6 +71,7 @@ export default function App() {
       scanning: snapshot.scanning,
       comparing: snapshot.comparing,
       hasEntries: snapshot.entries.length > 0,
+      entryCount: snapshot.entries.length,
     }
   }, [activeCompareTab, activeCompareTabId, comparing, entryCount, liveLeftSource, liveRightSource, page, scanning])
 
@@ -159,6 +164,16 @@ export default function App() {
     }
 
     if (!watchTarget.leftSource || !watchTarget.rightSource || watchTarget.scanning || watchTarget.comparing || !watchTarget.hasEntries) {
+      void window.api.stopLocalCompareWatch(watchTarget.sessionId)
+      return
+    }
+
+    if (watchTarget.entryCount > MAX_LIVE_LOCAL_WATCH_ENTRIES) {
+      addRendererLog(
+        'compare-watch',
+        'warn',
+        `跳过本地实时监听 entries=${watchTarget.entryCount} limit=${MAX_LIVE_LOCAL_WATCH_ENTRIES}`,
+      )
       void window.api.stopLocalCompareWatch(watchTarget.sessionId)
       return
     }

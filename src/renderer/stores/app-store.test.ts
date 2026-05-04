@@ -230,4 +230,38 @@ describe('app-store', () => {
     expect(persisted.compareTabs[0]?.diffTabs.map((tab) => tab.id)).toEqual(['kept.txt'])
     expect(persisted.compareTabs[0]?.activeDiffTabId).toBe('kept.txt')
   })
+
+  it('drops huge completed compare entries from persisted app state', () => {
+    const largeEntries = Array.from({ length: 5001 }, (_unused, index) => ({
+      relativePath: `file-${index}.txt`,
+      name: `file-${index}.txt`,
+      isDirectory: false,
+      state: 'equal' as const,
+      left: { name: `file-${index}.txt`, path: `file-${index}.txt`, isDirectory: false, size: 1, mtime: 1 },
+      right: { name: `file-${index}.txt`, path: `file-${index}.txt`, isDirectory: false, size: 1, mtime: 1 },
+      reasons: [],
+    }))
+
+    const persisted = createPersistedAppState({
+      page: 'compare',
+      activeCompareTabId: 'compare-tab-1',
+      compareTabs: [{
+        id: 'compare-tab-1',
+        title: 'left ↔ right',
+        snapshot: createCompareSnapshot({
+          entries: largeEntries,
+          done: true,
+          duration: 1234,
+        }),
+        diffTabs: [],
+        activeDiffTabId: null,
+      }],
+      diffTabs: [],
+      activeDiffTabId: null,
+    })
+
+    expect(persisted.compareTabs[0]?.snapshot.entries).toEqual([])
+    expect(persisted.compareTabs[0]?.snapshot.done).toBe(false)
+    expect(persisted.compareTabs[0]?.snapshot.duration).toBe(0)
+  })
 })

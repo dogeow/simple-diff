@@ -2,13 +2,13 @@ import { ipcMain, dialog, shell, BrowserWindow } from 'electron'
 import * as fs from 'fs/promises'
 import * as path from 'path'
 import { IPC_CHANNELS } from '@shared/types'
-import type { CompareEntry, CompareRequest, SourceConfig, SSHConfigInput, StartSyncRequest } from '@shared/types'
+import type { CompareEntry, CompareRequest, LogEntry, SourceConfig, SSHConfigInput, StartSyncRequest } from '@shared/types'
 import { formatDuration } from '@shared/format-duration'
 import { createFileSource } from '../file-source/index'
 import { compareDirectories } from '../compare/comparator'
 import { computeTextDiff } from '@shared/text-diff'
 import { wrapHandler } from '../utils/error'
-import { logger } from '../utils/logger'
+import { getLogFilePath, logger, writeLogFile } from '../utils/logger'
 import { safeSendToWebContents, safeSendToWindow } from '../utils/safe-ipc'
 import * as configStore from '../ssh/config-store'
 import { connectionManager } from '../ssh/connection-manager'
@@ -24,6 +24,33 @@ const SCAN_BATCH_LOG_LIMIT = 20
 const SCAN_BATCH_LOG_INTERVAL = 200
 const ENTRY_UPDATE_LOG_LIMIT = 20
 const ENTRY_UPDATE_LOG_INTERVAL = 5000
+const VALID_LOG_SCOPES = new Set(['app', 'compare', 'compare-watch', 'sync', 'ssh'])
+const VALID_LOG_LEVELS = new Set(['info', 'warn', 'error'])
+
+function formatBytes(value: number): string {
+  return `${(value / 1024 / 1024).toFixed(1)}MB`
+}
+
+function formatProcessMemoryUsage(): string {
+  const memory = process.memoryUsage()
+  return `rss=${formatBytes(memory.rss)} heap=${formatBytes(memory.heapUsed)}/${formatBytes(memory.heapTotal)} external=${formatBytes(memory.external)}`
+}
+
+function isRendererLogEntry(value: unknown): value is LogEntry {
+  if (!value || typeof value !== 'object') return false
+  const entry = value as Partial<LogEntry>
+  return typeof entry.timestamp === 'number'
+    && typeof entry.message === 'string'
+    && VALID_LOG_SCOPES.has(String(entry.scope))
+    && VALID_LOG_LEVELS.has(String(entry.level))
+}
+
+function registerLogHandlers(): void {
+  ipcMain.handle(IPC_CHANNELS.LOG_WRITE, (_event, entry: unknown) => {
+    if (!isRendererLogEntry(entry)) return
+    writeLogFile(entry)
+  })
+}
 
 interface ActiveCompare {
   readonly compareId: string
@@ -210,7 +237,7 @@ function registerCompareHandlers(): void {
         })
 
         flushEntryUpdates()
-        compareLogger.info(`[${request.compareId}] 对比完成，耗时 ${formatDuration(result.duration)} — 相同:${result.stats.equal} 不同:${result.stats.different} 仅左:${result.stats.leftOnly} 仅右:${result.stats.rightOnly}`)
+        compareLogger.info(`[${request.compareId}] 对比完成，耗时 ${formatDuration(result.duration)} — 相同:${result.stats.equal} 不同:${result.stats.different} 仅左:${result.stats.leftOnly} 仅右:${result.stats.rightOnly} mem=${formatProcessMemoryUsage()}`)
 
         // Attach source info for history
         const enriched = { ...result, leftSource: request.left, rightSource: request.right }
@@ -424,6 +451,7 @@ function registerFileOperationHandlers(): void {
 }
 
 export function registerAllHandlers(): void {
+  registerLogHandlers()
   registerFileHandlers()
   registerCompareHandlers()
   registerCompareLocalWatchHandlers()
@@ -432,4 +460,5 @@ export function registerAllHandlers(): void {
   registerSyncHandlers()
   registerDialogHandlers()
   registerFileOperationHandlers()
+  logger.info(`日志文件: ${getLogFilePath()}`)
 }

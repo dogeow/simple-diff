@@ -69,8 +69,17 @@ export interface TreeNode {
   readonly relativePath: string
   readonly isDirectory: boolean
   readonly entry: CompareEntry | null
-  readonly children: TreeNode[]
+  readonly children?: TreeNode[]
   readonly depth: number
+}
+
+export interface VisibleTreeNodes {
+  readonly length: number
+  get: (index: number) => TreeNode | undefined
+  slice: (start?: number, end?: number) => readonly TreeNode[]
+  toArray: () => readonly TreeNode[]
+  toPathArray: () => readonly string[]
+  hasPath: (relativePath: string) => boolean
 }
 
 interface EntrySortInfo {
@@ -103,10 +112,87 @@ function compareEntrySortInfo(a: EntrySortInfo, b: EntrySortInfo): number {
   return a.segments.length - b.segments.length
 }
 
+const sortedEntryInfoCache = new WeakMap<readonly CompareEntry[], EntrySortInfo[]>()
+
 function sortEntryInfos(entries: readonly CompareEntry[]): EntrySortInfo[] {
-  return entries
+  const cached = sortedEntryInfoCache.get(entries)
+  if (cached) return cached
+
+  const next = entries
     .map((entry) => ({ entry, segments: entry.relativePath.split('/') }))
     .sort(compareEntrySortInfo)
+  sortedEntryInfoCache.set(entries, next)
+  return next
+}
+
+function createTreeNode(info: EntrySortInfo): TreeNode {
+  const { entry, segments } = info
+  return {
+    name: entry.name,
+    relativePath: entry.relativePath,
+    isDirectory: entry.isDirectory,
+    entry,
+    depth: segments.length - 1,
+  }
+}
+
+function clampSliceIndex(value: number | undefined, length: number, fallback: number): number {
+  if (value == null) return fallback
+  const normalized = value < 0 ? length + value : value
+  return Math.max(0, Math.min(length, normalized))
+}
+
+function createVisibleTreeNodes(
+  sorted: readonly EntrySortInfo[],
+  indexes: Int32Array | null,
+  length: number,
+): VisibleTreeNodes {
+  const getInfo = (index: number): EntrySortInfo | undefined => {
+    if (index < 0 || index >= length) return undefined
+    return indexes ? sorted[indexes[index]] : sorted[index]
+  }
+
+  return {
+    length,
+    get: (index) => {
+      const info = getInfo(index)
+      return info ? createTreeNode(info) : undefined
+    },
+    slice: (start, end) => {
+      const safeStart = clampSliceIndex(start, length, 0)
+      const safeEnd = clampSliceIndex(end, length, length)
+      if (safeEnd <= safeStart) return []
+      const result: TreeNode[] = []
+      for (let index = safeStart; index < safeEnd; index += 1) {
+        const info = getInfo(index)
+        if (info) result.push(createTreeNode(info))
+      }
+      return result
+    },
+    toArray: () => {
+      const result: TreeNode[] = []
+      for (let index = 0; index < length; index += 1) {
+        const info = getInfo(index)
+        if (info) result.push(createTreeNode(info))
+      }
+      return result
+    },
+    toPathArray: () => {
+      const result: string[] = []
+      for (let index = 0; index < length; index += 1) {
+        const info = getInfo(index)
+        if (info) result.push(info.entry.relativePath)
+      }
+      return result
+    },
+    hasPath: (relativePath) => {
+      for (let index = 0; index < length; index += 1) {
+        const info = getInfo(index)
+        if (info?.entry.relativePath === relativePath) return true
+      }
+      return false
+    },
+  }
 }
 
 export function buildTree(entries: readonly CompareEntry[]): TreeNode {
@@ -153,31 +239,42 @@ export function buildVisibleNodes(
   entries: readonly CompareEntry[],
   expandedDirs: ReadonlySet<string>,
 ): readonly TreeNode[] {
-  const result: TreeNode[] = []
+  return buildVisibleNodeList(entries, expandedDirs).toArray()
+}
+
+export function buildVisibleNodeList(
+  entries: readonly CompareEntry[],
+  expandedDirs: ReadonlySet<string>,
+): VisibleTreeNodes {
   const sorted = sortEntryInfos(entries)
   let hiddenPrefix: string | null = null
+  let indexes: number[] | null = null
+  let visibleCount = 0
 
-  for (const { entry, segments } of sorted) {
+  for (let sortedIndex = 0; sortedIndex < sorted.length; sortedIndex += 1) {
+    const { entry } = sorted[sortedIndex]
     if (hiddenPrefix && entry.relativePath.startsWith(`${hiddenPrefix}/`)) {
       continue
     }
 
     hiddenPrefix = null
-    result.push({
-      name: entry.name,
-      relativePath: entry.relativePath,
-      isDirectory: entry.isDirectory,
-      entry,
-      children: [],
-      depth: segments.length - 1,
-    })
+    if (indexes) {
+      indexes.push(sortedIndex)
+    } else if (sortedIndex !== visibleCount) {
+      indexes = []
+      for (let index = 0; index < visibleCount; index += 1) {
+        indexes.push(index)
+      }
+      indexes.push(sortedIndex)
+    }
+    visibleCount += 1
 
     if (entry.isDirectory && !expandedDirs.has(entry.relativePath)) {
       hiddenPrefix = entry.relativePath
     }
   }
 
-  return result
+  return createVisibleTreeNodes(sorted, indexes ? Int32Array.from(indexes) : null, visibleCount)
 }
 
 export function getVisibleNodes(
@@ -192,8 +289,10 @@ export function getVisibleNodes(
     }
 
     if (node.isDirectory && (node.depth < 0 || expandedDirs.has(node.relativePath))) {
-      for (const child of node.children) {
-        walk(child)
+      if (node.children) {
+        for (const child of node.children) {
+          walk(child)
+        }
       }
     }
   }
@@ -203,6 +302,7 @@ export function getVisibleNodes(
 }
 
 function sortTree(node: TreeNode): void {
+  if (!node.children) return
   node.children.sort((a, b) => {
     if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1
     return a.name.localeCompare(b.name)
@@ -466,11 +566,20 @@ export interface PrepareCompareEntriesOptions {
   readonly side?: TreeSide
 }
 
+interface PreparedCacheEntry {
+  readonly key: string
+  readonly value: readonly CompareEntry[]
+}
+const preparedEntriesCache = new WeakMap<readonly CompareEntry[], PreparedCacheEntry>()
+
 export function prepareCompareEntries(
   entries: readonly CompareEntry[],
   options: PrepareCompareEntriesOptions,
 ): readonly CompareEntry[] {
   const { filter, pathFilter, hideDot, hideDotFilter, side } = options
+  const cacheKey = `${filter}|${hideDot ? 1 : 0}|${hideDotFilter}|${side ?? ''}|${pathFilter.join('\u0001')}`
+  const cached = preparedEntriesCache.get(entries)
+  if (cached && cached.key === cacheKey) return cached.value
 
   const prefiltered = prefilterEntries(entries, {
     pathFilter,
@@ -479,16 +588,29 @@ export function prepareCompareEntries(
     side,
   })
 
-  return applyEffectiveAndFilter(prefiltered, filter)
+  const value = applyEffectiveAndFilter(prefiltered, filter)
+  preparedEntriesCache.set(entries, { key: cacheKey, value })
+  return value
 }
 
 const DIR_STATE_PRIORITY: CompareState[] = ['different', 'comparing', 'pending', 'equal']
+
+const effectiveDirStateCache = new WeakMap<readonly CompareEntry[], ReadonlyMap<string, CompareState>>()
 
 /**
  * Compute effective directory states by propagating descendant entry states upward.
  * A directory's effective state is the highest-priority state among its descendants.
  */
 export function computeEffectiveDirStates(entries: readonly CompareEntry[]): ReadonlyMap<string, CompareState> {
+  const cached = effectiveDirStateCache.get(entries)
+  if (cached) return cached
+
+  const computed = computeEffectiveDirStatesUncached(entries)
+  effectiveDirStateCache.set(entries, computed)
+  return computed
+}
+
+function computeEffectiveDirStatesUncached(entries: readonly CompareEntry[]): ReadonlyMap<string, CompareState> {
   const entryByPath = new Map<string, CompareEntry>()
   const dirStates = new Map<string, Set<CompareState>>()
 

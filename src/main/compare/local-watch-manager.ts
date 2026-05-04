@@ -21,6 +21,7 @@ interface LocalWatchSession {
   readonly watchers: FSWatcher[]
   readonly dirtyPaths: Set<string>
   flushTimer: NodeJS.Timeout | null
+  fatalError: boolean
 }
 
 const sessionsBySender = new WeakMap<WebContents, Map<string, LocalWatchSession>>()
@@ -73,6 +74,11 @@ function collectLocalWatchRoots(request: CompareLocalWatchRequest): readonly Loc
   }
 
   return roots.filter((root, index) => roots.findIndex((candidate) => candidate.rootPath === root.rootPath) === index)
+}
+
+function isFatalWatchError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error)
+  return message.includes('EMFILE') || message.includes('ENOSPC')
 }
 
 async function closeWatchSession(session: LocalWatchSession): Promise<void> {
@@ -133,6 +139,7 @@ export class LocalCompareWatchManager {
       watchers: [],
       dirtyPaths: new Set<string>(),
       flushTimer: null,
+      fatalError: false,
     }
 
     const flushDirtyPaths = (): void => {
@@ -199,7 +206,14 @@ export class LocalCompareWatchManager {
       })
 
       watcher.on('error', (error) => {
+        if (session.fatalError) return
         localWatchLogger.warn(`[${request.sessionId}] 本地监听异常 ${root.label}:${root.rootPath} error=${error instanceof Error ? error.message : error}`)
+        if (isFatalWatchError(error)) {
+          session.fatalError = true
+          localWatchLogger.warn(`[${request.sessionId}] 本地监听遇到系统 watch 限制，已停止实时监听`)
+          void this.stop(sender, request.sessionId)
+          return
+        }
         queueDirtyPath('')
       })
 

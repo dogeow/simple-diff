@@ -353,7 +353,7 @@ export default function ComparePage() {
     useCompareStore.getState().setExtensionFilter(nextFilters)
     const activeTabId = useAppStore.getState().activeCompareTabId
     if (activeTabId) {
-      useAppStore.getState().updateCompareTabSnapshot(activeTabId, () => useCompareStore.getState().createSnapshot())
+      useAppStore.getState().updateCompareTabSnapshot(activeTabId, () => useCompareStore.getState().createTabSnapshot())
     }
 
     if (isFilterAdditionOnly(previousFilters, nextFilters)) {
@@ -372,7 +372,7 @@ export default function ComparePage() {
     useAppStore.getState().saveCompareTab({
       id: activeCompareTabId ?? compareTabId,
       title: compareTabs.find((tab) => tab.id === activeCompareTabId)?.title ?? '未命名对比',
-      snapshot: useCompareStore.getState().createSnapshot(),
+      snapshot: useCompareStore.getState().createTabSnapshot(),
       diffTabs: useAppStore.getState().diffTabs,
       activeDiffTabId: useAppStore.getState().activeDiffTabId,
     })

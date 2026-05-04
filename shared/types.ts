@@ -204,7 +204,7 @@ export interface CompareHistoryEntry {
 // ─── Log ─────────────────────────────────────────────────────
 
 export type LogLevel = 'info' | 'warn' | 'error'
-export type LogScope = 'app' | 'compare' | 'sync' | 'ssh'
+export type LogScope = 'app' | 'compare' | 'compare-watch' | 'sync' | 'ssh'
 
 export interface LogEntry {
   readonly timestamp: number
@@ -229,6 +229,7 @@ export const IPC_CHANNELS = {
   COMPARE_LOCAL_WATCH_STOP: 'compare:local-watch:stop',
   COMPARE_LOCAL_DIRTY: 'compare:local-dirty',
   LOG: 'app:log',
+  LOG_WRITE: 'app:log-write',
   TEXT_DIFF: 'text:diff',
   SSH_LIST_CONFIGS: 'ssh:list-configs',
   SSH_SAVE_CONFIG: 'ssh:save-config',
