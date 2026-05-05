@@ -4,6 +4,7 @@ import type { CompareStats } from '../../../shared/types'
 import type { ViewMode, HideDotFilter } from '../stores/compare-store'
 import { formatSyncProgress } from '../utils/format-sync-progress'
 import { openSyncTaskView } from '../utils/compare-session-navigation'
+import { getRuntimeInfo } from '../runtime/runtime-info'
 import FilterModal from './FilterModal'
 import { ArrowLeftIcon, ArrowRightIcon, ChevronDownIcon, ChevronRightIcon, ChevronUpDownIcon, PauseIcon, PlayIcon, RefreshIcon } from './Icons'
 
@@ -100,6 +101,7 @@ export default function CompareToolbar({
   onResumeSync,
   onClearSync,
 }: CompareToolbarProps) {
+  const supportsSync = getRuntimeInfo().supportsSync
   const [dotDropOpen, setDotDropOpen] = useState(false)
   const dotDropRef = useRef<HTMLDivElement>(null)
 
@@ -175,7 +177,7 @@ export default function CompareToolbar({
         </div>
 
         <div className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-2">
-          {syncTask && (
+          {supportsSync && syncTask && (
             <div className="flex min-w-0 max-w-full items-center gap-2 rounded-md border border-neutral-700 bg-neutral-800/70 px-2 py-1 text-xs text-neutral-300">
               <span className="shrink-0 tabular-nums text-neutral-400">
                 同步 {syncTask.completedItems}/{syncTask.totalItems} · {formatSyncProgress(syncTask.completedItems, syncTask.totalItems)}
@@ -231,7 +233,7 @@ export default function CompareToolbar({
           )}
 
           <div className="flex flex-wrap gap-1">
-            {!hasGlobalSyncTask && (
+            {supportsSync && !hasGlobalSyncTask && (
               <>
                 <button
                   onClick={() => onStartSync('left_to_right')}
@@ -257,7 +259,7 @@ export default function CompareToolbar({
         </div>
       </div>
 
-      {syncTask?.lastError && (
+      {supportsSync && syncTask?.lastError && (
         <div className="rounded-md border border-rose-900/60 bg-rose-950/30 px-2 py-1 text-xs text-rose-300">
           同步错误: {syncTask.lastError}
         </div>

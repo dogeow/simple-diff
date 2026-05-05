@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
+import type { AppAPI as SharedAppAPI } from '../../shared/app-api'
 import { IPC_CHANNELS } from '../../shared/types'
 import type {
   CompareEntry,
@@ -19,6 +20,16 @@ import type {
 } from '../../shared/types'
 
 const api = {
+  runtime: {
+    mode: 'electron',
+    supportsSftp: true,
+    supportsHistory: true,
+    supportsSync: true,
+    supportsNativeFolderSelection: true,
+    supportsDirectoryDragDrop: true,
+    supportsWriteBack: true,
+  },
+
   // File source
   listFiles: (source: SourceConfig, dirPath: string): Promise<IpcResult<readonly FileEntry[]>> =>
     ipcRenderer.invoke(IPC_CHANNELS.FILE_SOURCE_LIST, source, dirPath),
@@ -166,8 +177,8 @@ const api = {
 
   // Utilities
   getPathForFile: (file: File): string => webUtils.getPathForFile(file),
-} as const
+} satisfies SharedAppAPI
 
 contextBridge.exposeInMainWorld('api', api)
 
-export type ElectronAPI = typeof api
+export type ElectronAPI = SharedAppAPI

@@ -6,6 +6,7 @@ import CommandPalette from './CommandPalette'
 import ShortcutHelp from './ShortcutHelp'
 import ToastContainer from './ToastContainer'
 import GlobalRunningIndicator from './GlobalRunningIndicator'
+import { getRuntimeInfo } from '../runtime/runtime-info'
 import { FolderIcon, HistoryIcon, RefreshIcon, ServerIcon, SettingsIcon, TextIcon } from './Icons'
 
 interface LayoutProps {
@@ -16,14 +17,15 @@ interface NavItem {
   readonly page: Page
   readonly label: string
   readonly Icon: ComponentType<{ width?: number; height?: number; className?: string }>
+  readonly hiddenWhen?: (runtime: Window['api']['runtime']) => boolean
 }
 
 const NAV_ITEMS: readonly NavItem[] = [
   { page: 'home', label: '目录对比', Icon: FolderIcon },
   { page: 'text', label: '文本对比', Icon: TextIcon },
-  { page: 'ssh', label: 'SSH管理', Icon: ServerIcon },
-  { page: 'history', label: '历史', Icon: HistoryIcon },
-  { page: 'sync', label: '同步任务', Icon: RefreshIcon },
+  { page: 'ssh', label: 'SSH管理', Icon: ServerIcon, hiddenWhen: (runtime) => !runtime.supportsSftp },
+  { page: 'history', label: '历史', Icon: HistoryIcon, hiddenWhen: (runtime) => !runtime.supportsHistory },
+  { page: 'sync', label: '同步任务', Icon: RefreshIcon, hiddenWhen: (runtime) => !runtime.supportsSync },
   { page: 'settings', label: '设置', Icon: SettingsIcon },
 ]
 
@@ -35,10 +37,28 @@ function isTypingTarget(target: EventTarget | null): boolean {
 }
 
 export default function Layout({ children }: LayoutProps) {
+  const runtime = getRuntimeInfo()
   const page = useAppStore((s) => s.page)
   const setPage = useAppStore((s) => s.setPage)
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [shortcutsOpen, setShortcutsOpen] = useState(false)
+  const visibleNavItems = NAV_ITEMS.filter((item) => !item.hiddenWhen?.(runtime))
+
+  useEffect(() => {
+    if (page === 'ssh' && !runtime.supportsSftp) {
+      setPage('home')
+      return
+    }
+
+    if (page === 'history' && !runtime.supportsHistory) {
+      setPage('home')
+      return
+    }
+
+    if (page === 'sync' && !runtime.supportsSync) {
+      setPage('home')
+    }
+  }, [page, runtime.supportsHistory, runtime.supportsSftp, runtime.supportsSync, setPage])
 
   const handleNavigate = (nextPage: Page) => {
     if ((page === 'home' || page === 'compare') && nextPage === 'home') {
@@ -96,7 +116,7 @@ export default function Layout({ children }: LayoutProps) {
     <div className="flex h-screen flex-col bg-neutral-900 text-neutral-100">
       <header className="app-drag-region flex h-11 shrink-0 items-center gap-3 border-b border-neutral-800 bg-neutral-850 px-3">
         <nav className="flex items-center gap-0.5">
-          {NAV_ITEMS.map(({ page: itemPage, label, Icon }) => {
+          {visibleNavItems.map(({ page: itemPage, label, Icon }) => {
             const active = isNavItemActive(itemPage)
             return (
               <button

@@ -1,7 +1,7 @@
-import type { ElectronAPI } from './index'
+import type { AppAPI } from '../../shared/app-api'
 
 declare global {
   interface Window {
-    api: ElectronAPI
+    api: AppAPI
   }
 }

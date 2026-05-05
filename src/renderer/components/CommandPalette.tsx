@@ -16,6 +16,7 @@ import {
   TrashIcon,
 } from './Icons'
 import Modal from './Modal'
+import { getRuntimeInfo } from '../runtime/runtime-info'
 
 interface CommandPaletteProps {
   readonly open: boolean
@@ -49,6 +50,7 @@ function matches(query: string, keywords: string): boolean {
 }
 
 export default function CommandPalette({ open, onClose }: CommandPaletteProps) {
+  const runtime = getRuntimeInfo()
   const inputRef = useRef<HTMLInputElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
   const [query, setQuery] = useState('')
@@ -105,30 +107,30 @@ export default function CommandPalette({ open, onClose }: CommandPaletteProps) {
         keywords: 'text compare 文本对比',
         onSelect: () => navigate('text'),
       },
-      {
+      runtime.supportsSftp ? {
         id: 'nav-ssh',
         title: PAGE_LABELS.ssh,
         hint: '管理 SFTP 连接',
         Icon: ServerIcon,
         keywords: 'ssh sftp 管理 连接',
         onSelect: () => navigate('ssh'),
-      },
-      {
+      } : null,
+      runtime.supportsHistory ? {
         id: 'nav-history',
         title: PAGE_LABELS.history,
         hint: '查看过往对比记录',
         Icon: HistoryIcon,
         keywords: 'history 历史 记录',
         onSelect: () => navigate('history'),
-      },
-      {
+      } : null,
+      runtime.supportsSync ? {
         id: 'nav-sync',
         title: PAGE_LABELS.sync,
         hint: '查看当前同步文件列表',
         Icon: RefreshIcon,
         keywords: 'sync 同步 任务 文件 列表',
         onSelect: () => navigate('sync'),
-      },
+      } : null,
       {
         id: 'nav-settings',
         title: PAGE_LABELS.settings,
@@ -137,7 +139,7 @@ export default function CommandPalette({ open, onClose }: CommandPaletteProps) {
         keywords: 'settings 设置 配置',
         onSelect: () => navigate('settings'),
       },
-    ]
+    ].filter((item): item is CommandItem => item !== null)
 
     const newCompareItem: CommandItem = {
       id: 'action-new-compare',
@@ -177,7 +179,7 @@ export default function CommandPalette({ open, onClose }: CommandPaletteProps) {
     ]
 
     return [...navItems, newCompareItem, ...tabItems, ...logItems]
-  }, [compareTabs, currentPage, logVisible])
+  }, [compareTabs, currentPage, logVisible, runtime.supportsHistory, runtime.supportsSftp, runtime.supportsSync])
 
   const filtered = useMemo(
     () => items.filter((item) => matches(query, `${item.title} ${item.keywords}`)),

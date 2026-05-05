@@ -1,10 +1,11 @@
 # Simple Diff
 
-桌面文件/目录对比工具，支持本地与 SFTP 远程对比。
+文件/目录对比工具，支持 Electron 桌面版，也支持浏览器静态部署版。
 
 ## 功能
 
 - **目录对比** — 本地 ↔ 本地、本地 ↔ SFTP、SFTP ↔ SFTP
+- **网页目录对比** — 浏览器中选择或拖入本地文件夹，直接完成目录分析与文本 diff
 - **逐层扫描** — BFS 逐层对比，父目录优先展示，子目录懒加载
 - **双视图** — 分栏（左右独立文件列表）和合并视图可切换
 - **文件 Diff** — 双击文件查看文本差异，Tab 管理多文件
@@ -36,12 +37,28 @@ npm install
 # 开发模式
 npm run dev
 
+# 网页开发模式
+npm run dev:web
+
 # 构建
 npm run build
+
+# 构建网页静态产物
+npm run build:web
 
 # 打包
 npm run dist
 ```
+
+## 网页版
+
+网页模式适合本地目录拖入、浏览器内文本对比和静态部署场景。
+
+- 当前支持：本地目录 ↔ 本地目录、目录拖放、文本 diff、浏览器内保存文本改动
+- 当前不支持：SFTP、同步任务、系统文件管理器定位、历史记录
+- 推荐浏览器：Chrome / Edge（依赖 File System Access API）
+
+部署说明见 [docs/web-deploy.md](docs/web-deploy.md)。
 
 ## 项目结构
 
@@ -54,6 +71,7 @@ src/renderer/          React 前端
   pages/               页面 (Home, Compare, SSH, History)
   components/          UI 组件
   hooks/               自定义 Hooks
+  runtime/             浏览器运行时 API / 目录句柄实现
 ```
 
 ## TODO

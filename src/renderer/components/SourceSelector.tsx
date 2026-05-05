@@ -3,6 +3,8 @@ import { joinSourcePath, trimTrailingSeparators } from '@shared/source-path'
 import { useShallow } from 'zustand/react/shallow'
 import type { FileEntry, SSHConfig } from '../../../shared/types'
 import { useSSHStore } from '../stores/ssh-store'
+import { formatSourceInputValue, registerDroppedBrowserDirectory } from '../runtime/browser-roots'
+import { getRuntimeInfo } from '../runtime/runtime-info'
 import { ArrowLeftIcon, CheckIcon, CloseIcon, FolderIcon, RefreshIcon, ServerIcon } from './Icons'
 
 interface SourceSelectorProps {
@@ -89,6 +91,7 @@ export default function SourceSelector({
   onPathChange,
   onSSHConfigIdChange,
 }: SourceSelectorProps) {
+  const runtime = getRuntimeInfo()
   const { configs, loadConfigs } = useSSHStore(useShallow((state) => ({
     configs: state.configs,
     loadConfigs: state.loadConfigs,
@@ -100,10 +103,21 @@ export default function SourceSelector({
   const [remoteLoading, setRemoteLoading] = useState(false)
   const [remoteError, setRemoteError] = useState<string | null>(null)
   const dragDepthRef = useRef(0)
+  const browserLocalSource = runtime.mode === 'web' && sourceType === 'local'
+  const displayPath = browserLocalSource ? formatSourceInputValue(path) : path
 
   useEffect(() => {
     loadConfigs()
   }, [loadConfigs])
+
+  useEffect(() => {
+    if (runtime.supportsSftp || sourceType !== 'sftp') {
+      return
+    }
+
+    onSourceTypeChange('local')
+    onSSHConfigIdChange('')
+  }, [onSSHConfigIdChange, onSourceTypeChange, runtime.supportsSftp, sourceType])
 
   const handleBrowse = async () => {
     const result = await window.api.selectFolder()
@@ -203,6 +217,16 @@ export default function SourceSelector({
     dragDepthRef.current = 0
     setIsDragOver(false)
 
+    if (runtime.mode === 'web') {
+      void (async () => {
+        const droppedPath = await registerDroppedBrowserDirectory(event.dataTransfer)
+        if (droppedPath) {
+          onPathChange(droppedPath)
+        }
+      })()
+      return
+    }
+
     const droppedPath = getDroppedFolderPath(event)
     if (droppedPath) {
       onPathChange(droppedPath)
@@ -237,11 +261,13 @@ export default function SourceSelector({
             type="button"
             onClick={() => onSourceTypeChange('sftp')}
             aria-pressed={sourceType === 'sftp'}
+            disabled={!runtime.supportsSftp}
             className={`${SOURCE_PILL_BASE} border-l border-neutral-700 ${
               sourceType === 'sftp'
                 ? 'bg-blue-600 text-white'
                 : 'text-neutral-300 hover:bg-neutral-700'
             }`}
+            title={runtime.supportsSftp ? undefined : '网页版暂不支持 SFTP'}
           >
             <ServerIcon width={12} height={12} />
             SFTP
@@ -271,9 +297,10 @@ export default function SourceSelector({
 
         <input
           type="text"
-          value={path}
+          value={displayPath}
           onChange={(e) => onPathChange(e.target.value)}
-          placeholder={sourceType === 'local' ? '选择或拖入目录路径...' : '远程目录路径...'}
+          placeholder={sourceType === 'local' ? (runtime.mode === 'web' ? '选择或拖入浏览器目录...' : '选择或拖入目录路径...') : '远程目录路径...'}
+          readOnly={browserLocalSource}
           className={`flex-1 min-w-0 rounded-md border bg-neutral-800 px-3 py-1.5 font-mono text-sm text-neutral-100 placeholder-neutral-500 outline-none transition-colors ${
             isDragOver
               ? 'border-blue-500 ring-1 ring-blue-500/40'
@@ -284,10 +311,11 @@ export default function SourceSelector({
         {sourceType === 'local' && (
           <button
             onClick={handleBrowse}
+            disabled={runtime.mode === 'web' && !runtime.supportsNativeFolderSelection}
             className="inline-flex items-center gap-1.5 rounded-md border border-neutral-700 bg-neutral-800 px-3 py-1.5 text-sm text-neutral-200 transition-colors hover:border-neutral-600 hover:bg-neutral-750 active:bg-neutral-700"
           >
             <FolderIcon width={13} height={13} />
-            浏览...
+            {runtime.mode === 'web' ? '选择文件夹' : '浏览...'}
           </button>
         )}
 
@@ -302,6 +330,14 @@ export default function SourceSelector({
           </button>
         )}
       </div>
+
+      {browserLocalSource && (
+        <div className="text-[11px] text-neutral-500">
+          {runtime.supportsDirectoryDragDrop
+            ? '支持将目录直接拖到输入框中。'
+            : '当前浏览器不支持目录拖放，请使用“选择文件夹”。'}
+        </div>
+      )}
 
       {sourceType === 'sftp' && remoteBrowserOpen && (
         <div

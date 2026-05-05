@@ -11,6 +11,7 @@ import { useSettingsStore } from '../stores/settings-store'
 import { openCompareTab, openSyncTaskView } from '../utils/compare-session-navigation'
 import { formatSyncProgress } from '../utils/format-sync-progress'
 import { isFilterAdditionOnly } from '../utils/filter-change'
+import { getRuntimeInfo } from '../runtime/runtime-info'
 import type { StrategyName } from '../../../shared/types'
 import { ArrowRightIcon, PlayIcon, SwapIcon } from '../components/Icons'
 
@@ -29,6 +30,7 @@ const SYNC_STATUS_TONE: Record<string, string> = {
 }
 
 export default function HomePage() {
+  const runtime = getRuntimeInfo()
   const [strategyDetailsOpen, setStrategyDetailsOpen] = useState(false)
   const {
     syncTask,
@@ -146,7 +148,7 @@ export default function HomePage() {
               <ol className="ml-1 grid gap-1.5 text-xs text-neutral-400 sm:grid-cols-3">
                 <li className="flex items-start gap-2">
                   <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-neutral-800 text-[10px] font-semibold text-neutral-300">1</span>
-                  <span>选择左右数据源（本地或 SFTP）</span>
+                  <span>选择左右数据源（{runtime.supportsSftp ? '本地或 SFTP' : '本地目录'}）</span>
                 </li>
                 <li className="flex items-start gap-2">
                   <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-neutral-800 text-[10px] font-semibold text-neutral-300">2</span>
@@ -161,7 +163,7 @@ export default function HomePage() {
                 <span>提示：</span>
                 <span className="rounded bg-neutral-800/70 px-1.5 py-0.5">⌘K 命令面板</span>
                 <span className="rounded bg-neutral-800/70 px-1.5 py-0.5">? 快捷键帮助</span>
-                <span className="rounded bg-neutral-800/70 px-1.5 py-0.5">右键文件可忽略 / 同步</span>
+                <span className="rounded bg-neutral-800/70 px-1.5 py-0.5">右键文件可忽略{runtime.supportsSync ? ' / 同步' : ''}</span>
               </div>
             </div>
           )}

@@ -16,6 +16,7 @@ import { type TreeNode } from '../utils/tree-utils'
 import { getSyncRecompareRootsFromEntries } from '../utils/sync-dirty'
 import { collectSyncEntriesForSelection, resolveCompareSelection, type CompareSelectionState } from '../utils/compare-selection'
 import { isSameSourceConfig } from '../utils/source-label'
+import { getRuntimeInfo } from '../runtime/runtime-info'
 
 interface CompareTreeProps {
   readonly entries: readonly CompareEntry[]
@@ -75,6 +76,7 @@ function CompareTreeTable({
   onExtensionFilterChange,
   setExtensionFilter,
 }: CompareTreeTableProps) {
+  const supportsSync = getRuntimeInfo().supportsSync
   const tableRef = useRef<HTMLDivElement>(null)
   const nodeInteractions = useCompareNodeInteractions(onDoubleClickFile)
   const { dirtyDisplayPaths, leftSource, rightSource, syncTask, setSyncTask } = useCompareStore(useShallow((state) => ({
@@ -214,7 +216,7 @@ function CompareTreeTable({
     const canCopyToLeft = canQueueSyncDirection(syncTask, leftSource, rightSource, 'right_to_left')
     const actions: ContextMenuAction[] = []
 
-    if (leftSyncEntries.length > 0) {
+    if (supportsSync && leftSyncEntries.length > 0) {
       actions.push({
         label: effectiveSelectedPaths.size > 1 ? `复制所选到右边${selectedSuffix}` : '复制到右边',
         disabled: !canCopyToRight,
@@ -225,7 +227,7 @@ function CompareTreeTable({
       })
     }
 
-    if (rightSyncEntries.length > 0) {
+    if (supportsSync && rightSyncEntries.length > 0) {
       actions.push({
         label: effectiveSelectedPaths.size > 1 ? `复制所选到左边${selectedSuffix}` : '复制到左边',
         disabled: !canCopyToLeft,
@@ -242,7 +244,7 @@ function CompareTreeTable({
     })
 
     return actions
-  }, [entries, handleCopySelection, handleIgnoreNode, leftSource, rightSource, selection.selectedPaths, syncTask])
+  }, [entries, handleCopySelection, handleIgnoreNode, leftSource, rightSource, selection.selectedPaths, supportsSync, syncTask])
 
   return (
     <>
@@ -252,24 +254,28 @@ function CompareTreeTable({
             已选 {selectedCount} 项，可按 Shift 连选、按 Cmd/Ctrl 增减选择
           </div>
           <div className="flex shrink-0 flex-wrap items-center gap-2">
-            <button
-              onClick={() => {
-                void handleCopySelection(selection.selectedPaths, 'left_to_right')
-              }}
-              disabled={leftSelectionEntries.length === 0 || !canQueueSyncDirection(syncTask, leftSource, rightSource, 'left_to_right')}
-              className="inline-flex items-center rounded-md bg-emerald-600 px-2.5 py-1 text-xs font-medium text-white transition-colors hover:bg-emerald-500 disabled:cursor-not-allowed disabled:bg-neutral-700 disabled:text-neutral-500"
-            >
-              复制所选到右边
-            </button>
-            <button
-              onClick={() => {
-                void handleCopySelection(selection.selectedPaths, 'right_to_left')
-              }}
-              disabled={rightSelectionEntries.length === 0 || !canQueueSyncDirection(syncTask, leftSource, rightSource, 'right_to_left')}
-              className="inline-flex items-center rounded-md bg-cyan-600 px-2.5 py-1 text-xs font-medium text-white transition-colors hover:bg-cyan-500 disabled:cursor-not-allowed disabled:bg-neutral-700 disabled:text-neutral-500"
-            >
-              复制所选到左边
-            </button>
+            {supportsSync && (
+              <>
+                <button
+                  onClick={() => {
+                    void handleCopySelection(selection.selectedPaths, 'left_to_right')
+                  }}
+                  disabled={leftSelectionEntries.length === 0 || !canQueueSyncDirection(syncTask, leftSource, rightSource, 'left_to_right')}
+                  className="inline-flex items-center rounded-md bg-emerald-600 px-2.5 py-1 text-xs font-medium text-white transition-colors hover:bg-emerald-500 disabled:cursor-not-allowed disabled:bg-neutral-700 disabled:text-neutral-500"
+                >
+                  复制所选到右边
+                </button>
+                <button
+                  onClick={() => {
+                    void handleCopySelection(selection.selectedPaths, 'right_to_left')
+                  }}
+                  disabled={rightSelectionEntries.length === 0 || !canQueueSyncDirection(syncTask, leftSource, rightSource, 'right_to_left')}
+                  className="inline-flex items-center rounded-md bg-cyan-600 px-2.5 py-1 text-xs font-medium text-white transition-colors hover:bg-cyan-500 disabled:cursor-not-allowed disabled:bg-neutral-700 disabled:text-neutral-500"
+                >
+                  复制所选到左边
+                </button>
+              </>
+            )}
             <button
               onClick={() => setSelection({ selectedPaths: new Set(), anchorPath: null })}
               className="inline-flex items-center rounded-md border border-neutral-700 bg-neutral-800/70 px-2.5 py-1 text-xs font-medium text-neutral-200 transition-colors hover:border-neutral-600 hover:bg-neutral-800"
@@ -346,6 +352,7 @@ function CompareTreeTable({
 }
 
 export default function CompareTree({ entries, filter, onFilterChange, onDoubleClickFile, toolbarOnly = false, emptyStateMessage = '无匹配项', onRerunCompare, onExtensionFilterChange }: CompareTreeProps) {
+  const supportsSync = getRuntimeInfo().supportsSync
   const clearDiffTabs = useAppStore((s) => s.clearDiffTabs)
   const setActiveDiffTab = useAppStore((s) => s.setActiveDiffTab)
   const { pauseCompare, resumeCompare, restartCompare, recompareDirtyPaths } = useCompareActions()
@@ -519,8 +526,8 @@ export default function CompareTree({ entries, filter, onFilterChange, onDoubleC
         onResumeCompare={handleResumeCompare}
         onRestartCompare={handleRestartCompare}
         onRecompareDirtyPaths={handleRecompareDirtyPaths}
-        hasGlobalSyncTask={syncTask !== null}
-        syncTask={visibleSyncTask}
+        hasGlobalSyncTask={supportsSync && syncTask !== null}
+        syncTask={supportsSync ? visibleSyncTask : null}
         onStartSync={handleStartSync}
         onPauseSync={handlePauseSync}
         onResumeSync={handleResumeSync}

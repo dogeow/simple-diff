@@ -17,6 +17,8 @@ import { collectSyncEntriesForSelection, resolveCompareSelection, type CompareSe
 import { formatSourceTag, isSameSourceConfig } from '../utils/source-label'
 import { rememberSyncDirtyRoots } from '../hooks/useCompare'
 import { getSyncRecompareRootsFromEntries } from '../utils/sync-dirty'
+import { formatSourceInputValue, isBrowserSourcePath } from '../runtime/browser-roots'
+import { getRuntimeInfo } from '../runtime/runtime-info'
 
 interface SplitTreeProps {
   readonly entries: readonly CompareEntry[]
@@ -65,6 +67,7 @@ function PathHeader({
     loadConfigs: state.loadConfigs,
   })))
   const sourcePath = useCompareStore((s) => side === 'left' ? s.leftPath : s.rightPath)
+  const browserLocalSource = source?.type === 'local' && getRuntimeInfo().mode === 'web' && isBrowserSourcePath(source.path)
   const [pathInput, setPathInput] = useState(sourcePath)
 
   useEffect(() => {
@@ -74,10 +77,14 @@ function PathHeader({
   }, [configs.length, loadConfigs, source])
 
   useEffect(() => {
-    setPathInput(sourcePath)
-  }, [sourcePath])
+    setPathInput(browserLocalSource ? formatSourceInputValue(sourcePath) : sourcePath)
+  }, [browserLocalSource, sourcePath])
 
   const handlePathSubmit = useCallback(() => {
+    if (browserLocalSource) {
+      return
+    }
+
     const trimmed = pathInput.trim()
     if (!trimmed) {
       setPathInput(sourcePath)
@@ -87,7 +94,7 @@ function PathHeader({
     if (trimmed !== sourcePath) {
       void onSourcePathSubmit?.(side, trimmed)
     }
-  }, [onSourcePathSubmit, pathInput, sourcePath, side])
+  }, [browserLocalSource, onSourcePathSubmit, pathInput, sourcePath, side])
 
   const sideBadgeClass = side === 'left'
     ? 'bg-sky-500/15 text-sky-300'
@@ -106,6 +113,7 @@ function PathHeader({
             type="text"
             value={pathInput}
             onChange={(e) => setPathInput(e.target.value)}
+            readOnly={browserLocalSource}
             onBlur={handlePathSubmit}
             onKeyDown={(e) => {
               if (e.key === 'Enter') handlePathSubmit()
@@ -164,6 +172,9 @@ function SideTable({
   onSelectNode,
   onExtensionFilterChange,
 }: SideTableProps) {
+  const runtime = getRuntimeInfo()
+  const supportsSync = runtime.supportsSync
+  const isDesktopRuntime = runtime.mode === 'electron'
   const {
     refreshDir,
     leftSource,
@@ -254,7 +265,7 @@ function SideTable({
         ? '复制到右边'
         : '复制到左边'
     const canCopySelection = canQueueSyncDirection(syncTask, leftSource, rightSource, copyDirection)
-    const copyAction = syncEntries.length > 0
+    const copyAction = supportsSync && syncEntries.length > 0
       ? [{
           label: copyLabel,
           disabled: !canCopySelection,
@@ -265,7 +276,7 @@ function SideTable({
         } satisfies ContextMenuAction]
       : []
 
-    if (!isLocal) {
+    if (!isLocal || !isDesktopRuntime) {
       return [...copyAction, ignoreAction]
     }
 
@@ -477,6 +488,7 @@ const SideRow = memo(SideRowImpl, (prev, next) => {
 // ─── Main Component ──────────────────────────────────────────
 
 export default function SplitTree({ entries, filter, onDoubleClickFile, emptyStateMessage = '无匹配项', onExtensionFilterChange, onSourcePathSubmit }: SplitTreeProps) {
+  const supportsSync = getRuntimeInfo().supportsSync
   const leftRef = useRef<HTMLDivElement>(null)
   const rightRef = useRef<HTMLDivElement>(null)
   const syncing = useRef(false)
@@ -617,24 +629,28 @@ export default function SplitTree({ entries, filter, onDoubleClickFile, emptySta
             已选 {selectedCount} 项，可按 Shift 连选、按 Cmd/Ctrl 增减选择
           </div>
           <div className="flex shrink-0 flex-wrap items-center gap-2">
-            <button
-              onClick={() => {
-                void handleBatchSync('left_to_right')
-              }}
-              disabled={leftSelectionEntries.length === 0 || !canQueueSyncDirection(syncTask, leftSource, rightSource, 'left_to_right')}
-              className="inline-flex items-center rounded-md bg-emerald-600 px-2.5 py-1 text-xs font-medium text-white transition-colors hover:bg-emerald-500 disabled:cursor-not-allowed disabled:bg-neutral-700 disabled:text-neutral-500"
-            >
-              复制所选到右边
-            </button>
-            <button
-              onClick={() => {
-                void handleBatchSync('right_to_left')
-              }}
-              disabled={rightSelectionEntries.length === 0 || !canQueueSyncDirection(syncTask, leftSource, rightSource, 'right_to_left')}
-              className="inline-flex items-center rounded-md bg-cyan-600 px-2.5 py-1 text-xs font-medium text-white transition-colors hover:bg-cyan-500 disabled:cursor-not-allowed disabled:bg-neutral-700 disabled:text-neutral-500"
-            >
-              复制所选到左边
-            </button>
+            {supportsSync && (
+              <>
+                <button
+                  onClick={() => {
+                    void handleBatchSync('left_to_right')
+                  }}
+                  disabled={leftSelectionEntries.length === 0 || !canQueueSyncDirection(syncTask, leftSource, rightSource, 'left_to_right')}
+                  className="inline-flex items-center rounded-md bg-emerald-600 px-2.5 py-1 text-xs font-medium text-white transition-colors hover:bg-emerald-500 disabled:cursor-not-allowed disabled:bg-neutral-700 disabled:text-neutral-500"
+                >
+                  复制所选到右边
+                </button>
+                <button
+                  onClick={() => {
+                    void handleBatchSync('right_to_left')
+                  }}
+                  disabled={rightSelectionEntries.length === 0 || !canQueueSyncDirection(syncTask, leftSource, rightSource, 'right_to_left')}
+                  className="inline-flex items-center rounded-md bg-cyan-600 px-2.5 py-1 text-xs font-medium text-white transition-colors hover:bg-cyan-500 disabled:cursor-not-allowed disabled:bg-neutral-700 disabled:text-neutral-500"
+                >
+                  复制所选到左边
+                </button>
+              </>
+            )}
             <button
               onClick={() => setSelection({ selectedPaths: new Set(), anchorPath: null })}
               className="inline-flex items-center rounded-md border border-neutral-700 bg-neutral-800/70 px-2.5 py-1 text-xs font-medium text-neutral-200 transition-colors hover:border-neutral-600 hover:bg-neutral-800"
