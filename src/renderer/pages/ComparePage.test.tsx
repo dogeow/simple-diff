@@ -550,30 +550,24 @@ describe('ComparePage renderer interactions', () => {
     expect(screen.getByRole('alert').textContent).toContain('左侧目录不可访问：/Volumes/未命名2/迅雷下载/书籍。可能是硬盘未插入、未挂载，或路径已变更。')
   })
 
-  it('shows a source pair summary for sftp compares', () => {
-    resetStores()
-    useSSHStore.setState({
-      configs: [
-        { id: 'left-server', label: '生产服', host: 'prod.example.com', port: 22, username: 'deploy', authType: 'privateKey' },
-        { id: 'right-server', label: '预发服', host: 'staging.example.com', port: 22, username: 'deploy', authType: 'privateKey' },
-      ],
-      loading: false,
-      loadConfigs: async () => undefined,
-    })
-    useCompareStore.setState({
-      leftSourceType: 'sftp',
-      rightSourceType: 'sftp',
-      leftSSHConfigId: 'left-server',
-      rightSSHConfigId: 'right-server',
-      leftPath: '/var/www/api-next',
-      rightPath: '/var/www/api',
-      leftSource: { type: 'sftp', configId: 'left-server', path: '/var/www/api-next' },
-      rightSource: { type: 'sftp', configId: 'right-server', path: '/var/www/api' },
-    })
+  it('uses the compare tab tooltip for full source paths instead of rendering a separate summary pill', () => {
+    resetStores([
+      {
+        id: 'compare-tab-1',
+        title: '本地:old-left ↔ 本地:old-right',
+        snapshot: createSnapshot(),
+        diffTabs: [],
+        activeDiffTabId: null,
+      },
+    ])
 
     render(<ComparePage />)
 
-    expect(screen.getByText('生产服:/var/www/api-next ↔ 预发服:/var/www/api')).toBeTruthy()
+    const compareTab = screen.getByRole('button', { name: '本地:old-left ↔ 本地:old-right' })
+    const fullLabel = '/var/old-left ↔ /var/old-right'
+
+    expect(compareTab.getAttribute('title')).toBe(fullLabel)
+    expect(screen.queryByText(fullLabel)).toBeNull()
   })
 
   it('shows dot files by default instead of hiding them', () => {
@@ -723,5 +717,51 @@ describe('ComparePage renderer interactions', () => {
       expect(state.entries).toEqual([])
       expect(state.paused).toBe(false)
     })
+  })
+
+  it('restarts compare without cloning the full compare snapshot first', async () => {
+    const api = installApiMock({
+      runCompare: vi.fn(() => new Promise(() => undefined)),
+    })
+    resetStores([
+      {
+        id: 'compare-tab-1',
+        title: '完成对比',
+        snapshot: createSnapshot({
+          entries: [createCompareEntry('src/app.ts')],
+          done: true,
+          paused: false,
+          activeCompareId: null,
+        }),
+        diffTabs: [],
+        activeDiffTabId: null,
+      },
+    ])
+    useCompareStore.setState({
+      entries: [createCompareEntry('src/app.ts')],
+      scanning: false,
+      comparing: false,
+      paused: false,
+      done: true,
+      activeCompareId: null,
+    })
+
+    const originalCreateSnapshot = useCompareStore.getState().createSnapshot
+    const forbiddenCreateSnapshot = vi.fn(() => {
+      throw new Error('restart compare should not build a full snapshot')
+    })
+    useCompareStore.setState({ createSnapshot: forbiddenCreateSnapshot })
+
+    const user = userEvent.setup()
+    render(<ComparePage />)
+
+    await user.click(screen.getByRole('button', { name: '重启对比' }))
+
+    await waitFor(() => {
+      expect(api.runCompare).toHaveBeenCalledTimes(1)
+    })
+    expect(forbiddenCreateSnapshot).not.toHaveBeenCalled()
+
+    useCompareStore.setState({ createSnapshot: originalCreateSnapshot })
   })
 })

@@ -1,5 +1,9 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { useShallow } from 'zustand/react/shallow'
+import type { SSHConfig } from '../../../shared/types'
 import type { CompareTab } from '../stores/app-store'
+import { useSSHStore } from '../stores/ssh-store'
+import { formatComparePairLabel } from '../utils/source-label'
 import { CloseIcon, PlusIcon } from './Icons'
 import FileContextMenu, { type ContextMenuAction } from './FileContextMenu'
 
@@ -21,6 +25,10 @@ interface MenuState {
   readonly tabId: string
 }
 
+function formatCompareTabTooltip(tab: CompareTab, configs: readonly SSHConfig[]): string {
+  return formatComparePairLabel(tab.snapshot.leftSource, tab.snapshot.rightSource, configs) ?? tab.title
+}
+
 export default function CompareSessionTabs({
   compareTabs,
   activeCompareTabId,
@@ -30,6 +38,19 @@ export default function CompareSessionTabs({
   onCloseCompareTab,
 }: CompareSessionTabsProps) {
   const [menu, setMenu] = useState<MenuState | null>(null)
+  const { configs, loadConfigs } = useSSHStore(useShallow((state) => ({
+    configs: state.configs,
+    loadConfigs: state.loadConfigs,
+  })))
+
+  useEffect(() => {
+    if (
+      configs.length === 0
+      && compareTabs.some((tab) => tab.snapshot.leftSource?.type === 'sftp' || tab.snapshot.rightSource?.type === 'sftp')
+    ) {
+      void loadConfigs()
+    }
+  }, [compareTabs, configs.length, loadConfigs])
 
   const buildActions = (tabId: string): readonly ContextMenuAction[] => {
     if (!onCloseCompareTab) return []
@@ -63,7 +84,7 @@ export default function CompareSessionTabs({
   }
 
   return (
-    <div className="flex min-w-0 flex-1 items-center gap-1.5">
+    <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden">
       <button
         onClick={onSelectNewCompare}
         className={`inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md px-3 text-xs font-medium transition-colors ${
@@ -79,6 +100,7 @@ export default function CompareSessionTabs({
       <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
         {compareTabs.map((tab) => {
           const isActive = !newCompareActive && activeCompareTabId === tab.id
+          const tooltip = formatCompareTabTooltip(tab, configs)
 
           return (
             <div key={tab.id} className="group flex h-8 shrink-0 items-stretch">
@@ -89,8 +111,8 @@ export default function CompareSessionTabs({
                   event.preventDefault()
                   setMenu({ x: event.clientX, y: event.clientY, tabId: tab.id })
                 }}
-                title={tab.title}
-                className={`relative inline-flex h-8 max-w-56 items-center truncate px-3 text-xs font-medium transition-colors ${
+                title={tooltip}
+                className={`relative inline-flex h-8 max-w-[22rem] items-center truncate px-3 text-xs font-medium transition-colors sm:max-w-[28rem] ${
                   isActive
                     ? ACTIVE_TAB_BUTTON
                     : 'bg-neutral-800/60 text-neutral-400 hover:bg-neutral-800 hover:text-neutral-200'
@@ -110,8 +132,8 @@ export default function CompareSessionTabs({
                       ? ACTIVE_TAB_CLOSE
                       : 'bg-neutral-800/60 text-neutral-500 hover:bg-neutral-800 hover:text-neutral-200'
                   }`}
-                  aria-label={`关闭 ${tab.title}`}
-                  title={`关闭 ${tab.title}`}
+                  aria-label={`关闭 ${tooltip}`}
+                  title={`关闭 ${tooltip}`}
                 >
                   <CloseIcon width={11} height={11} />
                 </button>

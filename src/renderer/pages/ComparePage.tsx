@@ -4,7 +4,6 @@ import { formatDuration } from '@shared/format-duration'
 import { useShallow } from 'zustand/react/shallow'
 import { useCompareStore } from '../stores/compare-store'
 import { useAppStore, type DiffTab } from '../stores/app-store'
-import { useSSHStore } from '../stores/ssh-store'
 import CompareSessionTabs from '../components/CompareSessionTabs'
 import CompareTree from '../components/CompareTree'
 import SplitTree from '../components/SplitTree'
@@ -15,7 +14,6 @@ import { useState } from 'react'
 import { useCompareActions } from '../hooks/useCompare'
 import { openCompareTab, openDirectoryCompareHome } from '../utils/compare-session-navigation'
 import { useLogStore } from '../stores/log-store'
-import { formatComparePairLabel } from '../utils/source-label'
 import { isFilterAdditionOnly } from '../utils/filter-change'
 import { loadDiffTabContents } from '../utils/diff-tab-loader'
 import { showToast } from '../stores/toast-store'
@@ -89,34 +87,6 @@ function CompareErrorBanner() {
   return (
     <div className="mx-3 mt-2 rounded-md border border-rose-900/60 bg-rose-950/40 px-3 py-2 text-sm text-rose-300" role="alert">
       {error}
-    </div>
-  )
-}
-
-function CompareSourcePairSummary() {
-  const { leftSource, rightSource } = useCompareStore(useShallow((state) => ({
-    leftSource: state.leftSource,
-    rightSource: state.rightSource,
-  })))
-  const { configs, loadConfigs } = useSSHStore(useShallow((state) => ({
-    configs: state.configs,
-    loadConfigs: state.loadConfigs,
-  })))
-
-  useEffect(() => {
-    if ((leftSource?.type === 'sftp' || rightSource?.type === 'sftp') && configs.length === 0) {
-      void loadConfigs()
-    }
-  }, [configs.length, leftSource, loadConfigs, rightSource])
-
-  const label = formatComparePairLabel(leftSource, rightSource, configs)
-  if (!label) {
-    return null
-  }
-
-  return (
-    <div className="min-w-0 max-w-[38rem] truncate rounded-md border border-neutral-800 bg-neutral-900/60 px-2.5 py-1 text-xs text-neutral-400" title={label}>
-      {label}
     </div>
   )
 }
@@ -523,8 +493,6 @@ export default function ComparePage() {
             void handleCloseCompareSession(compareTabId)
           }}
         />
-
-        <CompareSourcePairSummary />
 
         {/* Status indicator */}
         <CompareStatusIndicator />

@@ -116,6 +116,10 @@ function formatCompareTabTitle(leftSource: SourceConfig, rightSource: SourceConf
   return formatCompareTabTitleFromSources(leftSource, rightSource, useSSHStore.getState().configs)
 }
 
+function createControlSnapshot() {
+  return useCompareStore.getState().createLightweightSnapshot()
+}
+
 export function formatCompareErrorForUi(rawError: string): string {
   const message = rawError.trim()
   if (!message) {
@@ -289,7 +293,7 @@ export function useCompareActions() {
     }
 
     const appStore = useAppStore.getState()
-    const currentSnapshot = compareState.createSnapshot()
+    const currentSnapshot = compareState.createLightweightSnapshot()
     const activeCompareTabId = appStore.activeCompareTabId
     const currentCompareTab = activeCompareTabId
       ? appStore.compareTabs.find((tab) => tab.id === activeCompareTabId)
@@ -301,7 +305,7 @@ export function useCompareActions() {
       : null
     const globalPathFilters = useSettingsStore.getState().globalPathFilters
     const effectivePathFilters = mergePathFilters(globalPathFilters, currentExtensionFilter)
-    const previousEntries = createCompareCacheEntries(currentSnapshot.entries)
+    const previousEntries = createCompareCacheEntries(compareState.entries)
     const currentLeftSource = buildSourceConfig(currentLeftSourceType, currentLeftPath, currentLeftSSHConfigId)
     const currentRightSource = buildSourceConfig(currentRightSourceType, currentRightPath, currentRightSSHConfigId)
 
@@ -309,7 +313,7 @@ export function useCompareActions() {
       appStore.saveCompareTab({
         id: activeCompareTabId,
         title: currentCompareTab?.title ?? formatCompareTabTitle(currentLeftSource, currentRightSource),
-        snapshot: currentSnapshot,
+        snapshot: compareState.createTabSnapshot(),
         diffTabs: appStore.diffTabs,
         activeDiffTabId: appStore.activeDiffTabId,
       })
@@ -487,7 +491,7 @@ export function useCompareActions() {
       return false
     }
 
-    const currentSnapshot = useCompareStore.getState().createSnapshot()
+    const currentSnapshot = createControlSnapshot()
     if (!resolveReusableCompareId(currentSnapshot, activeCompareTab)) {
       return false
     }
@@ -502,7 +506,7 @@ export function useCompareActions() {
     const activeCompareTab = appStore.activeCompareTabId
       ? appStore.compareTabs.find((tab) => tab.id === appStore.activeCompareTabId)
       : undefined
-    const compareId = resolveReusableCompareId(compareState.createSnapshot(), activeCompareTab)
+    const compareId = resolveReusableCompareId(compareState.createLightweightSnapshot(), activeCompareTab)
 
     if (!compareId) {
       return false
