@@ -4,9 +4,12 @@ import App from './App'
 import ErrorBoundary from './components/ErrorBoundary'
 import { ensureAppApi } from './runtime/ensure-app-api'
 import { addRendererLog } from './stores/log-store'
+import { useSettingsStore } from './stores/settings-store'
+import { applyTheme, getSystemPrefersDark } from './utils/theme'
 import './styles/globals.css'
 
 ensureAppApi()
+applyTheme(useSettingsStore.getState().theme, getSystemPrefersDark())
 
 window.addEventListener('error', (event) => {
   addRendererLog('app', 'error', `window.onerror: ${event.message} @ ${event.filename}:${event.lineno}:${event.colno}\n${event.error?.stack ?? ''}`)

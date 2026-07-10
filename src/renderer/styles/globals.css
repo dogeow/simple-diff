@@ -6,6 +6,29 @@
 }
 
 @layer base {
+  html[data-theme='light'] {
+    --color-neutral-950: oklch(0.91 0 0);
+    --color-neutral-900: oklch(0.985 0 0);
+    --color-neutral-850: oklch(0.965 0 0);
+    --color-neutral-800: oklch(0.93 0 0);
+    --color-neutral-750: oklch(0.88 0 0);
+    --color-neutral-700: oklch(0.82 0 0);
+    --color-neutral-600: oklch(0.68 0 0);
+    --color-neutral-500: oklch(0.46 0 0);
+    --color-neutral-400: oklch(0.38 0 0);
+    --color-neutral-300: oklch(0.30 0 0);
+    --color-neutral-200: oklch(0.24 0 0);
+    --color-neutral-100: oklch(0.18 0 0);
+    --color-neutral-50: oklch(0.13 0 0);
+    --color-rose-950: oklch(0.94 0.035 15);
+    --color-rose-900: oklch(0.88 0.065 15);
+    --color-red-950: oklch(0.94 0.035 25);
+    --color-red-900: oklch(0.88 0.065 25);
+    --color-emerald-950: oklch(0.94 0.035 160);
+    --color-green-900: oklch(0.90 0.05 145);
+    --color-amber-950: oklch(0.95 0.04 85);
+  }
+
   html,
   body,
   #root {
@@ -47,6 +70,22 @@
 }
 
 @layer utilities {
+  html[data-theme='light'] :where(.text-blue-300, .text-blue-300\/80) {
+    color: var(--color-blue-700);
+  }
+
+  html[data-theme='light'] :where(.text-amber-100, .text-amber-200, .text-amber-300) {
+    color: var(--color-amber-800);
+  }
+
+  html[data-theme='light'] :where(.text-emerald-100, .text-emerald-200, .text-emerald-300) {
+    color: var(--color-emerald-700);
+  }
+
+  html[data-theme='light'] :where(.text-red-200, .text-red-300, .text-rose-100, .text-rose-100\/80, .text-rose-200, .text-rose-200\/90, .text-rose-300) {
+    color: var(--color-rose-700);
+  }
+
   .app-drag-region {
     -webkit-app-region: drag;
   }

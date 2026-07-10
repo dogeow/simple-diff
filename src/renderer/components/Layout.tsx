@@ -6,6 +6,7 @@ import CommandPalette from './CommandPalette'
 import ShortcutHelp from './ShortcutHelp'
 import ToastContainer from './ToastContainer'
 import GlobalRunningIndicator from './GlobalRunningIndicator'
+import ThemeToggle from './ThemeToggle'
 import { getRuntimeInfo } from '../runtime/runtime-info'
 import { FolderIcon, HistoryIcon, RefreshIcon, ServerIcon, SettingsIcon, TextIcon } from './Icons'
 
@@ -136,6 +137,7 @@ export default function Layout({ children }: LayoutProps) {
         </nav>
         <div className="ml-auto flex items-center gap-1.5">
           <GlobalRunningIndicator />
+          <ThemeToggle />
           <button
             onClick={() => setPaletteOpen(true)}
             title="命令面板 (⌘K)"

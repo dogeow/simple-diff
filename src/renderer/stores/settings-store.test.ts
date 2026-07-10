@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { createPersistedSettingsState, useSettingsStore } from './settings-store'
 
 function resetSettingsStore(): void {
-  useSettingsStore.setState({ globalPathFilters: [] })
+  useSettingsStore.setState({ globalPathFilters: [], theme: 'system' })
 }
 
 describe('settings-store', () => {
@@ -19,8 +19,16 @@ describe('settings-store', () => {
   it('creates persisted settings state with sanitized filters', () => {
     expect(createPersistedSettingsState({
       globalPathFilters: [' dist ', 'DIST', 'path:/docs'],
+      theme: 'dark',
     })).toEqual({
       globalPathFilters: ['dist', 'path:docs'],
+      theme: 'dark',
     })
+  })
+
+  it('updates the preferred theme', () => {
+    useSettingsStore.getState().setTheme('light')
+
+    expect(useSettingsStore.getState().theme).toBe('light')
   })
 })

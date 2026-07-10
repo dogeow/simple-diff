@@ -5,6 +5,7 @@ import { useSettingsStore } from '../stores/settings-store'
 import { CheckIcon, FilterIcon, TrashIcon } from '../components/Icons'
 import { showToast } from '../stores/toast-store'
 import { isFilterAdditionOnly } from '../utils/filter-change'
+import ThemePreferenceSelector from '../components/ThemePreferenceSelector'
 
 export default function SettingsPage() {
   const globalPathFilters = useSettingsStore((s) => s.globalPathFilters)
@@ -50,6 +51,8 @@ export default function SettingsPage() {
             全局过滤会作用到所有新的目录对比；如果当前活动对比仍在运行，保存后会立即按新规则重跑。
           </p>
         </header>
+
+        <ThemePreferenceSelector />
 
         <section className="rounded-lg border border-neutral-800 bg-neutral-900/40 p-5">
           <div className="mb-3 flex items-center justify-between gap-3">
