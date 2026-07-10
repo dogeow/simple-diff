@@ -178,7 +178,7 @@ function SideTable({
     refreshDir,
     leftSource,
     rightSource,
-    activeCompareId,
+    compareSessionId,
     syncTask,
     setSyncTask,
     extensionFilter,
@@ -188,7 +188,7 @@ function SideTable({
     refreshDir: s.refreshDir,
     leftSource: s.leftSource,
     rightSource: s.rightSource,
-    activeCompareId: s.activeCompareId,
+    compareSessionId: s.compareSessionId,
     syncTask: s.syncTask,
     setSyncTask: s.setSyncTask,
     extensionFilter: s.extensionFilter,
@@ -211,13 +211,13 @@ function SideTable({
 
     const syncEntries = collectSyncEntriesForSelection(entries, paths, direction)
     if (syncEntries.length === 0) return
-    if (!activeCompareId) return
+    if (!compareSessionId) return
 
     const response = await window.api.startSync({
       leftSource,
       rightSource,
       direction,
-      compareId: activeCompareId,
+      compareId: compareSessionId,
       entries: syncEntries,
     })
 
@@ -226,7 +226,7 @@ function SideTable({
       rememberSyncDirtyRoots(response.data?.id, getSyncRecompareRootsFromEntries(syncEntries))
       setSyncTask(response.data ?? null)
     }
-  }, [activeCompareId, entries, leftSource, rightSource, setSyncTask, syncTask])
+  }, [compareSessionId, entries, leftSource, rightSource, setSyncTask, syncTask])
 
   const handleContextMenu = useCallback((e: React.MouseEvent, node: TreeNode) => {
     e.preventDefault()
@@ -501,9 +501,10 @@ export default function SplitTree({ entries, filter, onDoubleClickFile, emptySta
   const [selection, setSelection] = useState<CompareSelectionState>({ selectedPaths: new Set(), anchorPath: null })
   const visibleNodes = useVisibleCompareNodes({ entries, filter })
   const nodeInteractions = useCompareNodeInteractions(onDoubleClickFile)
-  const { leftSource, rightSource, syncTask, setSyncTask } = useCompareStore(useShallow((s) => ({
+  const { leftSource, rightSource, compareSessionId, syncTask, setSyncTask } = useCompareStore(useShallow((s) => ({
     leftSource: s.leftSource,
     rightSource: s.rightSource,
+    compareSessionId: s.compareSessionId,
     syncTask: s.syncTask,
     setSyncTask: s.setSyncTask,
   })))
@@ -603,7 +604,7 @@ export default function SplitTree({ entries, filter, onDoubleClickFile, emptySta
     if (syncEntries.length === 0) {
       return
     }
-    if (!activeCompareId) {
+    if (!compareSessionId) {
       return
     }
 
@@ -611,7 +612,7 @@ export default function SplitTree({ entries, filter, onDoubleClickFile, emptySta
       leftSource,
       rightSource,
       direction,
-      compareId: activeCompareId,
+      compareId: compareSessionId,
       entries: syncEntries,
     })
 
@@ -620,7 +621,7 @@ export default function SplitTree({ entries, filter, onDoubleClickFile, emptySta
       rememberSyncDirtyRoots(response.data?.id, getSyncRecompareRootsFromEntries(syncEntries))
       setSyncTask(response.data ?? null)
     }
-  }, [activeCompareId, leftSelectionEntries, leftSource, rightSelectionEntries, rightSource, selection.selectedPaths, setSyncTask, syncTask])
+  }, [compareSessionId, leftSelectionEntries, leftSource, rightSelectionEntries, rightSource, selection.selectedPaths, setSyncTask, syncTask])
 
   return (
     <div className="flex h-full flex-col">

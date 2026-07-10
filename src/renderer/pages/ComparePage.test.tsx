@@ -181,6 +181,7 @@ function resetStores(compareTabs: readonly CompareTab[] = []): void {
     expandedDirs: new Set(),
     viewMode: 'split',
     activeCompareId: null,
+    compareSessionId: 'compare-1',
     syncTask: null,
     compareVersion: 0,
   })

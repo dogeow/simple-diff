@@ -594,7 +594,7 @@ describe('compare-store', () => {
     ])
   })
 
-  it('clears the active compare id when a compare finishes', () => {
+  it('clears the active compare id while retaining the sync session id when a compare finishes', () => {
     const store = useCompareStore.getState()
     store.startScanning('compare-1')
 
@@ -607,6 +607,7 @@ describe('compare-store', () => {
     const state = useCompareStore.getState()
     expect(state.done).toBe(true)
     expect(state.activeCompareId).toBeNull()
+    expect(state.compareSessionId).toBe('compare-1')
     expect(state.loadingDirs.size).toBe(0)
   })
 

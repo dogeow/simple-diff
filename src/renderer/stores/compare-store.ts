@@ -41,6 +41,7 @@ export interface CompareSessionSnapshot {
   readonly expandedDirs: readonly string[]
   readonly viewMode: ViewMode
   readonly activeCompareId: string | null
+  readonly compareSessionId?: string | null
 }
 
 interface CompareStore {
@@ -73,6 +74,7 @@ interface CompareStore {
   readonly expandedDirs: ReadonlySet<string>
   readonly viewMode: ViewMode
   readonly activeCompareId: string | null
+  readonly compareSessionId: string | null
   readonly syncTask: SyncTaskSnapshot | null
   readonly compareVersion: number
   readonly entrySummary: CompareEntrySummary
@@ -139,6 +141,7 @@ export function sanitizePersistedCompareSessionSnapshot(snapshot: CompareSession
     dirtyPaths: [],
     loadingDirs: [],
     activeCompareId: null,
+    compareSessionId: null,
   }
 
   const inactiveSnapshot = clearInactiveIncompleteSnapshot(sanitizedSnapshot)
@@ -206,6 +209,7 @@ export function applyScanEntriesToSnapshot(
   return {
     ...snapshot,
     entries: upsertEntries(snapshot.entries, entries),
+    compareSessionId: compareId,
     scanning: true,
     comparing: true,
     paused: false,
@@ -234,6 +238,7 @@ export function applyEntryUpdatesToSnapshot(
   return {
     ...snapshot,
     entries: upsertEntries(snapshot.entries, entries),
+    compareSessionId: compareId,
     scanning: true,
     comparing: true,
     paused: false,
@@ -257,6 +262,7 @@ export function applyPauseCompareToSnapshot(
     error: null,
     loadingDirs: [],
     activeCompareId: compareId,
+    compareSessionId: compareId,
   }
 }
 
@@ -273,6 +279,7 @@ export function applyPausedCompareErrorToSnapshot(
     paused: false,
     error,
     activeCompareId: null,
+    compareSessionId: null,
   }
 }
 
@@ -298,6 +305,7 @@ export function applyFinishCompareToSnapshot(
     duration: result.duration,
     loadingDirs: [],
     activeCompareId: null,
+    compareSessionId: compareId,
   }
 }
 
@@ -316,6 +324,7 @@ export function applyCompareErrorToSnapshot(
     error,
     loadingDirs: [],
     activeCompareId: null,
+    compareSessionId: null,
   }
 }
 
@@ -512,6 +521,7 @@ const compareInitial = {
   expandedDirs: new Set<string>() as ReadonlySet<string>,
   viewMode: 'split' as ViewMode,
   activeCompareId: null as string | null,
+  compareSessionId: null as string | null,
   syncTask: null as SyncTaskSnapshot | null,
 }
 
@@ -720,6 +730,7 @@ function createCompareSessionSnapshot(
     expandedDirs: options.includeEntries ? [...state.expandedDirs] : [],
     viewMode: state.viewMode,
     activeCompareId: state.activeCompareId,
+    compareSessionId: state.compareSessionId,
   }
 }
 
@@ -833,6 +844,7 @@ const compareStore = create<CompareStore>((set, get) => ({
     leftSource: options?.preserveEntries ? state.leftSource : compareInitial.leftSource,
     rightSource: options?.preserveEntries ? state.rightSource : compareInitial.rightSource,
     activeCompareId,
+    compareSessionId: activeCompareId,
     scanning: true,
     paused: false,
     compareVersion: state.compareVersion + 1,
@@ -910,6 +922,7 @@ const compareStore = create<CompareStore>((set, get) => ({
         dirtyDisplayPaths: compareInitial.dirtyDisplayPaths,
         loadingDirs: new Set(),
         activeCompareId: null,
+        compareSessionId: compareId,
       }
     })
   },
@@ -1013,7 +1026,15 @@ const compareStore = create<CompareStore>((set, get) => ({
 
   setError: (error, compareId) => {
     if (compareId && get().activeCompareId !== compareId) return
-    set({ error, scanning: false, comparing: false, paused: false, loadingDirs: new Set(), activeCompareId: null })
+    set({
+      error,
+      scanning: false,
+      comparing: false,
+      paused: false,
+      loadingDirs: new Set(),
+      activeCompareId: null,
+      compareSessionId: null,
+    })
   },
   setFilter: (filter) => set({ filter }),
 
@@ -1159,6 +1180,7 @@ const compareStore = create<CompareStore>((set, get) => ({
       expandedDirs: new Set(restoredSnapshot.expandedDirs),
       viewMode: restoredSnapshot.viewMode,
       activeCompareId: restoredSnapshot.activeCompareId,
+      compareSessionId: restoredSnapshot.compareSessionId ?? restoredSnapshot.activeCompareId,
       compareVersion: compareVersion + 1,
     })
   },
