@@ -170,6 +170,7 @@ export interface SyncTaskSnapshot {
 }
 
 export interface StartSyncRequest {
+  readonly compareId: string
   readonly leftSource: SourceConfig
   readonly rightSource: SourceConfig
   readonly direction: SyncDirection

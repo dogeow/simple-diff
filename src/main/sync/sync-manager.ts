@@ -3,7 +3,7 @@ import { dirname } from 'path'
 import { posix } from 'path'
 import { createFileSource } from '../file-source'
 import { logger } from '../utils/logger'
-import { joinSourcePath } from '@shared/source-path'
+import { joinSourcePath, normalizeRelativePath } from '@shared/source-path'
 import type {
   SourceConfig,
   StartSyncRequest,
@@ -416,14 +416,18 @@ export class SyncManager {
         const item = this.activeSyncQueue[this.activeSyncIndex]
 
         if (item) {
+          const safeRelativePath = this.assertSafeRelativePath(item.relativePath, '同步项路径')
           this.task = {
             ...currentTask,
-            currentPath: item.relativePath,
+            currentPath: safeRelativePath,
             updatedAt: now(),
           }
           this.publishProgress()
 
-          await this.executeItem(item, source, target, sourceFileSource, targetFileSource)
+          const safeItem: SyncItem = safeRelativePath === item.relativePath
+            ? item
+            : { ...item, relativePath: safeRelativePath }
+          await this.executeItem(safeItem, source, target, sourceFileSource, targetFileSource)
 
           const nextTask = this.task
           if (!nextTask) break
@@ -432,10 +436,10 @@ export class SyncManager {
             ...nextTask,
             completedItems: nextTask.completedItems + 1,
             currentPath: null,
-            lastCompletedPath: item.relativePath,
+            lastCompletedPath: safeRelativePath,
             updatedAt: now(),
           }
-          this.maybeLogSyncProgress(item)
+          this.maybeLogSyncProgress(safeItem)
           if (this.task.status === 'running') {
             this.publishProgress()
           } else {
@@ -510,15 +514,17 @@ export class SyncManager {
     const collected: SyncItem[] = []
 
     for (const item of items) {
-      collected.push(item)
+      const safeRelativePath = this.assertSafeRelativePath(item.relativePath, '待同步项路径')
+      const safeItem: SyncItem = safeRelativePath === item.relativePath ? item : { ...item, relativePath: safeRelativePath }
+      collected.push(safeItem)
 
-      if (item.kind !== 'directory') continue
+      if (safeItem.kind !== 'directory') continue
 
-      this.maybeLogHydrationProgress(item.relativePath)
-      const fullPath = joinSourcePath(source, source.path, item.relativePath)
+      this.maybeLogHydrationProgress(safeItem.relativePath)
+      const fullPath = joinSourcePath(source, source.path, safeItem.relativePath)
       const children = await sourceFileSource.list(fullPath)
       const expanded = expandDirectoryEntries(
-        item.relativePath,
+        safeItem.relativePath,
         children.map((child) => ({ name: child.name, isDirectory: child.isDirectory })),
         source.type,
       )
@@ -566,8 +572,9 @@ export class SyncManager {
     sourceFileSource: Awaited<ReturnType<typeof createFileSource>>,
     targetFileSource: Awaited<ReturnType<typeof createFileSource>>,
   ): Promise<void> {
-    const sourcePath = joinSourcePath(source, source.path, item.relativePath)
-    const targetPath = joinSourcePath(target, target.path, item.relativePath)
+    const safeRelativePath = this.assertSafeRelativePath(item.relativePath, '同步条目路径')
+    const sourcePath = joinSourcePath(source, source.path, safeRelativePath)
+    const targetPath = joinSourcePath(target, target.path, safeRelativePath)
 
     if (item.kind === 'directory') {
       await targetFileSource.ensureDir(targetPath)
@@ -585,6 +592,14 @@ export class SyncManager {
 
     this.lastProgressLogAt = timestamp
     syncLogger.info(`正在预计算同步目录: ${relativePath}`)
+  }
+
+  private assertSafeRelativePath(relativePath: string, label: string): string {
+    const normalized = normalizeRelativePath(relativePath, '/')
+    if (normalized !== relativePath) {
+      throw new Error(`${label}包含非法路径片段`)
+    }
+    return normalized
   }
 
   private maybeLogSyncProgress(item: SyncItem): void {

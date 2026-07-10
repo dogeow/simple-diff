@@ -186,9 +186,9 @@ export const browserApi: AppAPI = {
   clearHistory: async () => successVoid(),
   deleteHistory: async () => successVoid(),
 
-  showInFolder: () => unsupportedResult('网页版无法在系统文件管理器中定位文件'),
-  renameFile: () => unsupportedResult('网页版暂不支持重命名文件'),
-  deleteFile: () => unsupportedResult('网页版暂不支持删除文件'),
+  showInFolder: (_source: SourceConfig, _relativePath: string) => unsupportedResult('网页版无法在系统文件管理器中定位文件'),
+  renameFile: (_source: SourceConfig, _oldRelativePath: string, _newName: string) => unsupportedResult('网页版暂不支持重命名文件'),
+  deleteFile: (_source: SourceConfig, _relativePath: string, _isDirectory: boolean) => unsupportedResult('网页版暂不支持删除文件'),
 
   selectFolder: async () => {
     try {

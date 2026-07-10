@@ -4,6 +4,7 @@ import * as path from 'path'
 import { IPC_CHANNELS } from '@shared/types'
 import type { CompareEntry, CompareRequest, LogEntry, SourceConfig, SSHConfigInput, StartSyncRequest } from '@shared/types'
 import { formatDuration } from '@shared/format-duration'
+import { normalizePathSegment, normalizeRelativePath, resolveSourcePath } from '@shared/source-path'
 import { createFileSource } from '../file-source/index'
 import { compareDirectories } from '../compare/comparator'
 import { computeTextDiff } from '@shared/text-diff'
@@ -26,6 +27,70 @@ const ENTRY_UPDATE_LOG_LIMIT = 20
 const ENTRY_UPDATE_LOG_INTERVAL = 5000
 const VALID_LOG_SCOPES = new Set(['app', 'compare', 'compare-watch', 'sync', 'ssh'])
 const VALID_LOG_LEVELS = new Set(['info', 'warn', 'error'])
+
+function resolveAllowedLocalPath(source: SourceConfig, relativePath: string): string {
+  if (source.type !== 'local') {
+    throw new Error('当前操作仅支持本地路径')
+  }
+
+  const sourceRoot = path.resolve(source.path)
+  const inputPath = path.isAbsolute(relativePath) ? relativePath : resolveSourcePath(source, relativePath)
+  const resolvedPath = path.resolve(inputPath)
+  const relative = path.relative(sourceRoot, resolvedPath)
+  if (relative === '' || relative === '.') {
+    return resolvedPath
+  }
+  if (path.isAbsolute(relative) || relative === '..' || relative.startsWith(`..${path.sep}`)) {
+    throw new Error('文件路径超出允许范围')
+  }
+
+  return resolvedPath
+}
+
+function resolveAllowedSourcePath(source: SourceConfig, filePath: string): string {
+  if (source.type === 'local') {
+    return resolveAllowedLocalPath(source, filePath)
+  }
+
+  const sourceRoot = path.posix.resolve(source.path || '/')
+  const normalizedInput = filePath.replace(/\\/g, '/')
+  const resolvedPath = path.posix.resolve(
+    path.posix.isAbsolute(normalizedInput)
+      ? normalizedInput
+      : path.posix.join(sourceRoot, normalizedInput),
+  )
+  const relative = path.posix.relative(sourceRoot, resolvedPath)
+  if (relative === '' || relative === '.') return resolvedPath
+  if (relative === '..' || relative.startsWith(`../`)) {
+    throw new Error('文件路径超出允许范围')
+  }
+
+  return resolvedPath
+}
+
+function buildRenameTarget(source: SourceConfig, oldRelativePath: string, newName: string): {
+  oldPath: string
+  newPath: string
+} {
+  if (oldRelativePath === '') {
+    throw new Error('无法重命名根目录')
+  }
+
+  const oldPath = resolveAllowedLocalPath(source, oldRelativePath)
+  const safeName = normalizePathSegment(newName)
+  const parentRelativePath = oldRelativePath
+    .split(/[\\/]+/)
+    .filter(Boolean)
+    .slice(0, -1)
+    .join('/')
+
+  const newRelativePath = parentRelativePath ? `${parentRelativePath}/${safeName}` : safeName
+
+  return {
+    oldPath,
+    newPath: resolveSourcePath(source, newRelativePath),
+  }
+}
 
 function formatBytes(value: number): string {
   return `${(value / 1024 / 1024).toFixed(1)}MB`
@@ -54,8 +119,15 @@ function registerLogHandlers(): void {
 
 interface ActiveCompare {
   readonly compareId: string
-  readonly controller: AbortController
+  leftSource: SourceConfig
+  rightSource: SourceConfig
+  controller: AbortController | null
+  leftToRightEntries: Map<string, { readonly isDirectory: boolean, readonly state: CompareEntry['state'] }>
+  rightToLeftEntries: Map<string, { readonly isDirectory: boolean, readonly state: CompareEntry['state'] }>
+  updatedAt: number
 }
+
+const MAX_ACTIVE_COMPARER_ENTRIES_BY_SENDER = 32
 
 const activeCompares = new WeakMap<object, Map<string, ActiveCompare>>()
 
@@ -68,9 +140,117 @@ function getActiveCompareMap(sender: object): Map<string, ActiveCompare> {
   return compares
 }
 
-function setActiveCompare(sender: object, compare: ActiveCompare): void {
+function pruneActiveCompares(sender: object): void {
+  const compares = activeCompares.get(sender)
+  if (!compares || compares.size <= MAX_ACTIVE_COMPARER_ENTRIES_BY_SENDER) return
+
+  const entries = Array.from(compares.entries())
+    .filter(([, compare]) => compare.controller == null)
+    .sort((a, b) => a[1].updatedAt - b[1].updatedAt)
+
+  for (const [compareId] of entries) {
+    if (compares.size <= MAX_ACTIVE_COMPARER_ENTRIES_BY_SENDER) break
+    compares.delete(compareId)
+  }
+}
+
+function setActiveCompare(sender: object, compare: Omit<ActiveCompare, 'updatedAt'>): void {
   const compares = getActiveCompareMap(sender)
-  compares.set(compare.compareId, compare)
+  compares.set(compare.compareId, {
+    ...compare,
+    updatedAt: Date.now(),
+  })
+
+  pruneActiveCompares(sender)
+}
+
+function updateCompareSession(sender: object, compareId: string, entries: readonly CompareEntry[]): void {
+  const compare = getActiveCompare(sender, compareId)
+  if (!compare) return
+
+  for (const entry of entries) {
+    let normalizedPath: string
+
+    try {
+      normalizedPath = normalizeRelativePath(entry.relativePath, '/')
+    } catch {
+      continue
+    }
+
+    if (entry.state === 'left_only') {
+      compare.leftToRightEntries.set(normalizedPath, {
+        isDirectory: entry.isDirectory,
+        state: entry.state,
+      })
+      compare.rightToLeftEntries.delete(normalizedPath)
+      continue
+    }
+
+    if (entry.state === 'right_only') {
+      compare.rightToLeftEntries.set(normalizedPath, {
+        isDirectory: entry.isDirectory,
+        state: entry.state,
+      })
+      compare.leftToRightEntries.delete(normalizedPath)
+      continue
+    }
+
+    compare.leftToRightEntries.delete(normalizedPath)
+    compare.rightToLeftEntries.delete(normalizedPath)
+  }
+
+  compare.updatedAt = Date.now()
+}
+
+function isSourceConfigSame(left: SourceConfig, right: SourceConfig): boolean {
+  if (left.type !== right.type) {
+    return false
+  }
+
+  if (left.path !== right.path) {
+    return false
+  }
+
+  return left.type !== 'sftp' || left.configId === right.configId
+}
+
+function assertSyncStartRequestEntries(
+  sender: object,
+  request: StartSyncRequest,
+): readonly CompareEntry[] {
+  const compare = getActiveCompare(sender, request.compareId)
+  if (!compare) {
+    throw new Error('未找到匹配的对比会话')
+  }
+
+  if (!isSourceConfigSame(compare.leftSource, request.leftSource)
+    || !isSourceConfigSame(compare.rightSource, request.rightSource)) {
+    throw new Error('当前对比会话与同步参数不一致')
+  }
+
+  const expectedState: CompareEntry['state'] = request.direction === 'left_to_right' ? 'left_only' : 'right_only'
+  const allowedEntries = request.direction === 'left_to_right'
+    ? compare.leftToRightEntries
+    : compare.rightToLeftEntries
+
+  const sanitizedEntries: CompareEntry[] = []
+
+  for (const entry of request.entries) {
+    const normalizedPath = normalizeRelativePath(entry.relativePath, '/')
+    const expected = allowedEntries.get(normalizedPath)
+
+    if (!expected || expected.state !== expectedState || expected.isDirectory !== entry.isDirectory) {
+      throw new Error('同步条目不在受信任范围')
+    }
+
+    if (entry.relativePath === normalizedPath) {
+      sanitizedEntries.push(entry)
+    } else {
+      sanitizedEntries.push({ ...entry, relativePath: normalizedPath })
+    }
+  }
+
+  return sanitizedEntries
 }
 
 function getActiveCompare(sender: object, compareId: string): ActiveCompare | null {
@@ -81,9 +261,14 @@ function clearActiveCompare(sender: object, compareId: string, controller: Abort
   const compares = activeCompares.get(sender)
   const activeCompare = compares?.get(compareId)
   if (activeCompare?.controller === controller) {
-    compares.delete(compareId)
+    activeCompare.controller = null
   }
-  if (compares && compares.size === 0) {
+  if (!compares) return
+
+  if (compares.size > MAX_ACTIVE_COMPARER_ENTRIES_BY_SENDER) {
+    pruneActiveCompares(sender)
+  }
+  if (compares.size === 0) {
     activeCompares.delete(sender)
   }
 }
@@ -93,21 +278,23 @@ function cancelActiveCompare(sender: object, compareId?: string): void {
   if (!compares) return
 
   if (compareId) {
-    compares.get(compareId)?.controller.abort()
+    const compare = compares.get(compareId)
+    compare?.controller?.abort()
     return
   }
 
   for (const compare of compares.values()) {
-    compare.controller.abort()
+    compare.controller?.abort()
   }
 }
 
 function registerFileHandlers(): void {
   ipcMain.handle(IPC_CHANNELS.FILE_SOURCE_LIST, (_event, sourceConfig: SourceConfig, dirPath: string) =>
     wrapHandler(async () => {
+      const safePath = resolveAllowedSourcePath(sourceConfig, dirPath)
       const source = await createFileSource(sourceConfig)
       try {
-        return await source.list(dirPath)
+        return await source.list(safePath)
       } finally {
         await source.dispose()
       }
@@ -116,9 +303,11 @@ function registerFileHandlers(): void {
 
   ipcMain.handle(IPC_CHANNELS.FILE_READ_TEXT, (_event, sourceConfig: SourceConfig, filePath: string) =>
     wrapHandler(async () => {
+      if (!filePath) throw new Error('文件路径不能为空')
+      const safePath = resolveAllowedSourcePath(sourceConfig, filePath)
       const source = await createFileSource(sourceConfig)
       try {
-        return await source.readText(filePath)
+        return await source.readText(safePath)
       } finally {
         await source.dispose()
       }
@@ -127,9 +316,11 @@ function registerFileHandlers(): void {
 
   ipcMain.handle(IPC_CHANNELS.FILE_WRITE_TEXT, (_event, sourceConfig: SourceConfig, filePath: string, content: string) =>
     wrapHandler(async () => {
+      if (!filePath) throw new Error('文件路径不能为空')
+      const safePath = resolveAllowedSourcePath(sourceConfig, filePath)
       const source = await createFileSource(sourceConfig)
       try {
-        await source.writeText(filePath, content)
+        await source.writeText(safePath, content)
       } finally {
         await source.dispose()
       }
@@ -143,7 +334,14 @@ function registerCompareHandlers(): void {
       getActiveCompare(event.sender, request.compareId)?.controller.abort()
 
       const controller = new AbortController()
-      setActiveCompare(event.sender, { compareId: request.compareId, controller })
+      setActiveCompare(event.sender, {
+        compareId: request.compareId,
+        leftSource: request.left,
+        rightSource: request.right,
+        controller,
+        leftToRightEntries: new Map<string, { readonly isDirectory: boolean, readonly state: CompareEntry['state'] }>(),
+        rightToLeftEntries: new Map<string, { readonly isDirectory: boolean, readonly state: CompareEntry['state'] }>(),
+      })
 
       const sender = event.sender
       const onSenderGone = (reason: string): void => {
@@ -213,6 +411,7 @@ function registerCompareHandlers(): void {
           signal: controller.signal,
           onEntriesFound: (entries) => {
             if (controller.signal.aborted) return
+            updateCompareSession(event.sender, request.compareId, entries)
             scanBatchCount += 1
             if (scanBatchCount <= SCAN_BATCH_LOG_LIMIT || scanBatchCount % SCAN_BATCH_LOG_INTERVAL === 0) {
               compareLogger.info(
@@ -225,6 +424,7 @@ function registerCompareHandlers(): void {
             }
           },
           onEntryUpdate: (entry) => {
+            updateCompareSession(event.sender, request.compareId, [entry])
             entryUpdateBuffer.push(entry)
             if (entryUpdateBuffer.length >= ENTRY_UPDATE_FLUSH_THRESHOLD) {
               flushEntryUpdates()
@@ -236,6 +436,7 @@ function registerCompareHandlers(): void {
           },
         })
 
+        updateCompareSession(event.sender, request.compareId, result.entries)
         flushEntryUpdates()
         compareLogger.info(`[${request.compareId}] 对比完成，耗时 ${formatDuration(result.duration)} — 相同:${result.stats.equal} 不同:${result.stats.different} 仅左:${result.stats.leftOnly} 仅右:${result.stats.rightOnly} mem=${formatProcessMemoryUsage()}`)
 
@@ -345,9 +546,20 @@ function registerSSHHandlers(): void {
 
   ipcMain.handle(IPC_CHANNELS.SSH_BROWSE, (_event, configId: string, dirPath: string) =>
     wrapHandler(async () => {
-      const source = await createFileSource({ type: 'sftp', configId, path: dirPath })
+      const config = getConfigInternal(configId)
+      if (!config) throw new Error('SSH 配置未找到')
+
+      const defaultPath = config.defaultPath?.trim() || '/'
+      const sourceConfig: SourceConfig = {
+        type: 'sftp',
+        configId,
+        path: defaultPath,
+      }
+
+      const safePath = resolveAllowedSourcePath(sourceConfig, dirPath)
+      const source = await createFileSource(sourceConfig)
       try {
-        return await source.list(dirPath)
+        return await source.list(safePath)
       } finally {
         await source.dispose()
       }
@@ -376,8 +588,11 @@ function registerSyncHandlers(): void {
     }
   })
 
-  ipcMain.handle(IPC_CHANNELS.SYNC_START, (_event, request: StartSyncRequest) =>
-    wrapHandler(async () => syncManager.start(request)),
+  ipcMain.handle(IPC_CHANNELS.SYNC_START, (event, request: StartSyncRequest) =>
+    wrapHandler(async () => {
+      const entries = assertSyncStartRequestEntries(event.sender, request)
+      return syncManager.start({ ...request, entries })
+    }),
   )
 
   ipcMain.handle(IPC_CHANNELS.SYNC_PAUSE, () =>
@@ -425,22 +640,31 @@ function registerDialogHandlers(): void {
 }
 
 function registerFileOperationHandlers(): void {
-  ipcMain.handle(IPC_CHANNELS.FILE_SHOW_IN_FOLDER, (_event, filePath: string) =>
+  ipcMain.handle(IPC_CHANNELS.FILE_SHOW_IN_FOLDER, (_event, source: SourceConfig, relativePath: string) =>
     wrapHandler(async () => {
+      const filePath = resolveAllowedLocalPath(source, relativePath)
       shell.showItemInFolder(filePath)
     }),
   )
 
-  ipcMain.handle(IPC_CHANNELS.FILE_RENAME, (_event, oldPath: string, newName: string) =>
+  ipcMain.handle(IPC_CHANNELS.FILE_RENAME, (_event, source: SourceConfig, oldRelativePath: string, newName: string) =>
     wrapHandler(async () => {
-      const dir = path.dirname(oldPath)
-      const newPath = path.join(dir, newName)
+      const { oldPath, newPath } = buildRenameTarget(source, oldRelativePath, newName)
       await fs.rename(oldPath, newPath)
     }),
   )
 
-  ipcMain.handle(IPC_CHANNELS.FILE_DELETE, (_event, filePath: string, isDirectory: boolean) =>
+  ipcMain.handle(IPC_CHANNELS.FILE_DELETE, (_event, source: SourceConfig, relativePath: string, isDirectory: boolean) =>
     wrapHandler(async () => {
+      if (!relativePath) {
+        throw new Error('文件路径不能为空')
+      }
+      const filePath = resolveAllowedLocalPath(source, relativePath)
+      const sourceRoot = path.resolve(source.path)
+      const relativeToRoot = path.relative(sourceRoot, filePath)
+      if (relativeToRoot === '' || relativeToRoot === '.') {
+        throw new Error('不允许删除根目录')
+      }
       if (isDirectory) {
         await fs.rm(filePath, { recursive: true })
       } else {

@@ -79,10 +79,11 @@ function CompareTreeTable({
   const supportsSync = getRuntimeInfo().supportsSync
   const tableRef = useRef<HTMLDivElement>(null)
   const nodeInteractions = useCompareNodeInteractions(onDoubleClickFile)
-  const { dirtyDisplayPaths, leftSource, rightSource, syncTask, setSyncTask } = useCompareStore(useShallow((state) => ({
+  const { dirtyDisplayPaths, leftSource, rightSource, syncTask, activeCompareId, setSyncTask } = useCompareStore(useShallow((state) => ({
     dirtyDisplayPaths: state.dirtyDisplayPaths,
     leftSource: state.leftSource,
     rightSource: state.rightSource,
+    activeCompareId: state.activeCompareId,
     syncTask: state.syncTask,
     setSyncTask: state.setSyncTask,
   })))
@@ -189,11 +190,13 @@ function CompareTreeTable({
 
     const syncEntries = collectSyncEntriesForSelection(entries, paths, direction)
     if (syncEntries.length === 0) return
+    if (!activeCompareId) return
 
     const response = await window.api.startSync({
       leftSource,
       rightSource,
       direction,
+      compareId: activeCompareId,
       entries: syncEntries,
     })
 
@@ -202,7 +205,7 @@ function CompareTreeTable({
       rememberSyncDirtyRoots(response.data?.id, getSyncRecompareRootsFromEntries(syncEntries))
       setSyncTask(response.data ?? null)
     }
-  }, [entries, leftSource, rightSource, setSyncTask, syncTask])
+  }, [activeCompareId, entries, leftSource, rightSource, setSyncTask, syncTask])
 
   const getContextActions = useCallback((node: TreeNode): readonly ContextMenuAction[] => {
     if (!node.entry) return []
@@ -468,8 +471,9 @@ export default function CompareTree({ entries, filter, onFilterChange, onDoubleC
   }, [onExtensionFilterChange, setExtensionFilter])
 
   const handleStartSync = useCallback(async (direction: 'left_to_right' | 'right_to_left') => {
-    if (!leftSource || !rightSource || !compareDone || pendingCount > 0 || entries.length === 0) return
+    if (!leftSource || !rightSource || !activeCompareId || !compareDone || pendingCount > 0 || entries.length === 0) return
     const response = await window.api.startSync({
+      compareId: activeCompareId,
       leftSource,
       rightSource,
       direction,
@@ -481,7 +485,7 @@ export default function CompareTree({ entries, filter, onFilterChange, onDoubleC
       rememberSyncDirtyRoots(response.data?.id, roots)
       setSyncTask(response.data ?? null)
     }
-  }, [compareDone, entries, leftSource, pendingCount, rightSource, setSyncTask])
+  }, [activeCompareId, compareDone, entries, leftSource, pendingCount, rightSource, setSyncTask])
 
   const handlePauseSync = useCallback(async () => {
     const response = await window.api.pauseSync()

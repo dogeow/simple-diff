@@ -150,14 +150,14 @@ const api = {
     ipcRenderer.invoke(IPC_CHANNELS.HISTORY_DELETE, id),
 
   // File operations
-  showInFolder: (filePath: string): Promise<IpcResult<void>> =>
-    ipcRenderer.invoke(IPC_CHANNELS.FILE_SHOW_IN_FOLDER, filePath),
+  showInFolder: (source: SourceConfig, relativePath: string): Promise<IpcResult<void>> =>
+    ipcRenderer.invoke(IPC_CHANNELS.FILE_SHOW_IN_FOLDER, source, relativePath),
 
-  renameFile: (oldPath: string, newName: string): Promise<IpcResult<void>> =>
-    ipcRenderer.invoke(IPC_CHANNELS.FILE_RENAME, oldPath, newName),
+  renameFile: (source: SourceConfig, oldRelativePath: string, newName: string): Promise<IpcResult<void>> =>
+    ipcRenderer.invoke(IPC_CHANNELS.FILE_RENAME, source, oldRelativePath, newName),
 
-  deleteFile: (filePath: string, isDirectory: boolean): Promise<IpcResult<void>> =>
-    ipcRenderer.invoke(IPC_CHANNELS.FILE_DELETE, filePath, isDirectory),
+  deleteFile: (source: SourceConfig, relativePath: string, isDirectory: boolean): Promise<IpcResult<void>> =>
+    ipcRenderer.invoke(IPC_CHANNELS.FILE_DELETE, source, relativePath, isDirectory),
 
   // Dialog
   selectFolder: (): Promise<IpcResult<string | null>> =>

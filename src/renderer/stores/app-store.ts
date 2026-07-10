@@ -63,7 +63,14 @@ interface PersistedAppState {
 function sanitizePersistedDiffTabs(diffTabs: readonly DiffTab[]): readonly DiffTab[] {
   return diffTabs
     .filter((tab) => !tab.loading)
-    .map((tab) => ({ ...tab }))
+    .map((tab) => ({
+      ...tab,
+      leftContent: '',
+      rightContent: '',
+      originalLeftContent: '',
+      originalRightContent: '',
+      diffResult: null,
+    }))
 }
 
 function createRestorableCompareTab(

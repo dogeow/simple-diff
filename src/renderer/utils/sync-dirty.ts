@@ -1,22 +1,40 @@
 import type { CompareEntry, SyncTaskItemSnapshot } from '../../../shared/types'
+import { normalizeRelativePath } from '@shared/source-path'
 
-function normalizeRelativePath(relativePath: string): string {
+function normalizeRelativePathForRecompare(relativePath: string): string | null {
   const trimmed = relativePath.trim()
   if (!trimmed || trimmed === '.' || trimmed === '/') {
     return ''
   }
 
-  return trimmed.split(/[\\/]+/).filter(Boolean).join('/')
+  try {
+    return normalizeRelativePath(trimmed, '/')
+  } catch {
+    return null
+  }
 }
 
-function getParentPath(relativePath: string): string {
-  const normalizedPath = normalizeRelativePath(relativePath)
+function getParentPath(relativePath: string): string | null {
+  const normalizedPath = normalizeRelativePathForRecompare(relativePath)
+  if (normalizedPath === null) {
+    return null
+  }
+
   const lastSlashIndex = normalizedPath.lastIndexOf('/')
   return lastSlashIndex >= 0 ? normalizedPath.slice(0, lastSlashIndex) : ''
 }
 
 export function minimizeSyncRecompareRoots(roots: readonly string[]): readonly string[] {
-  const normalizedRoots = new Set(roots.map(normalizeRelativePath))
+  const normalizedRoots = new Set<string>()
+  for (const root of roots) {
+    const normalizedRoot = normalizeRelativePathForRecompare(root)
+    if (normalizedRoot === null) {
+      continue
+    }
+
+    normalizedRoots.add(normalizedRoot)
+  }
+
   if (normalizedRoots.has('')) {
     return ['']
   }
@@ -36,13 +54,22 @@ export function minimizeSyncRecompareRoots(roots: readonly string[]): readonly s
 }
 
 export function getSyncDirtyPathsFromEntries(entries: readonly CompareEntry[]): readonly string[] {
-  return Array.from(new Set(entries.map((entry) => normalizeRelativePath(entry.relativePath))))
+  const normalized = new Set<string>()
+  for (const entry of entries) {
+    const normalizedPath = normalizeRelativePathForRecompare(entry.relativePath)
+    if (normalizedPath !== null) {
+      normalized.add(normalizedPath)
+    }
+  }
+
+  return Array.from(normalized)
 }
 
 export function getSyncRecompareRootsFromEntries(entries: readonly CompareEntry[]): readonly string[] {
-  return minimizeSyncRecompareRoots(entries.map((entry) => (
-    entry.isDirectory ? entry.relativePath : getParentPath(entry.relativePath)
-  )))
+  return minimizeSyncRecompareRoots(entries.flatMap((entry) => {
+    const path = entry.isDirectory ? entry.relativePath : getParentPath(entry.relativePath)
+    return path === null ? [] : [path]
+  }))
 }
 
 export function getSyncRecompareRootsFromItems(items: readonly SyncTaskItemSnapshot[] | undefined): readonly string[] {
@@ -50,7 +77,8 @@ export function getSyncRecompareRootsFromItems(items: readonly SyncTaskItemSnaps
     return []
   }
 
-  return minimizeSyncRecompareRoots(items.map((item) => (
-    item.kind === 'directory' ? item.relativePath : getParentPath(item.relativePath)
-  )))
+  return minimizeSyncRecompareRoots(items.flatMap((item) => {
+    const path = item.kind === 'directory' ? item.relativePath : getParentPath(item.relativePath)
+    return path === null ? [] : [path]
+  }))
 }

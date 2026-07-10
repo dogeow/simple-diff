@@ -1,5 +1,5 @@
 import type { CompareEntry, SyncDirection, SyncItem } from '@shared/types'
-import { joinSourcePath } from '@shared/source-path'
+import { joinSourcePath, normalizeRelativePath } from '@shared/source-path'
 
 export interface SeededSyncQueues {
   readonly pendingItems: readonly SyncItem[]
@@ -17,13 +17,15 @@ export function seedSyncQueues(
   for (const entry of entries) {
     if (!shouldSyncEntry(entry, direction)) continue
 
+    const relativePath = normalizeRelativePath(entry.relativePath, '/')
+
     if (entry.isDirectory) {
-      pendingItems.push({ relativePath: entry.relativePath, kind: 'directory' })
-      pendingDirs.push(entry.relativePath)
+      pendingItems.push({ relativePath, kind: 'directory' })
+      pendingDirs.push(relativePath)
       continue
     }
 
-    pendingItems.push({ relativePath: entry.relativePath, kind: 'file' })
+    pendingItems.push({ relativePath, kind: 'file' })
   }
 
   return {
@@ -46,8 +48,10 @@ export function expandDirectoryEntries(
     return a.name.localeCompare(b.name)
   })
 
+  const safeParentRelativePath = normalizeRelativePath(parentRelativePath, '/')
+
   for (const child of sorted) {
-    const relativePath = joinSourcePath(sourceType, parentRelativePath, child.name)
+    const relativePath = joinSourcePath(sourceType, safeParentRelativePath, child.name)
     if (child.isDirectory) {
       pendingItems.push({ relativePath, kind: 'directory' })
       pendingDirs.push(relativePath)

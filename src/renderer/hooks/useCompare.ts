@@ -18,6 +18,7 @@ import { addRendererLog } from '../stores/log-store'
 import { flushBufferedCompareEvents } from '../utils/compare-events'
 import { formatCompareTabTitleFromSources } from '../utils/source-label'
 import { minimizeSyncRecompareRoots } from '../utils/sync-dirty'
+import { normalizeRelativePath } from '@shared/source-path'
 
 function buildSourceConfig(type: 'local' | 'sftp', path: string, sshConfigId: string): SourceConfig {
   if (type === 'sftp') {
@@ -74,7 +75,7 @@ function normalizeDirtyPath(relativePath: string): string {
     return ''
   }
 
-  return trimmed.split(/[\\/]+/).filter(Boolean).join('/')
+  return normalizeRelativePath(trimmed, '/')
 }
 
 function getDirtyRecompareRoots(dirtyPaths: ReadonlySet<string>): readonly string[] {
@@ -85,7 +86,12 @@ function getDirtyRecompareRoots(dirtyPaths: ReadonlySet<string>): readonly strin
   const roots = new Set<string>()
 
   for (const dirtyPath of dirtyPaths) {
-    const normalizedPath = normalizeDirtyPath(dirtyPath)
+    let normalizedPath: string
+    try {
+      normalizedPath = normalizeDirtyPath(dirtyPath)
+    } catch {
+      continue
+    }
     if (!normalizedPath) {
       return ['']
     }
@@ -238,26 +244,27 @@ async function runPartialCompareForRoots(relativeRoots: readonly string[]): Prom
   const compareState = useCompareStore.getState()
   const activeCompareTabId = useAppStore.getState().activeCompareTabId
   const globalPathFilters = useSettingsStore.getState().globalPathFilters
+  const effectiveRelativeRoots = minimizeSyncRecompareRoots(relativeRoots)
 
   if (!activeCompareTabId || !compareState.leftSource || !compareState.rightSource) {
     return false
   }
 
-  if (relativeRoots.length === 0) {
+  if (effectiveRelativeRoots.length === 0) {
     return false
   }
 
   const effectivePathFilters = mergePathFilters(globalPathFilters, compareState.extensionFilter)
   const previousEntries = createCompareCacheEntries(compareState.entries)
 
-  addRendererLog('compare', 'info', `开始局部重比对 roots=${relativeRoots.join('、') || '.'}`)
+  addRendererLog('compare', 'info', `开始局部重比对 roots=${effectiveRelativeRoots.join('、') || '.'}`)
   const response = await window.api.runPartialCompare({
     left: compareState.leftSource,
     right: compareState.rightSource,
     strategies: [...compareState.strategies],
     extensionFilter: effectivePathFilters.length > 0 ? effectivePathFilters : undefined,
     previousEntries: previousEntries.length > 0 ? previousEntries : undefined,
-    relativeRoots,
+    relativeRoots: effectiveRelativeRoots,
   })
 
   if (!response.success || !response.data) {
@@ -267,9 +274,9 @@ async function runPartialCompareForRoots(relativeRoots: readonly string[]): Prom
     return false
   }
 
-  useCompareStore.getState().applyPartialCompareResult(relativeRoots, response.data.entries)
+  useCompareStore.getState().applyPartialCompareResult(effectiveRelativeRoots, response.data.entries)
   syncCurrentCompareTabSnapshot(activeCompareTabId)
-  addRendererLog('compare', 'info', `局部重比对完成 roots=${relativeRoots.join('、') || '.'} total=${response.data.stats.total}`)
+  addRendererLog('compare', 'info', `局部重比对完成 roots=${effectiveRelativeRoots.join('、') || '.'} total=${response.data.stats.total}`)
   return true
 }
 

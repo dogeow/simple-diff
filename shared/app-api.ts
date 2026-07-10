@@ -64,9 +64,9 @@ export interface AppAPI {
   clearHistory: () => Promise<IpcResult<void>>
   deleteHistory: (id: string) => Promise<IpcResult<void>>
 
-  showInFolder: (filePath: string) => Promise<IpcResult<void>>
-  renameFile: (oldPath: string, newName: string) => Promise<IpcResult<void>>
-  deleteFile: (filePath: string, isDirectory: boolean) => Promise<IpcResult<void>>
+  showInFolder: (source: SourceConfig, relativePath: string) => Promise<IpcResult<void>>
+  renameFile: (source: SourceConfig, oldRelativePath: string, newName: string) => Promise<IpcResult<void>>
+  deleteFile: (source: SourceConfig, relativePath: string, isDirectory: boolean) => Promise<IpcResult<void>>
 
   selectFolder: () => Promise<IpcResult<string | null>>
   selectFile: () => Promise<IpcResult<string | null>>

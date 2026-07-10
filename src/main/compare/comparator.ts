@@ -1,5 +1,5 @@
 import type { FileEntry, CompareCacheEntry, CompareEntry, CompareFileFingerprint, CompareResult, CompareState, DiffReason, StrategyName } from '@shared/types'
-import { joinSourcePath } from '@shared/source-path'
+import { joinSourcePath, normalizeRelativePath } from '@shared/source-path'
 import { matchesPathFilter } from '@shared/path-filter'
 import type { FileSource } from '../file-source/types'
 import type { CompareContext, CompareStrategy } from './types'
@@ -185,7 +185,7 @@ function normalizeRelativeRoot(relativeRoot: string): string {
     return ''
   }
 
-  return trimmed.split(/[\\/]+/).filter(Boolean).join('/')
+  return normalizeRelativePath(trimmed, '/')
 }
 
 function normalizeRelativeRoots(relativeRoots: readonly string[] | undefined): readonly string[] {
@@ -193,7 +193,19 @@ function normalizeRelativeRoots(relativeRoots: readonly string[] | undefined): r
     return ['']
   }
 
-  const normalized = new Set(relativeRoots.map(normalizeRelativeRoot))
+  const normalized = new Set<string>()
+  for (const relativeRoot of relativeRoots) {
+    try {
+      normalized.add(normalizeRelativeRoot(relativeRoot))
+    } catch {
+      // Ignore malformed roots and keep scanning to trusted paths only.
+    }
+  }
+
+  if (normalized.size === 0) {
+    return []
+  }
+
   if (normalized.has('')) {
     return ['']
   }

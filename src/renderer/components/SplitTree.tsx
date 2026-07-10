@@ -1,5 +1,4 @@
 import { memo, useState, useCallback, useEffect, useMemo, useRef } from 'react'
-import { joinSourcePath } from '@shared/source-path'
 import { useShallow } from 'zustand/react/shallow'
 import type { CompareEntry, CompareFilter, SyncDirection } from '../../../shared/types'
 import { type TreeNode, type VisibleTreeNodes } from '../utils/tree-utils'
@@ -179,6 +178,7 @@ function SideTable({
     refreshDir,
     leftSource,
     rightSource,
+    activeCompareId,
     syncTask,
     setSyncTask,
     extensionFilter,
@@ -188,6 +188,7 @@ function SideTable({
     refreshDir: s.refreshDir,
     leftSource: s.leftSource,
     rightSource: s.rightSource,
+    activeCompareId: s.activeCompareId,
     syncTask: s.syncTask,
     setSyncTask: s.setSyncTask,
     extensionFilter: s.extensionFilter,
@@ -198,10 +199,6 @@ function SideTable({
   const [renaming, setRenaming] = useState<string | null>(null)
   const [renameValue, setRenameValue] = useState('')
   const renderedNodes = visibleNodes.slice(startIndex, endIndex)
-
-  const buildFullPath = (relativePath: string) => {
-    return joinSourcePath(isLocal ? 'local' : 'sftp', sourcePath, relativePath)
-  }
 
   const getParentRelativePath = (relativePath: string): string => {
     const segments = relativePath.split('/')
@@ -214,11 +211,13 @@ function SideTable({
 
     const syncEntries = collectSyncEntriesForSelection(entries, paths, direction)
     if (syncEntries.length === 0) return
+    if (!activeCompareId) return
 
     const response = await window.api.startSync({
       leftSource,
       rightSource,
       direction,
+      compareId: activeCompareId,
       entries: syncEntries,
     })
 
@@ -227,7 +226,7 @@ function SideTable({
       rememberSyncDirtyRoots(response.data?.id, getSyncRecompareRootsFromEntries(syncEntries))
       setSyncTask(response.data ?? null)
     }
-  }, [entries, leftSource, rightSource, setSyncTask, syncTask])
+  }, [activeCompareId, entries, leftSource, rightSource, setSyncTask, syncTask])
 
   const handleContextMenu = useCallback((e: React.MouseEvent, node: TreeNode) => {
     e.preventDefault()
@@ -239,7 +238,6 @@ function SideTable({
     const fileInfo = side === 'left' ? node.entry.left : node.entry.right
     if (!fileInfo) return []
 
-    const fullPath = buildFullPath(node.relativePath)
     const ignoreAction: ContextMenuAction = {
       label: `${node.isDirectory ? '忽略目录' : '忽略文件'}：『${node.name}』`,
       onClick: () => {
@@ -265,6 +263,7 @@ function SideTable({
         ? '复制到右边'
         : '复制到左边'
     const canCopySelection = canQueueSyncDirection(syncTask, leftSource, rightSource, copyDirection)
+    const source = side === 'left' ? leftSource : rightSource
     const copyAction = supportsSync && syncEntries.length > 0
       ? [{
           label: copyLabel,
@@ -284,7 +283,10 @@ function SideTable({
       ...copyAction,
       {
         label: '在 Finder 中显示',
-        onClick: () => window.api.showInFolder(fullPath),
+        onClick: () => {
+          if (!source) return
+          void window.api.showInFolder(source, node.relativePath)
+        },
       },
       {
         label: '重命名',
@@ -297,9 +299,10 @@ function SideTable({
         label: '删除',
         danger: true,
         onClick: async () => {
+          if (!source) return
           const confirmed = window.confirm(`确定删除 "${node.name}" 吗？`)
           if (confirmed) {
-            const result = await window.api.deleteFile(fullPath, node.isDirectory)
+            const result = await window.api.deleteFile(source, node.relativePath, node.isDirectory)
             if (result.success) {
               await refreshDir(getParentRelativePath(node.relativePath))
             }
@@ -314,8 +317,9 @@ function SideTable({
   const handleRenameSubmit = useCallback(async (node: TreeNode) => {
     const trimmed = renameValue.trim()
     if (trimmed && trimmed !== node.name) {
-      const fullPath = buildFullPath(node.relativePath)
-      const result = await window.api.renameFile(fullPath, trimmed)
+      const source = side === 'left' ? leftSource : rightSource
+      if (!source) return
+      const result = await window.api.renameFile(source, node.relativePath, trimmed)
       if (result.success) {
         await refreshDir(getParentRelativePath(node.relativePath))
       }
@@ -599,11 +603,15 @@ export default function SplitTree({ entries, filter, onDoubleClickFile, emptySta
     if (syncEntries.length === 0) {
       return
     }
+    if (!activeCompareId) {
+      return
+    }
 
     const response = await window.api.startSync({
       leftSource,
       rightSource,
       direction,
+      compareId: activeCompareId,
       entries: syncEntries,
     })
 
@@ -612,7 +620,7 @@ export default function SplitTree({ entries, filter, onDoubleClickFile, emptySta
       rememberSyncDirtyRoots(response.data?.id, getSyncRecompareRootsFromEntries(syncEntries))
       setSyncTask(response.data ?? null)
     }
-  }, [leftSelectionEntries, leftSource, rightSelectionEntries, rightSource, selection.selectedPaths, setSyncTask, syncTask])
+  }, [activeCompareId, leftSelectionEntries, leftSource, rightSelectionEntries, rightSource, selection.selectedPaths, setSyncTask, syncTask])
 
   return (
     <div className="flex h-full flex-col">
