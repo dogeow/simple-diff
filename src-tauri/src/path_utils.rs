@@ -53,3 +53,22 @@ pub fn normalize_relative(relative: &str) -> String {
     .collect::<Vec<_>>()
     .join("/")
 }
+
+/// Like normalize_relative but rejects `..` segments.
+pub fn normalize_relative_safe(relative: &str) -> Result<String, String> {
+  if relative.split(['/', '\\']).any(|part| part == "..") {
+    return Err("路径包含非法片段".into());
+  }
+  Ok(normalize_relative(relative))
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn normalize_relative_safe_rejects_dotdot() {
+    assert!(normalize_relative_safe("../secret").is_err());
+    assert_eq!(normalize_relative_safe("a/b").unwrap(), "a/b");
+  }
+}

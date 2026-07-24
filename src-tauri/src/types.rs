@@ -24,10 +24,30 @@ pub enum SourceConfig {
 }
 
 impl SourceConfig {
-  pub fn local_path(&self) -> Result<&str, String> {
+  pub fn as_local_path(&self) -> Result<&str, String> {
     match self {
       Self::Local { path } => Ok(path),
-      Self::Sftp { .. } => Err("当前 Tauri 版本暂不支持 SFTP".into()),
+      Self::Sftp { .. } => Err("需要本地路径".into()),
+    }
+  }
+
+  pub fn is_local(&self) -> bool {
+    matches!(self, Self::Local { .. })
+  }
+
+  #[allow(dead_code)]
+  pub fn sftp_config_id(&self) -> Option<&str> {
+    match self {
+      Self::Sftp { config_id, .. } => Some(config_id),
+      _ => None,
+    }
+  }
+
+  #[allow(dead_code)]
+  pub fn root_path(&self) -> &str {
+    match self {
+      Self::Local { path } => path,
+      Self::Sftp { path, .. } => path,
     }
   }
 }
@@ -204,3 +224,178 @@ impl IpcResult<()> {
     }
   }
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SyncDirection {
+  LeftToRight,
+  RightToLeft,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SyncTaskStatus {
+  Running,
+  Paused,
+  Completed,
+  Failed,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SyncItemKind {
+  Directory,
+  File,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SyncTaskItemStatus {
+  Pending,
+  Running,
+  Completed,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncItem {
+  pub relative_path: String,
+  pub kind: SyncItemKind,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncTaskItemSnapshot {
+  pub relative_path: String,
+  pub kind: SyncItemKind,
+  pub status: SyncTaskItemStatus,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncTaskSnapshot {
+  pub id: String,
+  pub left_source: SourceConfig,
+  pub right_source: SourceConfig,
+  pub direction: SyncDirection,
+  pub status: SyncTaskStatus,
+  pub total_items: u64,
+  pub completed_items: u64,
+  pub current_path: Option<String>,
+  pub last_completed_path: Option<String>,
+  pub last_error: Option<String>,
+  pub created_at: u64,
+  pub updated_at: u64,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub items: Option<Vec<SyncTaskItemSnapshot>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StartSyncRequest {
+  pub compare_id: String,
+  pub left_source: SourceConfig,
+  pub right_source: SourceConfig,
+  pub direction: SyncDirection,
+  pub entries: Vec<CompareEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CompareHistoryEntry {
+  pub id: String,
+  pub timestamp: u64,
+  pub left_label: String,
+  pub right_label: String,
+  pub left_source: SourceConfig,
+  pub right_source: SourceConfig,
+  pub stats: CompareStats,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum LogLevel {
+  Info,
+  Warn,
+  Error,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum LogScope {
+  App,
+  Compare,
+  #[serde(rename = "compare-watch")]
+  CompareWatch,
+  Sync,
+  Ssh,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LogEntry {
+  pub timestamp: u64,
+  pub level: LogLevel,
+  pub scope: LogScope,
+  pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum SshAuthType {
+  Password,
+  PrivateKey,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SshConfig {
+  pub id: String,
+  pub label: String,
+  pub host: String,
+  pub port: u16,
+  pub username: String,
+  pub auth_type: SshAuthType,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub default_path: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SshConfigInput {
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub id: Option<String>,
+  pub label: String,
+  pub host: String,
+  pub port: u16,
+  pub username: String,
+  pub auth_type: SshAuthType,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub default_path: Option<String>,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub password: Option<String>,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub private_key_path: Option<String>,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub passphrase: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SshConfigInternal {
+  pub id: String,
+  pub label: String,
+  pub host: String,
+  pub port: u16,
+  pub username: String,
+  pub auth_type: SshAuthType,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub default_path: Option<String>,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub password: Option<String>,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub private_key_path: Option<String>,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub passphrase: Option<String>,
+}
+

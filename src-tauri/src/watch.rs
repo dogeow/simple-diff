@@ -33,8 +33,8 @@ impl WatchManager {
     left: SourceConfig,
     right: SourceConfig,
   ) -> Result<(), String> {
-    let left_root = PathBuf::from(left.local_path()?);
-    let right_root = PathBuf::from(right.local_path()?);
+    let left_root = PathBuf::from(left.as_local_path()?);
+    let right_root = PathBuf::from(right.as_local_path()?);
 
     self.stop(Some(&session_id));
 

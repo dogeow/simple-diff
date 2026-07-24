@@ -1,9 +1,11 @@
 import { invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
+import { getCurrentWebview } from '@tauri-apps/api/webview'
 import type { AppAPI } from '@shared/app-api'
 import { computeTextDiff } from '@shared/text-diff'
 import type {
   CompareEntry,
+  CompareHistoryEntry,
   CompareLocalWatchRequest,
   ComparePartialRequest,
   CompareRequest,
@@ -12,15 +14,12 @@ import type {
   IpcResult,
   LogEntry,
   SourceConfig,
+  SSHConfig,
+  SSHConfigInput,
+  StartSyncRequest,
+  SyncTaskSnapshot,
   TextDiffResult,
 } from '@shared/types'
-
-function unsupported<T = never>(feature: string): Promise<IpcResult<T>> {
-  return Promise.resolve({
-    success: false,
-    error: `当前 Tauri 版本暂不支持${feature}`,
-  })
-}
 
 async function wrap<T>(fn: () => Promise<IpcResult<T>>): Promise<IpcResult<T>> {
   try {
@@ -48,12 +47,42 @@ function subscribe<T>(
   }
 }
 
+/** Last native drop paths (Tauri onDragDropEvent); HTML5 File has no path in WKWebView. */
+let lastNativeDropPaths: string[] = []
+
+function rememberNativeDropPaths(paths: readonly string[]): void {
+  lastNativeDropPaths = [...paths]
+}
+
+export function consumeNativeDropPath(): string | null {
+  if (lastNativeDropPaths.length === 0) return null
+  return lastNativeDropPaths.shift() ?? null
+}
+
+function ensureNativeDropListener(): void {
+  if (typeof window === 'undefined') return
+  if ((window as unknown as { __simpleDiffDropBound?: boolean }).__simpleDiffDropBound) return
+  ;(window as unknown as { __simpleDiffDropBound?: boolean }).__simpleDiffDropBound = true
+
+  void getCurrentWebview()
+    .onDragDropEvent((event) => {
+      if (event.payload.type === 'drop') {
+        rememberNativeDropPaths(event.payload.paths)
+      }
+    })
+    .catch(() => {
+      // Not running inside Tauri webview (e.g. vitest)
+    })
+}
+
+ensureNativeDropListener()
+
 export const tauriApi: AppAPI = {
   runtime: {
     mode: 'tauri',
-    supportsSftp: false,
-    supportsHistory: false,
-    supportsSync: false,
+    supportsSftp: true,
+    supportsHistory: true,
+    supportsSync: true,
     supportsNativeFolderSelection: true,
     supportsDirectoryDragDrop: true,
     supportsWriteBack: true,
@@ -83,11 +112,20 @@ export const tauriApi: AppAPI = {
   stopLocalCompareWatch: (sessionId?: string) =>
     wrap(() => invoke<IpcResult<void>>('stop_local_compare_watch', { sessionId: sessionId ?? null })),
 
-  startSync: () => unsupported('同步'),
-  pauseSync: () => unsupported('同步'),
-  resumeSync: () => unsupported('同步'),
-  getSyncStatus: () => Promise.resolve({ success: true, data: null }),
-  clearSync: () => unsupported('同步'),
+  startSync: (request: StartSyncRequest) =>
+    wrap(() => invoke<IpcResult<SyncTaskSnapshot>>('sync_start', { request })),
+
+  pauseSync: () =>
+    wrap(() => invoke<IpcResult<SyncTaskSnapshot | null>>('sync_pause')),
+
+  resumeSync: () =>
+    wrap(() => invoke<IpcResult<SyncTaskSnapshot | null>>('sync_resume')),
+
+  getSyncStatus: () =>
+    wrap(() => invoke<IpcResult<SyncTaskSnapshot | null>>('sync_get_status')),
+
+  clearSync: () =>
+    wrap(() => invoke<IpcResult<void>>('sync_clear')),
 
   onScanComplete: (callback) =>
     subscribe<[string, readonly CompareEntry[]]>('compare:scan-complete', ([compareId, entries]) => {
@@ -104,11 +142,18 @@ export const tauriApi: AppAPI = {
       callback(sessionId, paths)
     }),
 
-  onSyncProgress: () => () => undefined,
+  onSyncProgress: (callback) =>
+    subscribe<SyncTaskSnapshot | null>('sync:progress', (task) => {
+      callback(task)
+    }),
 
-  onLog: () => () => undefined,
+  onLog: (callback) =>
+    subscribe<LogEntry>('app:log', (entry) => {
+      callback(entry)
+    }),
+
   writeLog: (entry: LogEntry) => {
-    void invoke('write_log', { message: `[${entry.scope}/${entry.level}] ${entry.message}` })
+    void invoke('write_log', { entry })
   },
 
   textDiff: async (leftText, rightText): Promise<IpcResult<TextDiffResult>> => ({
@@ -116,15 +161,29 @@ export const tauriApi: AppAPI = {
     data: computeTextDiff(leftText, rightText),
   }),
 
-  listSSHConfigs: () => unsupported('SSH'),
-  saveSSHConfig: () => unsupported('SSH'),
-  deleteSSHConfig: () => unsupported('SSH'),
-  testSSHConnection: () => unsupported('SSH'),
-  browseSSH: () => unsupported('SSH'),
+  listSSHConfigs: () =>
+    wrap(() => invoke<IpcResult<readonly SSHConfig[]>>('ssh_list_configs')),
 
-  listHistory: () => unsupported('历史'),
-  clearHistory: () => unsupported('历史'),
-  deleteHistory: () => unsupported('历史'),
+  saveSSHConfig: (config: SSHConfigInput) =>
+    wrap(() => invoke<IpcResult<SSHConfig>>('ssh_save_config', { input: config })),
+
+  deleteSSHConfig: (id: string) =>
+    wrap(() => invoke<IpcResult<void>>('ssh_delete_config', { id })),
+
+  testSSHConnection: (id: string) =>
+    wrap(() => invoke<IpcResult<boolean>>('ssh_test', { id })),
+
+  browseSSH: (configId: string, dirPath: string) =>
+    wrap(() => invoke<IpcResult<readonly FileEntry[]>>('ssh_browse', { configId, dirPath })),
+
+  listHistory: () =>
+    wrap(() => invoke<IpcResult<readonly CompareHistoryEntry[]>>('history_list')),
+
+  clearHistory: () =>
+    wrap(() => invoke<IpcResult<void>>('history_clear')),
+
+  deleteHistory: (id: string) =>
+    wrap(() => invoke<IpcResult<void>>('history_delete', { id })),
 
   showInFolder: (source: SourceConfig, relativePath: string) =>
     wrap(() => invoke<IpcResult<void>>('show_in_folder', { source, relativePath })),
@@ -141,7 +200,10 @@ export const tauriApi: AppAPI = {
   selectFile: () =>
     wrap(() => invoke<IpcResult<string | null>>('select_file')),
 
-  onOpenPaths: () => () => undefined,
+  onOpenPaths: (callback) =>
+    subscribe<readonly string[]>('app:open-paths', (paths) => {
+      callback(paths)
+    }),
 
-  getPathForFile: () => '',
+  getPathForFile: () => consumeNativeDropPath() ?? '',
 }

@@ -1,15 +1,31 @@
 mod commands;
 mod compare;
 mod files;
+mod history;
+mod log_bridge;
+mod path_guards;
 mod path_utils;
+mod secret_crypto;
+mod source_ops;
+mod ssh;
+mod ssh_pool;
+mod ssh_store;
 mod state;
+mod sync;
+mod sync_plan;
 mod types;
 mod watch;
 
 use state::AppState;
+use tauri::{Emitter, Manager, RunEvent};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+  let open_paths: Vec<String> = std::env::args()
+    .skip(1)
+    .filter(|arg| !arg.starts_with('-'))
+    .collect();
+
   tauri::Builder::default()
     .plugin(tauri_plugin_dialog::init())
     .plugin(tauri_plugin_opener::init())
@@ -22,6 +38,9 @@ pub fn run() {
             .build(),
         )?;
       }
+      crate::sync::sync_manager().hydrate_from_disk(app.handle());
+      let _ = crate::secret_crypto::app_data_dir(app.handle());
+      app.manage(open_paths);
       Ok(())
     })
     .invoke_handler(tauri::generate_handler![
@@ -39,7 +58,29 @@ pub fn run() {
       commands::rename_path,
       commands::delete_path,
       commands::write_log,
+      commands::history_list,
+      commands::history_clear,
+      commands::history_delete,
+      commands::sync_start,
+      commands::sync_pause,
+      commands::sync_resume,
+      commands::sync_get_status,
+      commands::sync_clear,
+      commands::ssh_list_configs,
+      commands::ssh_save_config,
+      commands::ssh_delete_config,
+      commands::ssh_test,
+      commands::ssh_browse,
     ])
-    .run(tauri::generate_context!())
-    .expect("error while running tauri application");
+    .build(tauri::generate_context!())
+    .expect("error while building tauri application")
+    .run(|app_handle, event| {
+      if let RunEvent::Ready = event {
+        if let Some(paths) = app_handle.try_state::<Vec<String>>() {
+          if !paths.is_empty() {
+            let _ = app_handle.emit("app:open-paths", paths.inner().clone());
+          }
+        }
+      }
+    });
 }

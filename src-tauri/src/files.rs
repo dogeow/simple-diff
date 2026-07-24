@@ -8,7 +8,7 @@ use crate::path_utils::{join_path, normalize_relative};
 use crate::types::{FileEntry, SourceConfig};
 
 pub fn resolve_local_abs(source: &SourceConfig, relative_or_abs: &str) -> Result<PathBuf, String> {
-  let root = source.local_path()?;
+  let root = source.as_local_path()?;
   let root = PathBuf::from(root).canonicalize().map_err(|e| format!("无法解析路径: {e}"))?;
 
   let candidate = if Path::new(relative_or_abs).is_absolute() {
@@ -48,13 +48,14 @@ fn mtime_ms(meta: &fs::Metadata) -> u64 {
     .unwrap_or(0)
 }
 
+#[allow(dead_code)]
 pub fn list_directory(source: &SourceConfig, dir_path: &str) -> Result<Vec<FileEntry>, String> {
   let abs = resolve_local_abs(source, dir_path)?;
   if !abs.is_dir() {
     return Err("不是目录".into());
   }
 
-  let root = PathBuf::from(source.local_path()?);
+  let root = PathBuf::from(source.as_local_path()?);
   let mut entries = Vec::new();
 
   for item in fs::read_dir(&abs).map_err(|e| format!("读取目录失败: {e}"))? {
@@ -180,9 +181,18 @@ pub fn delete_file(source: &SourceConfig, relative: &str, is_directory: bool) ->
 }
 
 pub fn file_sha256(path: &Path) -> Result<String, String> {
-  let bytes = fs::read(path).map_err(|e| format!("读取文件失败: {e}"))?;
+  use std::io::Read;
+
+  let mut file = fs::File::open(path).map_err(|e| format!("打开文件失败: {e}"))?;
   let mut hasher = Sha256::new();
-  hasher.update(&bytes);
+  let mut buf = [0u8; 64 * 1024];
+  loop {
+    let read = file.read(&mut buf).map_err(|e| format!("读取文件失败: {e}"))?;
+    if read == 0 {
+      break;
+    }
+    hasher.update(&buf[..read]);
+  }
   Ok(hex::encode(hasher.finalize()))
 }
 
@@ -192,23 +202,62 @@ pub fn file_quick_hash(path: &Path) -> Result<String, String> {
   let meta = fs::metadata(path).map_err(|e| format!("读取元数据失败: {e}"))?;
   let size = meta.len();
   let mut file = fs::File::open(path).map_err(|e| format!("打开文件失败: {e}"))?;
-  let mut hasher = Sha256::new();
-  hasher.update(size.to_le_bytes());
-
   const CHUNK: usize = 64 * 1024;
   let mut buf = vec![0u8; CHUNK];
 
-  let head_read = file.read(&mut buf).map_err(|e| format!("读取失败: {e}"))?;
-  hasher.update(&buf[..head_read]);
-
-  if size > CHUNK as u64 {
-    let seek_pos = size.saturating_sub(CHUNK as u64);
-    file
-      .seek(SeekFrom::Start(seek_pos))
-      .map_err(|e| format!("定位失败: {e}"))?;
-    let tail_read = file.read(&mut buf).map_err(|e| format!("读取失败: {e}"))?;
-    hasher.update(&buf[..tail_read]);
+  // Small files: whole-file hash (matches Electron quick_hash semantics).
+  if size <= CHUNK as u64 {
+    let mut hasher = Sha256::new();
+    loop {
+      let n = file.read(&mut buf).map_err(|e| format!("读取失败: {e}"))?;
+      if n == 0 {
+        break;
+      }
+      hasher.update(&buf[..n]);
+    }
+    return Ok(hex::encode(hasher.finalize()));
   }
 
-  Ok(hex::encode(hasher.finalize()))
+  let head_read = file.read(&mut buf).map_err(|e| format!("读取失败: {e}"))?;
+  let mut head_hasher = Sha256::new();
+  head_hasher.update(&buf[..head_read]);
+  let head_hash = hex::encode(head_hasher.finalize());
+
+  let mut tail_hasher = Sha256::new();
+  let seek_pos = size.saturating_sub(CHUNK as u64);
+  file
+    .seek(SeekFrom::Start(seek_pos))
+    .map_err(|e| format!("定位失败: {e}"))?;
+  let tail_read = file.read(&mut buf).map_err(|e| format!("读取失败: {e}"))?;
+  tail_hasher.update(&buf[..tail_read]);
+  let tail_hash = hex::encode(tail_hasher.finalize());
+
+  Ok(format!("{head_hash}:{tail_hash}"))
 }
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use std::io::Write;
+
+  #[test]
+  fn quick_hash_small_file_is_single_digest() {
+    let dir = std::env::temp_dir().join(format!("simple-diff-qh-{}", std::process::id()));
+    let _ = fs::create_dir_all(&dir);
+    let path = dir.join("small.txt");
+    let mut f = fs::File::create(&path).unwrap();
+    write!(f, "hello").unwrap();
+    let hash = file_quick_hash(&path).unwrap();
+    assert!(!hash.contains(':'), "small file should be whole-file hash, got {hash}");
+    let _ = fs::remove_dir_all(&dir);
+  }
+}
+
+pub fn copy_local_file(from: &Path, to: &Path) -> Result<(), String> {
+  if let Some(parent) = to.parent() {
+    fs::create_dir_all(parent).map_err(|e| format!("创建目录失败: {e}"))?;
+  }
+  fs::copy(from, to).map_err(|e| format!("复制失败: {e}"))?;
+  Ok(())
+}
+

@@ -17,7 +17,7 @@ interface SourceSelectorProps {
 }
 
 function getDroppedFolderPath(event: React.DragEvent<HTMLDivElement>): string | null {
-  // Use Electron's webUtils.getPathForFile (works with contextIsolation)
+  // Tauri native drop fills getPathForFile via onDragDropEvent; HTML5 File has no path.
   const files = event.dataTransfer.files
   if (files.length > 0) {
     const filePath = window.api.getPathForFile(files[0])
@@ -254,7 +254,7 @@ export default function SourceSelector({
                 ? 'bg-blue-600 text-white'
                 : 'text-neutral-300 hover:bg-neutral-700'
             }`}
-            title={runtime.supportsSftp ? undefined : '网页版暂不支持 SFTP'}
+            title={runtime.supportsSftp ? undefined : '当前版本暂不支持 SFTP'}
           >
             <ServerIcon width={12} height={12} />
             SFTP

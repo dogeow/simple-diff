@@ -1,0 +1,32 @@
+[[permission]]
+identifier = "allow-commands"
+description = "Allow all Simple Diff application commands"
+commands.allow = [
+  "list_files",
+  "read_text_file",
+  "write_text_file",
+  "run_compare",
+  "run_partial_compare",
+  "cancel_compare",
+  "start_local_compare_watch",
+  "stop_local_compare_watch",
+  "select_folder",
+  "select_file",
+  "show_in_folder",
+  "rename_path",
+  "delete_path",
+  "write_log",
+  "history_list",
+  "history_clear",
+  "history_delete",
+  "sync_start",
+  "sync_pause",
+  "sync_resume",
+  "sync_get_status",
+  "sync_clear",
+  "ssh_list_configs",
+  "ssh_save_config",
+  "ssh_delete_config",
+  "ssh_test",
+  "ssh_browse"
+]

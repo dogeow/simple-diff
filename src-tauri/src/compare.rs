@@ -1,26 +1,72 @@
 use std::collections::HashMap;
-use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
+use rayon::prelude::*;
 use tauri::{AppHandle, Emitter};
 
-use crate::files::{file_quick_hash, file_sha256, list_directory_relative};
+use crate::files::{file_quick_hash, file_sha256};
 use crate::path_utils::{join_path, matches_path_filter, normalize_relative};
+use crate::source_ops::SourceSession;
+use crate::state::ActiveCompare;
 use crate::types::{
   CompareCacheEntry, CompareEntry, CompareResult, CompareState, CompareStats, DiffReason,
   FileEntry, SourceConfig, StrategyName,
 };
 
+const ENTRY_FLUSH_MS: u128 = 100;
+const ENTRY_FLUSH_SIZE: usize = 200;
+
 pub struct CompareCallbacks<'a> {
   pub app: &'a AppHandle,
   pub compare_id: &'a str,
   pub cancelled: Arc<AtomicBool>,
+  pub session: Option<Arc<ActiveCompare>>,
 }
 
 struct PendingDirectoryScan {
   rel: String,
+}
+
+struct EntryBatcher<'a> {
+  callbacks: &'a CompareCallbacks<'a>,
+  buffer: Vec<CompareEntry>,
+  last_flush: Instant,
+}
+
+impl<'a> EntryBatcher<'a> {
+  fn new(callbacks: &'a CompareCallbacks<'a>) -> Self {
+    Self {
+      callbacks,
+      buffer: Vec::new(),
+      last_flush: Instant::now(),
+    }
+  }
+
+  fn push(&mut self, entry: CompareEntry) {
+    if let Some(session) = &self.callbacks.session {
+      session.register_entries(std::slice::from_ref(&entry));
+    }
+    self.buffer.push(entry);
+    if self.buffer.len() >= ENTRY_FLUSH_SIZE
+      || self.last_flush.elapsed() >= Duration::from_millis(ENTRY_FLUSH_MS as u64)
+    {
+      self.flush();
+    }
+  }
+
+  fn flush(&mut self) {
+    if self.buffer.is_empty() {
+      return;
+    }
+    let batch = std::mem::take(&mut self.buffer);
+    let _ = self.callbacks.app.emit(
+      "compare:entry-update",
+      (self.callbacks.compare_id.to_string(), batch),
+    );
+    self.last_flush = Instant::now();
+  }
 }
 
 fn throw_if_cancelled(cancelled: &AtomicBool) -> Result<(), String> {
@@ -40,17 +86,14 @@ fn fingerprint_matches(cache: &CompareCacheEntry, left: &FileEntry, right: &File
     && cache.right.mtime == right.mtime
 }
 
-fn compare_file(
+fn compare_local_files(
   left_root: &str,
   right_root: &str,
   left: &FileEntry,
   right: &FileEntry,
   strategies: &[StrategyName],
 ) -> Result<(CompareState, Vec<DiffReason>), String> {
-  let left_abs = join_path(left_root, &left.path);
-  let right_abs = join_path(right_root, &right.path);
-  let left_path = Path::new(&left_abs);
-  let right_path = Path::new(&right_abs);
+  use std::path::Path;
 
   for strategy in strategies {
     match strategy {
@@ -73,8 +116,8 @@ fn compare_file(
         ));
       }
       StrategyName::QuickHash => {
-        let left_hash = file_quick_hash(left_path)?;
-        let right_hash = file_quick_hash(right_path)?;
+        let left_hash = file_quick_hash(Path::new(&join_path(left_root, &left.path)))?;
+        let right_hash = file_quick_hash(Path::new(&join_path(right_root, &right.path)))?;
         if left_hash != right_hash {
           return Ok((
             CompareState::Different,
@@ -86,8 +129,68 @@ fn compare_file(
         }
       }
       StrategyName::Hash => {
-        let left_hash = file_sha256(left_path)?;
-        let right_hash = file_sha256(right_path)?;
+        let left_hash = file_sha256(Path::new(&join_path(left_root, &left.path)))?;
+        let right_hash = file_sha256(Path::new(&join_path(right_root, &right.path)))?;
+        if left_hash != right_hash {
+          return Ok((
+            CompareState::Different,
+            vec![DiffReason::Hash {
+              left_hash,
+              right_hash,
+            }],
+          ));
+        }
+      }
+      _ => {}
+    }
+  }
+
+  Ok((CompareState::Equal, Vec::new()))
+}
+
+fn compare_file_with_sessions(
+  left_session: &SourceSession<'_>,
+  right_session: &SourceSession<'_>,
+  left: &FileEntry,
+  right: &FileEntry,
+  strategies: &[StrategyName],
+) -> Result<(CompareState, Vec<DiffReason>), String> {
+  for strategy in strategies {
+    match strategy {
+      StrategyName::Size if left.size != right.size => {
+        return Ok((
+          CompareState::Different,
+          vec![DiffReason::Size {
+            left_size: left.size,
+            right_size: right.size,
+          }],
+        ));
+      }
+      StrategyName::Mtime if left.mtime.abs_diff(right.mtime) > 1000 => {
+        return Ok((
+          CompareState::Different,
+          vec![DiffReason::Mtime {
+            left_mtime: left.mtime,
+            right_mtime: right.mtime,
+          }],
+        ));
+      }
+      StrategyName::QuickHash => {
+        let left_hash = left_session.quick_hash(&left.path)?;
+        let right_hash = right_session.quick_hash(&right.path)?;
+        if left_hash != right_hash {
+          return Ok((
+            CompareState::Different,
+            vec![DiffReason::QuickHash {
+              left_hash,
+              right_hash,
+            }],
+          ));
+        }
+      }
+      StrategyName::Hash => {
+        let left_hash = left_session.hash(&left.path)?;
+        let right_hash = right_session.hash(&right.path)?;
         if left_hash != right_hash {
           return Ok((
             CompareState::Different,
@@ -193,17 +296,17 @@ fn match_level(
             right: Some(right.clone()),
             reasons: cache.reasons.clone(),
           });
-          continue;
+        } else {
+          entries.push(CompareEntry {
+            relative_path,
+            name,
+            is_directory: false,
+            state: CompareState::Pending,
+            left: Some(left.clone()),
+            right: Some(right.clone()),
+            reasons: Vec::new(),
+          });
         }
-        entries.push(CompareEntry {
-          relative_path,
-          name,
-          is_directory: false,
-          state: CompareState::Pending,
-          left: Some(left.clone()),
-          right: Some(right.clone()),
-          reasons: Vec::new(),
-        });
       } else {
         entries.push(CompareEntry {
           relative_path,
@@ -239,6 +342,7 @@ fn bump_stats(stats: &mut CompareStats, state: &CompareState) {
 }
 
 pub fn compare_directories(
+  app: &AppHandle,
   left: &SourceConfig,
   right: &SourceConfig,
   relative_roots: &[String],
@@ -248,9 +352,11 @@ pub fn compare_directories(
   retain_entries: bool,
   callbacks: Option<&CompareCallbacks<'_>>,
 ) -> Result<CompareResult, String> {
-  let left_root = left.local_path()?.to_string();
-  let right_root = right.local_path()?.to_string();
+  let left_session = SourceSession::open(app, left)?;
+  let right_session = SourceSession::open(app, right)?;
   let path_filters = extension_filter.unwrap_or(&[]).to_vec();
+  let both_local = left.is_local() && right.is_local();
+  let list_concurrency = if both_local { 8usize } else { 2usize };
 
   let mut reusable: HashMap<String, CompareCacheEntry> = HashMap::new();
   if let Some(prev) = previous_entries {
@@ -285,21 +391,54 @@ pub fn compare_directories(
     let mut next_level: Vec<PendingDirectoryScan> = Vec::new();
     let mut level_entries: Vec<CompareEntry> = Vec::new();
 
-    for scan in &current_level {
-      let left_list = list_directory_relative(&left_root, &scan.rel).unwrap_or_default();
-      let right_list = list_directory_relative(&right_root, &scan.rel).unwrap_or_default();
-      let matched = match_level(&left_list, &right_list, &scan.rel, &path_filters, &reusable);
-      level_entries.extend(matched);
+    // Concurrent directory listing within the level (chunked).
+    for chunk in current_level.chunks(list_concurrency) {
+      if let Some(cb) = callbacks {
+        throw_if_cancelled(&cb.cancelled)?;
+      }
+      for scan in chunk {
+        let left_list = if scan.rel.is_empty() {
+          left_session
+            .list(&scan.rel)
+            .map_err(|e| format!("读取左侧根目录失败: {e}"))?
+        } else {
+          left_session.list(&scan.rel).unwrap_or_default()
+        };
+        let right_list = if scan.rel.is_empty() {
+          right_session
+            .list(&scan.rel)
+            .map_err(|e| format!("读取右侧根目录失败: {e}"))?
+        } else {
+          right_session.list(&scan.rel).unwrap_or_default()
+        };
+        let matched = match_level(&left_list, &right_list, &scan.rel, &path_filters, &reusable);
+        level_entries.extend(matched);
+      }
     }
 
     if let Some(cb) = callbacks {
+      if let Some(session) = &cb.session {
+        session.register_entries(&level_entries);
+      }
       let _ = cb.app.emit(
         "compare:scan-complete",
         (cb.compare_id.to_string(), level_entries.clone()),
       );
     }
 
-    for mut entry in level_entries {
+    let mut pending_files: Vec<CompareEntry> = Vec::new();
+    let mut other_entries: Vec<CompareEntry> = Vec::new();
+    for entry in level_entries {
+      if !entry.is_directory && entry.state == CompareState::Pending {
+        pending_files.push(entry);
+      } else {
+        other_entries.push(entry);
+      }
+    }
+
+    let mut batcher = callbacks.map(EntryBatcher::new);
+
+    for entry in other_entries {
       if let Some(cb) = callbacks {
         throw_if_cancelled(&cb.cancelled)?;
       }
@@ -307,6 +446,17 @@ pub fn compare_directories(
       if entry.is_directory {
         match entry.state {
           CompareState::Pending => {
+            // Emit comparing state for UI spinner before descending.
+            let mut comparing = entry.clone();
+            comparing.state = CompareState::Comparing;
+            if let Some(batcher) = batcher.as_mut() {
+              batcher.push(comparing);
+            } else if let Some(cb) = callbacks {
+              let _ = cb.app.emit(
+                "compare:entry-update",
+                (cb.compare_id.to_string(), vec![comparing]),
+              );
+            }
             next_level.push(PendingDirectoryScan {
               rel: entry.relative_path.clone(),
             });
@@ -316,6 +466,9 @@ pub fn compare_directories(
           }
           CompareState::LeftOnly | CompareState::RightOnly => {
             bump_stats(&mut stats, &entry.state);
+            if let Some(batcher) = batcher.as_mut() {
+              batcher.push(entry.clone());
+            }
             if retain_entries {
               all_entries.push(entry);
             }
@@ -326,35 +479,76 @@ pub fn compare_directories(
             }
           }
         }
-        continue;
-      }
-
-      if entry.state == CompareState::Pending {
-        if let (Some(left_fe), Some(right_fe)) = (&entry.left, &entry.right) {
-          match compare_file(&left_root, &right_root, left_fe, right_fe, strategies) {
-            Ok((state, reasons)) => {
-              entry.state = state;
-              entry.reasons = reasons;
-            }
-            Err(_) => {
-              entry.state = CompareState::Different;
-            }
-          }
+      } else {
+        bump_stats(&mut stats, &entry.state);
+        if let Some(batcher) = batcher.as_mut() {
+          batcher.push(entry.clone());
+        }
+        if retain_entries {
+          all_entries.push(entry);
         }
       }
+    }
 
-      bump_stats(&mut stats, &entry.state);
-
-      if let Some(cb) = callbacks {
-        let _ = cb.app.emit(
-          "compare:entry-update",
-          (cb.compare_id.to_string(), vec![entry.clone()]),
-        );
+    if both_local && pending_files.len() > 1 {
+      let left_root = left.as_local_path()?.to_string();
+      let right_root = right.as_local_path()?.to_string();
+      let strategies = strategies.to_vec();
+      let results: Result<Vec<_>, String> = pending_files
+        .par_iter()
+        .map(|entry| {
+          let left_fe = entry.left.as_ref().ok_or("缺少左侧文件")?;
+          let right_fe = entry.right.as_ref().ok_or("缺少右侧文件")?;
+          let (state, reasons) =
+            compare_local_files(&left_root, &right_root, left_fe, right_fe, &strategies)?;
+          Ok((entry.relative_path.clone(), state, reasons))
+        })
+        .collect();
+      let results = results?;
+      let mut by_path: HashMap<String, (CompareState, Vec<DiffReason>)> = HashMap::new();
+      for (path, state, reasons) in results {
+        by_path.insert(path, (state, reasons));
       }
 
-      if retain_entries {
-        all_entries.push(entry);
+      for mut entry in pending_files {
+        if let Some(cb) = callbacks {
+          throw_if_cancelled(&cb.cancelled)?;
+        }
+        if let Some((state, reasons)) = by_path.remove(&entry.relative_path) {
+          entry.state = state;
+          entry.reasons = reasons;
+        }
+        bump_stats(&mut stats, &entry.state);
+        if let Some(batcher) = batcher.as_mut() {
+          batcher.push(entry.clone());
+        }
+        if retain_entries {
+          all_entries.push(entry);
+        }
       }
+    } else {
+      for mut entry in pending_files {
+        if let Some(cb) = callbacks {
+          throw_if_cancelled(&cb.cancelled)?;
+        }
+        if let (Some(left_fe), Some(right_fe)) = (&entry.left, &entry.right) {
+          let (state, reasons) =
+            compare_file_with_sessions(&left_session, &right_session, left_fe, right_fe, strategies)?;
+          entry.state = state;
+          entry.reasons = reasons;
+        }
+        bump_stats(&mut stats, &entry.state);
+        if let Some(batcher) = batcher.as_mut() {
+          batcher.push(entry.clone());
+        }
+        if retain_entries {
+          all_entries.push(entry);
+        }
+      }
+    }
+
+    if let Some(mut batcher) = batcher {
+      batcher.flush();
     }
 
     current_level = next_level;

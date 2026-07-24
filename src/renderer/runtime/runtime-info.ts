@@ -2,9 +2,9 @@ import type { AppRuntimeInfo } from '@shared/app-api'
 
 const DEFAULT_RUNTIME_INFO: AppRuntimeInfo = {
   mode: 'tauri',
-  supportsSftp: false,
-  supportsHistory: false,
-  supportsSync: false,
+  supportsSftp: true,
+  supportsHistory: true,
+  supportsSync: true,
   supportsNativeFolderSelection: true,
   supportsDirectoryDragDrop: true,
   supportsWriteBack: true,
