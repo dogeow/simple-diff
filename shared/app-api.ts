@@ -17,7 +17,7 @@ import type {
 } from './types'
 
 export interface AppRuntimeInfo {
-  readonly mode: 'electron' | 'web'
+  readonly mode: 'tauri' | 'electron' | 'web'
   readonly supportsSftp: boolean
   readonly supportsHistory: boolean
   readonly supportsSync: boolean

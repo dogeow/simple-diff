@@ -193,6 +193,15 @@ function resetStores(compareTabs: readonly CompareTab[] = []): void {
 
 function installApiMock(overrides: Partial<Window['api']> = {}) {
   const api = {
+    runtime: {
+      mode: 'tauri' as const,
+      supportsSftp: true,
+      supportsHistory: true,
+      supportsSync: true,
+      supportsNativeFolderSelection: true,
+      supportsDirectoryDragDrop: true,
+      supportsWriteBack: true,
+    },
     onLog: vi.fn(() => () => undefined),
     readText: vi.fn(async () => ({ success: true, data: 'alpha' })),
     textDiff: vi.fn(async () => ({

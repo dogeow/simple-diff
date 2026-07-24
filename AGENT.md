@@ -2,89 +2,48 @@
 
 ## 项目概述
 
-基于 Electron + React + TypeScript + Vite 的桌面文件/目录对比工具，支持本地和 SFTP 远程对比。
+基于 **Tauri 2 + React + TypeScript + Vite** 的桌面文件/目录对比工具。`main` 为 Tauri 实现；完整 Electron 版在 `electron` 分支。
 
 ## 技术栈
 
-- **Runtime**: Electron 41 (Node 22+)
-- **Frontend**: React 19 + Zustand 5 (状态管理) + Tailwind CSS 4
-- **Build**: Vite 8，手动三配置 (main / preload / renderer)
-- **Language**: TypeScript 6 (strict)
-- **SSH**: node-ssh (基于 ssh2)
-- **持久化**: electron-store
+- **Runtime**: Tauri 2（系统 WebView）
+- **Backend**: Rust（`src-tauri/`）
+- **Frontend**: React 19 + Zustand 5 + Tailwind CSS 4
+- **Build**: Vite 8（renderer）+ cargo（tauri）
 
 ## 项目结构
 
 ```text
-build/icon.png          # 应用图标资源（打包 + dev 运行时共用）
-shared/types.ts          # 跨进程共享类型 & IPC 通道
-src/main/                # Electron 主进程
-  index.ts               # 入口，窗口创建
-  ipc/index.ts           # 所有 IPC handler 注册
-  compare/               # 对比引擎 (BFS 逐层对比，策略模式)
-  file-source/           # FileSource 接口 + Local/SFTP 实现
-  ssh/                   # SSH 连接管理 + 配置持久化
-  history/               # 对比历史存储
-  utils/logger.ts        # 日志广播到渲染进程
-src/preload/index.ts     # contextBridge API
-src/renderer/            # React SPA
-  App.tsx                # 路由 (home/compare/ssh/history)
-  stores/                # Zustand stores (app-store, compare-store, log-store)
-  pages/                 # 页面组件
-  components/            # UI 组件 (CompareTree, SplitTree, LogPanel 等)
-  hooks/useCompare.ts    # 对比流程 hook
-  utils/tree-utils.ts    # 树结构工具
+shared/                 共享类型、text-diff、path-filter
+src/renderer/           React SPA
+  runtime/tauri-api.ts  对接 Tauri invoke / events 的 AppAPI
+src-tauri/
+  src/commands.rs       Tauri commands
+  src/compare.rs        BFS 目录对比
+  src/files.rs          本地文件读写
+  src/watch.rs          notify 本地监听
 ```
 
 ## 构建命令
 
 ```bash
-npm run dev              # 开发模式 (watch + Electron)
-npm run build            # 构建全部 (main + preload + renderer)
-npm run pack             # 生成未封装目录，用于本地验证打包结果
-npm run dist             # 生成安装包/分发产物
-npx tsc --noEmit         # 类型检查
+npm run dev       # tauri dev
+npm run build     # tauri build
+npm test          # vitest（前端 / shared）
+cargo check --manifest-path src-tauri/Cargo.toml
 ```
 
-- 应用图标资源位于 `build/icon.png`
-- 打包时由 electron-builder 读取该文件
-- `npm run dev` 时由 `src/main/index.ts` 在运行时设置 Dock / 窗口图标；改图标后需要重启 Electron 才会生效
+## 运行时能力
 
-### 手动构建（调试用）
+`window.api.runtime`：
 
-```bash
-npx vite build --config vite.config.main.ts
-npx vite build --config vite.config.preload.ts
-npx vite build --config vite.config.renderer.ts
-```
-
-## 核心架构
-
-### IPC 模式
-
-- **Invoke/Handle**: 请求-响应 (`IpcResult<T>` 信封)
-- **Event Streaming**: 主进程 → 渲染进程 (BrowserWindow.webContents.send)
-  - `compare:scan-complete` — 逐层推送新发现条目
-  - `compare:entry-update` — 单条目状态更新
-  - `app:log` — 实时日志
-
-### 对比流程
-
-1. BFS 逐层扫描 (先对比父目录，再对比子目录)
-2. 仅左/仅右目录不递归
-3. 懒加载：展开目录时按需请求子目录内容
-4. 策略模式：size / mtime
-
-### 状态管理
-
-- `app-store`: 页面路由 + Diff Tab 管理
-- `compare-store`: 对比配置 + 结果 + 目录展开 + 懒加载
-- `log-store`: 日志条目 (max 500)
+- `mode: 'tauri'`
+- `supportsSftp / supportsHistory / supportsSync: false`（MVP）
+- 本地选目录、写回、拖放路径（浏览对话框）可用
 
 ## 编码规范
 
-- 不可变数据：所有 store 更新返回新对象
-- 文件 < 400 行
-- 函数 < 50 行
-- 使用 `readonly` 标注所有 props 和 interface 字段
-- Tailwind 类名用于样式，无 CSS 文件
+- 不可变数据：store 更新返回新对象
+- 文件尽量 < 400 行
+- 函数尽量 < 50 行
+- TypeScript 严格模式；Rust 显式错误用 `Result` / `IpcResult`

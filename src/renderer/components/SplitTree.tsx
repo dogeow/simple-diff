@@ -16,7 +16,6 @@ import { collectSyncEntriesForSelection, resolveCompareSelection, type CompareSe
 import { formatSourceTag, isSameSourceConfig } from '../utils/source-label'
 import { rememberSyncDirtyRoots } from '../hooks/useCompare'
 import { getSyncRecompareRootsFromEntries } from '../utils/sync-dirty'
-import { formatSourceInputValue, isBrowserSourcePath } from '../runtime/browser-roots'
 import { getRuntimeInfo } from '../runtime/runtime-info'
 
 interface SplitTreeProps {
@@ -66,7 +65,6 @@ function PathHeader({
     loadConfigs: state.loadConfigs,
   })))
   const sourcePath = useCompareStore((s) => side === 'left' ? s.leftPath : s.rightPath)
-  const browserLocalSource = source?.type === 'local' && getRuntimeInfo().mode === 'web' && isBrowserSourcePath(source.path)
   const [pathInput, setPathInput] = useState(sourcePath)
 
   useEffect(() => {
@@ -76,14 +74,10 @@ function PathHeader({
   }, [configs.length, loadConfigs, source])
 
   useEffect(() => {
-    setPathInput(browserLocalSource ? formatSourceInputValue(sourcePath) : sourcePath)
-  }, [browserLocalSource, sourcePath])
+    setPathInput(sourcePath)
+  }, [sourcePath])
 
   const handlePathSubmit = useCallback(() => {
-    if (browserLocalSource) {
-      return
-    }
-
     const trimmed = pathInput.trim()
     if (!trimmed) {
       setPathInput(sourcePath)
@@ -93,7 +87,7 @@ function PathHeader({
     if (trimmed !== sourcePath) {
       void onSourcePathSubmit?.(side, trimmed)
     }
-  }, [browserLocalSource, onSourcePathSubmit, pathInput, sourcePath, side])
+  }, [onSourcePathSubmit, pathInput, sourcePath, side])
 
   const sideBadgeClass = side === 'left'
     ? 'bg-sky-500/15 text-sky-300'
@@ -112,7 +106,6 @@ function PathHeader({
             type="text"
             value={pathInput}
             onChange={(e) => setPathInput(e.target.value)}
-            readOnly={browserLocalSource}
             onBlur={handlePathSubmit}
             onKeyDown={(e) => {
               if (e.key === 'Enter') handlePathSubmit()
@@ -173,7 +166,7 @@ function SideTable({
 }: SideTableProps) {
   const runtime = getRuntimeInfo()
   const supportsSync = runtime.supportsSync
-  const isDesktopRuntime = runtime.mode === 'electron'
+  const isDesktopRuntime = runtime.mode === 'tauri' || runtime.mode === 'electron'
   const {
     refreshDir,
     leftSource,

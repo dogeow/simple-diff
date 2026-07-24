@@ -1,21 +1,16 @@
 {
   "compilerOptions": {
-    "target": "ES2022",
+    "composite": true,
+    "skipLibCheck": true,
     "module": "ESNext",
     "moduleResolution": "bundler",
-    "lib": ["ES2022"],
-    "outDir": "dist",
+    "allowSyntheticDefaultImports": true,
     "strict": true,
-    "esModuleInterop": true,
-    "skipLibCheck": true,
-    "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
-    "isolatedModules": true,
-    "declaration": true,
-    "composite": true,
+    "baseUrl": ".",
     "paths": {
-      "@shared/*": ["./shared/*"]
+      "@shared/*": ["shared/*"]
     }
   },
-  "include": ["src/main/**/*", "src/preload/**/*", "shared/**/*", "scripts/**/*"]
+  "include": ["shared/**/*", "vite.config.renderer.ts", "vitest.config.ts"]
 }

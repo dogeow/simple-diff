@@ -1,10 +1,10 @@
 import type { AppRuntimeInfo } from '@shared/app-api'
 
 const DEFAULT_RUNTIME_INFO: AppRuntimeInfo = {
-  mode: 'electron',
-  supportsSftp: true,
-  supportsHistory: true,
-  supportsSync: true,
+  mode: 'tauri',
+  supportsSftp: false,
+  supportsHistory: false,
+  supportsSync: false,
   supportsNativeFolderSelection: true,
   supportsDirectoryDragDrop: true,
   supportsWriteBack: true,

@@ -1,13 +1,7 @@
 import { trimTrailingSeparators } from '@shared/source-path'
 import type { SSHConfig, SourceConfig } from '../../../shared/types'
-import { formatBrowserSourceLabel, isBrowserSourcePath } from '../runtime/browser-roots'
 
 function getPathLeaf(path: string): string {
-  const browserLabel = formatBrowserSourceLabel(path)
-  if (browserLabel) {
-    return browserLabel
-  }
-
   const normalized = path.replace(/[\\/]+$/g, '')
   const segments = normalized.split(/[\\/]/).filter(Boolean)
   return segments.at(-1) ?? normalized
@@ -32,10 +26,6 @@ export function resolveSftpLabel(configId: string, configs: readonly SSHConfig[]
 
 export function formatSourceTag(source: SourceConfig, configs: readonly SSHConfig[]): string {
   if (source.type === 'local') {
-    if (isBrowserSourcePath(source.path)) {
-      return '浏览器目录'
-    }
-
     return '本地'
   }
 
@@ -44,11 +34,6 @@ export function formatSourceTag(source: SourceConfig, configs: readonly SSHConfi
 
 export function formatSourcePathLabel(source: SourceConfig, configs: readonly SSHConfig[]): string {
   if (source.type === 'local') {
-    const browserLabel = formatBrowserSourceLabel(source.path)
-    if (browserLabel) {
-      return browserLabel
-    }
-
     return source.path
   }
 

@@ -2,85 +2,43 @@
   "name": "simple-diff",
   "version": "0.1.0",
   "description": "A Beyond Compare-like file and directory comparison tool",
-  "main": "dist/main/index.js",
   "type": "module",
   "scripts": {
-    "dev": "node scripts/dev.js",
-    "dev:web": "vite --config vite.config.renderer.ts",
-    "build:main": "vite build --config vite.config.main.ts",
-    "build:preload": "vite build --config vite.config.preload.ts",
-    "build:renderer": "vite build --config vite.config.renderer.ts",
-    "build:web": "vite build --config vite.config.renderer.ts",
-    "preview:web": "vite preview --config vite.config.renderer.ts",
-    "build": "npm run build:main && npm run build:preload && npm run build:renderer",
+    "dev": "tauri dev",
+    "dev:ui": "vite --config vite.config.renderer.ts",
+    "build:ui": "vite build --config vite.config.renderer.ts",
+    "build": "tauri build",
     "test": "vitest run",
-    "start": "electron dist/main/index.js",
-    "pack": "npm run build && electron-builder --dir",
-    "dist": "npm run build && electron-builder"
+    "tauri": "tauri"
   },
   "keywords": [
-    "electron",
+    "tauri",
     "diff",
-    "compare",
-    "sftp"
+    "compare"
   ],
   "author": "",
-  "license": "ISC",
+  "license": "MIT",
   "dependencies": {
-    "chokidar": "^5.0.0",
-    "electron-store": "^11.0.2",
-    "node-ssh": "^13.2.1",
+    "@tauri-apps/api": "^2.10.1",
+    "@tauri-apps/plugin-dialog": "^2.7.0",
+    "@tauri-apps/plugin-opener": "^2.5.4",
+    "@tauri-apps/plugin-shell": "^2.3.5",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
     "zustand": "^5.0.12"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.2.2",
+    "@tauri-apps/cli": "^2.11.4",
     "@testing-library/react": "^16.3.2",
     "@testing-library/user-event": "^14.6.1",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
-    "@types/ssh2": "^1.15.5",
     "@vitejs/plugin-react": "^6.0.1",
-    "concurrently": "^9.2.1",
-    "electron": "^41.3.0",
-    "electron-builder": "^26.8.1",
     "jsdom": "^29.0.2",
     "tailwindcss": "^4.2.2",
     "typescript": "^6.0.2",
     "vite": "^8.0.6",
-    "vitest": "^4.1.4",
-    "wait-on": "^9.0.4"
-  },
-  "build": {
-    "appId": "com.simplediff.app",
-    "productName": "Simple Diff",
-    "directories": {
-      "buildResources": "build"
-    },
-    "files": [
-      "dist/main/**/*",
-      "dist/preload/**/*",
-      "dist/renderer/**/*",
-      "dist/shared/**/*",
-      "!dist/shared/**/*.test.*"
-    ],
-    "icon": "icon.png",
-    "mac": {
-      "category": "public.app-category.developer-tools",
-      "extendInfo": {
-        "CFBundleDocumentTypes": [
-          {
-            "CFBundleTypeName": "Folder",
-            "CFBundleTypeRole": "Viewer",
-            "LSHandlerRank": "Alternate",
-            "LSItemContentTypes": [
-              "public.folder",
-              "public.directory"
-            ]
-          }
-        ]
-      }
-    }
+    "vitest": "^4.1.4"
   }
 }
