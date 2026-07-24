@@ -65,4 +65,93 @@ describe('computeTextDiff', () => {
     expect(result.leftLines[leftRow].type).toBe('equal')
     expect(result.rightLines[rightRow].type).toBe('equal')
   })
+
+  it('aligns edited lines across an insert instead of zip-skewing', () => {
+    const left = ['keep', 'oldValue = 1', 'trail'].join('\n')
+    const right = ['keep', 'inserted', 'oldValue = 2', 'trail'].join('\n')
+
+    const result = computeTextDiff(left, right)
+
+    const leftEdit = result.leftLines.findIndex((l) => l.content === 'oldValue = 1')
+    const rightEdit = result.rightLines.findIndex((l) => l.content === 'oldValue = 2')
+    const rightInsert = result.rightLines.findIndex((l) => l.content === 'inserted')
+
+    expect(leftEdit).toBe(rightEdit)
+    expect(result.leftLines[leftEdit].type).toBe('remove')
+    expect(result.rightLines[rightEdit].type).toBe('add')
+    expect(rightInsert).toBeGreaterThanOrEqual(0)
+    expect(rightInsert).not.toBe(leftEdit)
+    expect(result.leftLines[rightInsert].content).toBe('')
+  })
+
+  it('aligns edited lines across a delete instead of zip-skewing', () => {
+    const left = ['keep', 'removed', 'oldValue = 1', 'trail'].join('\n')
+    const right = ['keep', 'oldValue = 2', 'trail'].join('\n')
+
+    const result = computeTextDiff(left, right)
+
+    const leftEdit = result.leftLines.findIndex((l) => l.content === 'oldValue = 1')
+    const rightEdit = result.rightLines.findIndex((l) => l.content === 'oldValue = 2')
+    const leftDelete = result.leftLines.findIndex((l) => l.content === 'removed')
+
+    expect(leftEdit).toBe(rightEdit)
+    expect(leftDelete).not.toBe(leftEdit)
+    expect(result.rightLines[leftDelete].content).toBe('')
+  })
+
+  it('emits equal for identical non-unique middle lines via LCS', () => {
+    const left = ['alpha', 'shared', 'beta'].join('\n')
+    const right = ['gamma', 'shared', 'delta'].join('\n')
+
+    const result = computeTextDiff(left, right)
+
+    const leftShared = result.leftLines.findIndex((l) => l.content === 'shared')
+    const rightShared = result.rightLines.findIndex((l) => l.content === 'shared')
+
+    expect(leftShared).toBe(rightShared)
+    expect(result.leftLines[leftShared].type).toBe('equal')
+    expect(result.rightLines[rightShared].type).toBe('equal')
+  })
+
+  it('pairs near-duplicate lines by similarity when an insert precedes them', () => {
+    const left = [
+      'const color = 0x111111',
+    ].join('\n')
+    const right = [
+      '// tint',
+      'const color = 0x1a1a2e',
+    ].join('\n')
+
+    const result = computeTextDiff(left, right)
+
+    const leftColor = result.leftLines.findIndex((l) => l.content.includes('0x111111'))
+    const rightColor = result.rightLines.findIndex((l) => l.content.includes('0x1a1a2e'))
+
+    expect(leftColor).toBe(rightColor)
+    expect(result.leftLines[leftColor].type).toBe('remove')
+    expect(result.rightLines[rightColor].type).toBe('add')
+  })
+
+  it('does not let a unique blank line hijack patience anchors', () => {
+    const left = [
+      'function a() {',
+      '',
+      '  return 1',
+      '}',
+    ].join('\n')
+    const right = [
+      'function b() {',
+      '  setup()',
+      '',
+      '  return 2',
+      '}',
+    ].join('\n')
+
+    const result = computeTextDiff(left, right)
+
+    const leftReturn = result.leftLines.findIndex((l) => l.content === '  return 1')
+    const rightReturn = result.rightLines.findIndex((l) => l.content === '  return 2')
+
+    expect(leftReturn).toBe(rightReturn)
+  })
 })

@@ -9,6 +9,7 @@ import ScrollGutter, { type GutterMarker } from './ScrollGutter'
 import { applyDiffRange, canApplyLine, groupIntoHunks, type Hunk } from './file-diff-utils'
 import { buildHunkMetrics, getVisibleHunkWindow } from './file-diff-window'
 import { loadDiffTabContents } from '../utils/diff-tab-loader'
+import { buildInlineSegments, type InlineSegment } from '../utils/inline-diff'
 
 interface FileDiffViewProps {
   readonly tab: DiffTab
@@ -63,6 +64,10 @@ export default function FileDiffView({ tab }: FileDiffViewProps) {
   const hunks = useMemo(() => {
     if (!tab.diffResult) return []
     return groupIntoHunks(tab.diffResult.leftLines, tab.diffResult.rightLines)
+  }, [tab.diffResult])
+  const inlineSegments = useMemo(() => {
+    if (!tab.diffResult) return null
+    return buildInlineSegments(tab.diffResult.leftLines, tab.diffResult.rightLines)
   }, [tab.diffResult])
   const hunkMetrics = useMemo(() => buildHunkMetrics(hunks, DIFF_ROW_HEIGHT), [hunks])
   const visibleHunkWindow = useMemo(() => getVisibleHunkWindow({
@@ -397,6 +402,7 @@ export default function FileDiffView({ tab }: FileDiffViewProps) {
               lines={leftLines}
               otherLines={rightLines}
               side="left"
+              segmentMap={inlineSegments?.left}
               onApplyHunk={() => handleApplyRange(metric.hunk, 'left-to-right')}
               onApplyLine={(lineIndex) => handleApplyRange({ startIndex: lineIndex, endIndex: lineIndex + 1 }, 'left-to-right')}
             />
@@ -421,6 +427,7 @@ export default function FileDiffView({ tab }: FileDiffViewProps) {
               lines={rightLines}
               otherLines={leftLines}
               side="right"
+              segmentMap={inlineSegments?.right}
               onApplyHunk={() => handleApplyRange(metric.hunk, 'right-to-left')}
               onApplyLine={(lineIndex) => handleApplyRange({ startIndex: lineIndex, endIndex: lineIndex + 1 }, 'right-to-left')}
             />
@@ -494,16 +501,22 @@ const LINE_EDGE: Record<DiffLine['type'], string> = {
   remove: 'border-l-2 border-l-rose-500/50',
 }
 
+const EMPHASIS_BG: Record<'add' | 'remove', string> = {
+  add: 'bg-emerald-500/40',
+  remove: 'bg-rose-500/40',
+}
+
 interface HunkBlockProps {
   readonly hunk: Hunk
   readonly lines: readonly DiffLine[]
   readonly otherLines: readonly DiffLine[]
   readonly side: 'left' | 'right'
+  readonly segmentMap?: ReadonlyMap<number, readonly InlineSegment[]>
   readonly onApplyHunk: () => void
   readonly onApplyLine: (lineIndex: number) => void
 }
 
-function HunkBlock({ hunk, lines, otherLines, side, onApplyHunk, onApplyLine }: HunkBlockProps) {
+function HunkBlock({ hunk, lines, otherLines, side, segmentMap, onApplyHunk, onApplyLine }: HunkBlockProps) {
   const hunkLines = lines.slice(hunk.startIndex, hunk.endIndex)
   const isMultiLineDiff = hunk.endIndex - hunk.startIndex > 1
 
@@ -519,33 +532,50 @@ function HunkBlock({ hunk, lines, otherLines, side, onApplyHunk, onApplyLine }: 
           {isMultiLineDiff ? (side === 'left' ? '整块→' : '←整块') : (side === 'left' ? '→' : '←')}
         </button>
       )}
-      {hunkLines.map((line, i) => (
-        <div
-          key={hunk.startIndex + i}
-          className={`group/line flex w-max min-w-full border-b border-neutral-800/30 ${LINE_BG[line.type]} ${LINE_EDGE[line.type]}`}
-          style={{ height: `${DIFF_ROW_HEIGHT}px` }}
-        >
-          <span className="inline-block w-12 shrink-0 select-none border-r border-neutral-800/60 px-2 py-0.5 text-right tabular-nums text-neutral-600">
-            {line.lineNumber >= 0 ? line.lineNumber : ''}
-          </span>
-          {canApplyLine({
-            hunkType: hunk.type,
-            currentLine: line,
-            otherLine: otherLines[hunk.startIndex + i],
-          }) && (
-            <button
-              onClick={() => onApplyLine(hunk.startIndex + i)}
-              className="mx-1 my-0.5 inline-flex shrink-0 items-center justify-center rounded bg-blue-600 px-1 text-[10px] font-medium text-white opacity-0 shadow-sm transition-opacity hover:bg-blue-500 group-hover/line:opacity-100"
-              title={side === 'left' ? '仅应用当前行到右侧' : '仅应用当前行到左侧'}
-            >
-              {side === 'left' ? '→' : '←'}
-            </button>
-          )}
-          <pre className="min-w-0 whitespace-pre px-2 py-0.5">
-            {line.content}
-          </pre>
-        </div>
-      ))}
+      {hunkLines.map((line, i) => {
+        const lineIndex = hunk.startIndex + i
+        const segments = segmentMap?.get(lineIndex)
+        const emphasisClass =
+          line.type === 'add' || line.type === 'remove' ? EMPHASIS_BG[line.type] : ''
+
+        return (
+          <div
+            key={lineIndex}
+            className={`group/line flex w-max min-w-full border-b border-neutral-800/30 ${LINE_BG[line.type]} ${LINE_EDGE[line.type]}`}
+            style={{ height: `${DIFF_ROW_HEIGHT}px` }}
+          >
+            <span className="inline-block w-12 shrink-0 select-none border-r border-neutral-800/60 px-2 py-0.5 text-right tabular-nums text-neutral-600">
+              {line.lineNumber >= 0 ? line.lineNumber : ''}
+            </span>
+            {canApplyLine({
+              hunkType: hunk.type,
+              currentLine: line,
+              otherLine: otherLines[lineIndex],
+            }) && (
+              <button
+                onClick={() => onApplyLine(lineIndex)}
+                className="mx-1 my-0.5 inline-flex shrink-0 items-center justify-center rounded bg-blue-600 px-1 text-[10px] font-medium text-white opacity-0 shadow-sm transition-opacity hover:bg-blue-500 group-hover/line:opacity-100"
+                title={side === 'left' ? '仅应用当前行到右侧' : '仅应用当前行到左侧'}
+              >
+                {side === 'left' ? '→' : '←'}
+              </button>
+            )}
+            <pre className="min-w-0 whitespace-pre px-2 py-0.5">
+              {segments
+                ? segments.map((seg, segIndex) =>
+                    seg.emphasis ? (
+                      <span key={segIndex} className={emphasisClass}>
+                        {seg.text}
+                      </span>
+                    ) : (
+                      <span key={segIndex}>{seg.text}</span>
+                    ),
+                  )
+                : line.content}
+            </pre>
+          </div>
+        )
+      })}
     </div>
   )
 }

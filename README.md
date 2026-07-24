@@ -74,10 +74,6 @@ src/renderer/          React 前端
   runtime/             浏览器运行时 API / 目录句柄实现
 ```
 
-## TODO
-
-- [ ] 文件内容对比时的对齐不精准
-
 ## 许可证
 
 MIT
