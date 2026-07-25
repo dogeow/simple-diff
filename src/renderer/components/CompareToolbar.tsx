@@ -6,7 +6,7 @@ import { formatSyncProgress } from '../utils/format-sync-progress'
 import { openSyncTaskView } from '../utils/compare-session-navigation'
 import { getRuntimeInfo } from '../runtime/runtime-info'
 import FilterModal from './FilterModal'
-import { ArrowLeftIcon, ArrowRightIcon, ChevronDownIcon, ChevronRightIcon, ChevronUpDownIcon, PauseIcon, PlayIcon, RefreshIcon } from './Icons'
+import { ArrowLeftIcon, ArrowRightIcon, CheckIcon, ChevronDownIcon, ChevronRightIcon, ChevronUpDownIcon, PauseIcon, PlayIcon, RefreshIcon } from './Icons'
 
 const STRATEGY_LABELS: Record<StrategyName, string> = {
   size: '文件大小',
@@ -59,7 +59,9 @@ interface CompareToolbarProps {
   readonly onClearSync: () => void
 }
 
-const COMPACT_BTN = 'inline-flex items-center gap-1 h-7 rounded-md px-2 text-[11px] font-medium leading-none transition-colors'
+const COMPACT_BTN = 'inline-flex h-7 items-center gap-1 rounded-lg px-2.5 text-[11px] font-medium leading-none transition-colors'
+const QUIET_BTN = `${COMPACT_BTN} text-neutral-400 hover:bg-neutral-800 hover:text-neutral-200`
+const DISABLED_BTN = 'disabled:cursor-not-allowed disabled:opacity-40'
 
 function getFilterStatValue(statKey: keyof CompareStats | 'pending' | 'paired' | undefined, stats: CompareStats, pendingCount: number): number | null {
   if (!statKey) return null
@@ -121,10 +123,11 @@ export default function CompareToolbar({
   const viewModeBtn = (mode: ViewMode, label: string) => (
     <button
       onClick={() => setViewMode(mode)}
+      aria-pressed={viewMode === mode}
       className={`${COMPACT_BTN} ${
         viewMode === mode
-          ? 'bg-blue-600 text-white'
-          : 'border border-neutral-700 bg-neutral-800/70 text-neutral-300 hover:border-neutral-600 hover:bg-neutral-800'
+          ? 'bg-neutral-700 text-neutral-100 shadow-sm'
+          : 'text-neutral-500 hover:bg-neutral-800/80 hover:text-neutral-300'
       }`}
     >
       {label}
@@ -134,29 +137,31 @@ export default function CompareToolbar({
   const canStartSync = compareDone && !compareLoading && pendingCount === 0 && stats.total > 0
 
   return (
-    <div className="flex flex-col gap-2 px-1.5 py-1.5">
-      {/* Toolbar row 1: filters + stats + view mode */}
-      <div className="flex flex-wrap items-center gap-1.5">
+    <div className="mx-1.5 my-1.5 flex flex-col gap-2 rounded-xl border border-neutral-800 bg-neutral-900/55 p-2 shadow-sm">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="shrink-0 px-1 text-[10px] font-semibold uppercase tracking-wider text-neutral-600">结果</span>
+
         <button
           onClick={toggleExpandAll}
-          className={`${COMPACT_BTN} border border-neutral-700 bg-neutral-800/70 text-neutral-200 hover:border-neutral-600 hover:bg-neutral-800`}
+          title={allExpanded ? '收起全部目录' : '展开全部目录'}
+          aria-label={allExpanded ? '收起' : '展开'}
+          className={`${QUIET_BTN} px-2`}
         >
           {allExpanded ? <ChevronDownIcon width={11} height={11} /> : <ChevronRightIcon width={11} height={11} />}
-          {allExpanded ? '收起' : '展开'}
+          <span>目录</span>
         </button>
 
-        <span className="h-4 w-px bg-neutral-700" aria-hidden="true" />
-
-        <div className="flex flex-wrap items-center gap-1">
+        <div className="flex flex-wrap items-center gap-0.5 rounded-lg bg-neutral-800/55 p-0.5">
           {FILTERS.map((f) => (
             <button
               key={f.value}
               onClick={() => onFilterChange(f.value)}
               aria-label={f.label}
+              aria-pressed={filter === f.value}
               className={`${COMPACT_BTN} ${
                 filter === f.value
-                  ? 'bg-blue-600 text-white'
-                  : 'border border-neutral-700 bg-neutral-800/70 text-neutral-300 hover:border-neutral-600 hover:bg-neutral-800'
+                  ? 'bg-blue-500/15 text-blue-200 shadow-sm ring-1 ring-inset ring-blue-500/25'
+                  : 'text-neutral-500 hover:bg-neutral-800 hover:text-neutral-300'
               }`}
             >
               {f.label}
@@ -166,7 +171,7 @@ export default function CompareToolbar({
                 return (
                   <>
                     {' '}
-                    <span aria-hidden="true" className="ml-0.5 rounded bg-black/20 px-1.5 py-0.5 text-[10px] tabular-nums">
+                    <span aria-hidden="true" className="ml-0.5 rounded-full bg-neutral-900/50 px-1.5 py-0.5 text-[10px] tabular-nums text-neutral-400">
                       {value}
                     </span>
                   </>
@@ -176,9 +181,9 @@ export default function CompareToolbar({
           ))}
         </div>
 
-        <div className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-2">
+        <div className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-1.5">
           {supportsSync && syncTask && (
-            <div className="flex min-w-0 max-w-full items-center gap-2 rounded-md border border-neutral-700 bg-neutral-800/70 px-2 py-1 text-xs text-neutral-300">
+            <div className="flex min-w-0 max-w-full items-center gap-2 rounded-lg bg-neutral-800/55 px-2 py-1 text-xs text-neutral-300">
               <span className="shrink-0 tabular-nums text-neutral-400">
                 同步 {syncTask.completedItems}/{syncTask.totalItems} · {formatSyncProgress(syncTask.completedItems, syncTask.totalItems)}
               </span>
@@ -202,11 +207,11 @@ export default function CompareToolbar({
               <div className="min-w-0 w-56">
                 {syncTask.currentPath && <span className="block truncate font-mono text-neutral-500">{syncTask.currentPath}</span>}
               </div>
-              <button onClick={() => openSyncTaskView({ expandLogs: true })} className={`${COMPACT_BTN} border border-neutral-600 bg-neutral-700/80 text-neutral-200 hover:bg-neutral-700`}>
+              <button onClick={() => openSyncTaskView({ expandLogs: true })} className={QUIET_BTN}>
                 详情
               </button>
               {syncTask.status === 'running' && (
-                <button onClick={onPauseSync} className={`${COMPACT_BTN} border border-neutral-600 bg-neutral-700/80 text-neutral-200 hover:bg-neutral-700`}>
+                <button onClick={onPauseSync} className={QUIET_BTN}>
                   <PauseIcon width={10} height={10} />
                   暂停
                 </button>
@@ -218,27 +223,20 @@ export default function CompareToolbar({
                 </button>
               )}
               {syncTask.status !== 'running' && (
-                <button onClick={onClearSync} className={`${COMPACT_BTN} border border-neutral-600 bg-neutral-700/80 text-neutral-200 hover:bg-neutral-700`}>
+                <button onClick={onClearSync} className={QUIET_BTN}>
                   清除
                 </button>
               )}
             </div>
           )}
 
-          {dirtyCount > 0 && (
-            <div className="flex items-center gap-1 rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-[11px] text-amber-300">
-              <span className="h-1.5 w-1.5 rounded-full bg-amber-400" aria-hidden="true" />
-              <span className="tabular-nums">待重比 {dirtyCount}</span>
-            </div>
-          )}
-
-          <div className="flex flex-wrap gap-1">
+          <div className="flex flex-wrap items-center gap-0.5 rounded-lg bg-neutral-800/55 p-0.5">
             {supportsSync && !hasGlobalSyncTask && (
               <>
                 <button
                   onClick={() => onStartSync('left_to_right')}
                   disabled={!canStartSync}
-                  className={`${COMPACT_BTN} bg-emerald-600 text-white hover:bg-emerald-500 disabled:cursor-not-allowed disabled:bg-neutral-700 disabled:text-neutral-500`}
+                  className={`${COMPACT_BTN} text-emerald-300 hover:bg-emerald-500/10 ${DISABLED_BTN}`}
                 >
                   <ArrowRightIcon width={11} height={11} />
                   同步到右
@@ -246,13 +244,16 @@ export default function CompareToolbar({
                 <button
                   onClick={() => onStartSync('right_to_left')}
                   disabled={!canStartSync}
-                  className={`${COMPACT_BTN} bg-cyan-600 text-white hover:bg-cyan-500 disabled:cursor-not-allowed disabled:bg-neutral-700 disabled:text-neutral-500`}
+                  className={`${COMPACT_BTN} text-cyan-300 hover:bg-cyan-500/10 ${DISABLED_BTN}`}
                 >
                   <ArrowLeftIcon width={11} height={11} />
                   同步到左
                 </button>
               </>
             )}
+          </div>
+
+          <div className="flex items-center gap-0.5 rounded-lg bg-neutral-800/55 p-0.5" aria-label="显示方式">
             {viewModeBtn('split', '分栏')}
             {viewModeBtn('merged', '合并')}
           </div>
@@ -260,15 +261,15 @@ export default function CompareToolbar({
       </div>
 
       {supportsSync && syncTask?.lastError && (
-        <div className="rounded-md border border-rose-900/60 bg-rose-950/30 px-2 py-1 text-xs text-rose-300">
+        <div className="rounded-lg border border-rose-900/60 bg-rose-950/30 px-2.5 py-1.5 text-xs text-rose-300">
           同步错误: {syncTask.lastError}
         </div>
       )}
 
-      {/* Toolbar row 2: strategies + extension filter + actions + hidden files */}
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="flex flex-wrap items-center gap-1.5 border-t border-neutral-800/80 pt-2">
+        <span className="shrink-0 px-1 text-[10px] font-semibold uppercase tracking-wider text-neutral-600">比较依据</span>
+
         <div className="flex flex-wrap items-center gap-1.5">
-          <span className="text-[11px] font-medium text-neutral-500">策略</span>
           {(Object.keys(STRATEGY_LABELS) as StrategyName[]).map((strategy) => {
             const active = strategies.includes(strategy)
 
@@ -276,12 +277,14 @@ export default function CompareToolbar({
               <button
                 key={strategy}
                 onClick={() => onToggleStrategy(strategy)}
+                aria-pressed={active}
                 className={`${COMPACT_BTN} ${
                   active
-                    ? 'bg-blue-600 text-white hover:bg-blue-500'
-                    : 'border border-neutral-700 bg-neutral-800/70 text-neutral-300 hover:border-neutral-600 hover:bg-neutral-800'
+                    ? 'bg-blue-500/10 text-blue-200 ring-1 ring-inset ring-blue-500/25 hover:bg-blue-500/15'
+                    : 'text-neutral-500 hover:bg-neutral-800 hover:text-neutral-300'
                 }`}
               >
+                {active && <CheckIcon width={10} height={10} />}
                 {STRATEGY_LABELS[strategy] ?? strategy}
               </button>
             )
@@ -291,80 +294,16 @@ export default function CompareToolbar({
           )}
         </div>
 
-        <span className="h-4 w-px bg-neutral-700" aria-hidden="true" />
-
         <FilterModal extensionFilter={extensionFilter} onChange={setExtensionFilter} />
-
-        <span className="h-4 w-px bg-neutral-700" aria-hidden="true" />
-
-        {compareLoading ? (
-          <>
-            <button
-              onClick={onPauseCompare}
-              className={`${COMPACT_BTN} bg-amber-600 text-white hover:bg-amber-500`}
-            >
-              <PauseIcon width={10} height={10} />
-              暂停对比
-            </button>
-            <button
-              onClick={onRestartCompare}
-              disabled={strategies.length === 0}
-              className={`${COMPACT_BTN} bg-blue-600 text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50`}
-            >
-              <RefreshIcon width={10} height={10} />
-              重启对比
-            </button>
-          </>
-        ) : comparePaused ? (
-          <>
-            <button
-              onClick={onResumeCompare}
-              disabled={strategies.length === 0}
-              className={`${COMPACT_BTN} bg-emerald-600 text-white hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50`}
-            >
-              <PlayIcon width={10} height={10} />
-              继续对比
-            </button>
-            <button
-              onClick={onRestartCompare}
-              disabled={strategies.length === 0}
-              className={`${COMPACT_BTN} bg-blue-600 text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50`}
-            >
-              <RefreshIcon width={10} height={10} />
-              重启对比
-            </button>
-          </>
-        ) : (
-          <button
-            onClick={onRestartCompare}
-            disabled={strategies.length === 0}
-            className={`${COMPACT_BTN} bg-blue-600 text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50`}
-          >
-            {hasComparedResult ? <RefreshIcon width={10} height={10} /> : <PlayIcon width={10} height={10} />}
-            {compareActionLabel}
-          </button>
-        )}
-
-        {dirtyCount > 0 && !compareLoading && (
-          <button
-            onClick={onRecompareDirtyPaths}
-            disabled={strategies.length === 0}
-            className={`${COMPACT_BTN} border border-amber-500/40 bg-amber-500/10 text-amber-300 hover:bg-amber-500/15 disabled:cursor-not-allowed disabled:opacity-50`}
-          >
-            <RefreshIcon width={10} height={10} />
-            重比对脏节点
-          </button>
-        )}
-
-        <span className="h-4 w-px bg-neutral-700" aria-hidden="true" />
 
         <div className="relative flex items-center" ref={dotDropRef}>
           <button
             onClick={() => setHideDot(!hideDot)}
-            className={`h-7 rounded-l-md px-2.5 text-[11px] font-medium leading-none transition-colors ${
+            aria-pressed={hideDot}
+            className={`h-7 rounded-l-lg px-2.5 text-[11px] font-medium leading-none transition-colors ${
               hideDot
-                ? 'bg-blue-600 text-white'
-                : 'border border-neutral-700 bg-neutral-800/70 text-neutral-300 hover:border-neutral-600 hover:bg-neutral-800'
+                ? 'bg-blue-500/10 text-blue-200 ring-1 ring-inset ring-blue-500/25'
+                : 'text-neutral-500 hover:bg-neutral-800 hover:text-neutral-300'
             }`}
           >
             隐藏.*
@@ -372,10 +311,10 @@ export default function CompareToolbar({
           <button
             onClick={() => setDotDropOpen(!dotDropOpen)}
             aria-label="选择隐藏类型"
-            className={`flex h-7 items-center justify-center rounded-r-md px-1.5 text-[11px] font-medium leading-none transition-colors ${
+            className={`flex h-7 items-center justify-center rounded-r-lg px-1.5 text-[11px] font-medium leading-none transition-colors ${
               hideDot
-                ? 'border-l border-blue-500 bg-blue-600 text-white hover:bg-blue-500'
-                : 'border border-l-0 border-neutral-700 bg-neutral-800/70 text-neutral-300 hover:border-neutral-600 hover:bg-neutral-800'
+                ? 'border-l border-blue-500/20 bg-blue-500/10 text-blue-200 ring-1 ring-inset ring-blue-500/25 hover:bg-blue-500/15'
+                : 'text-neutral-500 hover:bg-neutral-800 hover:text-neutral-300'
             }`}
           >
             <ChevronUpDownIcon width={11} height={11} />
@@ -402,6 +341,75 @@ export default function CompareToolbar({
                 </button>
               ))}
             </div>
+          )}
+        </div>
+
+        <div className="ml-auto flex flex-wrap items-center justify-end gap-1.5">
+          {dirtyCount > 0 && (
+            <span className="inline-flex h-7 items-center gap-1 rounded-lg bg-amber-500/10 px-2.5 text-[11px] text-amber-300">
+              <span className="h-1.5 w-1.5 rounded-full bg-amber-400" aria-hidden="true" />
+              <span className="tabular-nums">待重比 {dirtyCount}</span>
+            </span>
+          )}
+
+          {dirtyCount > 0 && !compareLoading && (
+            <button
+              onClick={onRecompareDirtyPaths}
+              disabled={strategies.length === 0}
+              className={`${QUIET_BTN} text-amber-300 hover:bg-amber-500/10 ${DISABLED_BTN}`}
+            >
+              <RefreshIcon width={10} height={10} />
+              重比变更
+            </button>
+          )}
+
+          {compareLoading ? (
+            <>
+              <button
+                onClick={onPauseCompare}
+                aria-label="暂停对比"
+                className={`${QUIET_BTN} text-amber-300 hover:bg-amber-500/10`}
+              >
+                <PauseIcon width={10} height={10} />
+                暂停
+              </button>
+              <button
+                onClick={onRestartCompare}
+                disabled={strategies.length === 0}
+                className={`${COMPACT_BTN} bg-blue-600 text-white shadow-sm hover:bg-blue-500 ${DISABLED_BTN}`}
+              >
+                <RefreshIcon width={10} height={10} />
+                重启对比
+              </button>
+            </>
+          ) : comparePaused ? (
+            <>
+              <button
+                onClick={onResumeCompare}
+                disabled={strategies.length === 0}
+                className={`${COMPACT_BTN} bg-emerald-600 text-white shadow-sm hover:bg-emerald-500 ${DISABLED_BTN}`}
+              >
+                <PlayIcon width={10} height={10} />
+                继续对比
+              </button>
+              <button
+                onClick={onRestartCompare}
+                disabled={strategies.length === 0}
+                className={`${QUIET_BTN} ${DISABLED_BTN}`}
+              >
+                <RefreshIcon width={10} height={10} />
+                重启对比
+              </button>
+            </>
+          ) : (
+            <button
+              onClick={onRestartCompare}
+              disabled={strategies.length === 0}
+              className={`${COMPACT_BTN} bg-blue-600 text-white shadow-sm hover:bg-blue-500 ${DISABLED_BTN}`}
+            >
+              {hasComparedResult ? <RefreshIcon width={10} height={10} /> : <PlayIcon width={10} height={10} />}
+              {compareActionLabel}
+            </button>
           )}
         </div>
       </div>

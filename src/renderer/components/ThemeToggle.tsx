@@ -29,7 +29,7 @@ export default function ThemeToggle() {
       onClick={() => setTheme(nextTheme)}
       title={`当前为${resolvedTheme === 'dark' ? '深色' : '浅色'}模式，点击切换到${nextTheme === 'dark' ? '深色' : '浅色'}模式`}
       aria-label={`切换到${nextTheme === 'dark' ? '深色' : '浅色'}模式`}
-      className="inline-flex h-8 min-w-8 items-center justify-center rounded-md border border-neutral-700 bg-neutral-800/60 px-2.5 text-neutral-400 transition-colors hover:border-neutral-600 hover:bg-neutral-800 hover:text-neutral-200"
+      className="inline-flex h-7 min-w-7 items-center justify-center rounded-md px-2 text-neutral-500 transition-colors hover:bg-neutral-800 hover:text-neutral-200"
     >
       {resolvedTheme === 'dark'
         ? <SunIcon width={14} height={14} />

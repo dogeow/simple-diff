@@ -28,8 +28,8 @@ function DirectoryCompareContent({
 
   if (viewMode === 'split') {
     return (
-      <div className="h-full p-3">
-        <div className="flex h-full flex-col gap-2">
+      <div className="h-full p-2">
+        <div className="flex h-full flex-col gap-1.5">
           <CompareTree
             entries={entries}
             filter={filter}
@@ -53,7 +53,7 @@ function DirectoryCompareContent({
   }
 
   return (
-    <div className="h-full p-3">
+    <div className="h-full p-2">
       <CompareTree
         entries={entries}
         filter={filter}

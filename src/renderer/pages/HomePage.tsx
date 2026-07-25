@@ -11,7 +11,6 @@ import { useSettingsStore } from '../stores/settings-store'
 import { openCompareTab, openSyncTaskView } from '../utils/compare-session-navigation'
 import { formatSyncProgress } from '../utils/format-sync-progress'
 import { isFilterAdditionOnly } from '../utils/filter-change'
-import { getRuntimeInfo } from '../runtime/runtime-info'
 import type { StrategyName } from '../../../shared/types'
 import { ArrowRightIcon, PlayIcon, SwapIcon } from '../components/Icons'
 
@@ -30,7 +29,6 @@ const SYNC_STATUS_TONE: Record<string, string> = {
 }
 
 export default function HomePage() {
-  const runtime = getRuntimeInfo()
   const [strategyDetailsOpen, setStrategyDetailsOpen] = useState(false)
   const {
     syncTask,
@@ -117,7 +115,6 @@ export default function HomePage() {
 
   const ctaDisabled = loading || !leftPath || !rightPath || strategies.length === 0
   const ctaLabel = compareTabs.length > 0 ? '开始新的对比' : '开始对比'
-  const showWelcome = !leftPath && !rightPath && compareTabs.length === 0
 
   return (
     <div className="flex h-full flex-col">
@@ -136,37 +133,6 @@ export default function HomePage() {
           <header>
             <h2 className="text-xl font-semibold tracking-tight text-neutral-100">目录对比</h2>
           </header>
-
-          {showWelcome && (
-            <div className="rounded-lg border border-blue-500/20 bg-gradient-to-br from-blue-500/10 via-blue-500/5 to-transparent p-4">
-              <div className="mb-2 flex items-center gap-2">
-                <span className="flex h-6 w-6 items-center justify-center rounded-md bg-blue-500/20 text-blue-300">
-                  <PlayIcon width={11} height={11} />
-                </span>
-                <span className="text-sm font-medium text-neutral-100">三步开始你的第一次对比</span>
-              </div>
-              <ol className="ml-1 grid gap-1.5 text-xs text-neutral-400 sm:grid-cols-3">
-                <li className="flex items-start gap-2">
-                  <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-neutral-800 text-[10px] font-semibold text-neutral-300">1</span>
-                  <span>选择左右数据源（{runtime.supportsSftp ? '本地或 SFTP' : '本地目录'}）</span>
-                </li>
-                <li className="flex items-start gap-2">
-                  <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-neutral-800 text-[10px] font-semibold text-neutral-300">2</span>
-                  <span>勾选至少一种对比策略</span>
-                </li>
-                <li className="flex items-start gap-2">
-                  <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-neutral-800 text-[10px] font-semibold text-neutral-300">3</span>
-                  <span>点击开始对比</span>
-                </li>
-              </ol>
-              <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px] text-neutral-500">
-                <span>提示：</span>
-                <span className="rounded bg-neutral-800/70 px-1.5 py-0.5">⌘K 命令面板</span>
-                <span className="rounded bg-neutral-800/70 px-1.5 py-0.5">? 快捷键帮助</span>
-                <span className="rounded bg-neutral-800/70 px-1.5 py-0.5">右键文件可忽略{runtime.supportsSync ? ' / 同步' : ''}</span>
-              </div>
-            </div>
-          )}
 
           <div className="rounded-lg border border-neutral-800 bg-neutral-900/40 p-4">
             <div className="mb-3 flex items-center gap-2">

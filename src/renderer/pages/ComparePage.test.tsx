@@ -280,7 +280,7 @@ describe('ComparePage renderer interactions', () => {
     expect(useLogStore.getState().visible).toBe(true)
   })
 
-  it('styles the active compare tab like other blue buttons', () => {
+  it('styles the active compare tab with a quieter neutral surface', () => {
     resetStores([
       {
         id: 'compare-tab-1',
@@ -293,7 +293,7 @@ describe('ComparePage renderer interactions', () => {
 
     render(<ComparePage />)
 
-    expect(screen.getByRole('button', { name: '当前对比' }).className).toContain('bg-blue-600')
+    expect(screen.getByRole('button', { name: '当前对比' }).className).toContain('bg-neutral-800')
   })
 
   it('styles the active directory diff tab like other blue buttons', () => {

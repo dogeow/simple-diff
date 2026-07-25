@@ -7,8 +7,8 @@ import { formatComparePairLabel } from '../utils/source-label'
 import { CloseIcon, PlusIcon } from './Icons'
 import FileContextMenu, { type ContextMenuAction } from './FileContextMenu'
 
-const ACTIVE_TAB_BUTTON = 'bg-blue-600 text-white hover:bg-blue-500'
-const ACTIVE_TAB_CLOSE = 'bg-blue-600 text-blue-100 hover:bg-blue-500 hover:text-white'
+const ACTIVE_TAB_BUTTON = 'bg-neutral-800 text-neutral-100 ring-1 ring-inset ring-neutral-700'
+const ACTIVE_TAB_CLOSE = 'bg-neutral-800 text-neutral-500 ring-1 ring-inset ring-neutral-700 hover:bg-neutral-750 hover:text-neutral-200'
 
 interface CompareSessionTabsProps {
   readonly compareTabs: readonly CompareTab[]
@@ -90,7 +90,7 @@ export default function CompareSessionTabs({
         className={`inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md px-3 text-xs font-medium transition-colors ${
           newCompareActive
             ? ACTIVE_TAB_BUTTON
-            : 'border border-neutral-700 bg-neutral-800/60 text-neutral-300 hover:border-neutral-600 hover:bg-neutral-800'
+            : 'text-neutral-400 hover:bg-neutral-800 hover:text-neutral-200'
         }`}
       >
         <PlusIcon width={12} height={12} />
@@ -115,7 +115,7 @@ export default function CompareSessionTabs({
                 className={`relative inline-flex h-8 max-w-[22rem] items-center truncate px-3 text-xs font-medium transition-colors sm:max-w-[28rem] ${
                   isActive
                     ? ACTIVE_TAB_BUTTON
-                    : 'bg-neutral-800/60 text-neutral-400 hover:bg-neutral-800 hover:text-neutral-200'
+                    : 'text-neutral-500 hover:bg-neutral-800/70 hover:text-neutral-200'
                 } ${onCloseCompareTab ? 'rounded-l-md' : 'rounded-md'}`}
               >
                 {tab.title}
@@ -130,7 +130,7 @@ export default function CompareSessionTabs({
                   className={`inline-flex h-8 w-8 items-center justify-center rounded-r-md text-xs transition-colors ${
                     isActive
                       ? ACTIVE_TAB_CLOSE
-                      : 'bg-neutral-800/60 text-neutral-500 hover:bg-neutral-800 hover:text-neutral-200'
+                      : 'text-neutral-600 hover:bg-neutral-800/70 hover:text-neutral-200'
                   }`}
                   aria-label={`关闭 ${tooltip}`}
                   title={`关闭 ${tooltip}`}

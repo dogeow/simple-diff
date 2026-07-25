@@ -8,7 +8,7 @@ import ToastContainer from './ToastContainer'
 import GlobalRunningIndicator from './GlobalRunningIndicator'
 import ThemeToggle from './ThemeToggle'
 import { getRuntimeInfo } from '../runtime/runtime-info'
-import { FolderIcon, HistoryIcon, RefreshIcon, ServerIcon, SettingsIcon, TextIcon } from './Icons'
+import { FolderIcon, HistoryIcon, RefreshIcon, SearchIcon, ServerIcon, SettingsIcon, TextIcon } from './Icons'
 
 interface LayoutProps {
   readonly children: ReactNode
@@ -115,7 +115,7 @@ export default function Layout({ children }: LayoutProps) {
 
   return (
     <div className="flex h-screen flex-col bg-neutral-900 text-neutral-100">
-      <header className="app-drag-region flex h-11 shrink-0 items-center gap-3 border-b border-neutral-800 bg-neutral-850 px-3">
+      <header className="app-drag-region flex h-10 shrink-0 items-center gap-3 border-b border-neutral-800/80 bg-neutral-850 px-3">
         <nav className="flex items-center gap-0.5">
           {visibleNavItems.map(({ page: itemPage, label, Icon }) => {
             const active = isNavItemActive(itemPage)
@@ -125,11 +125,11 @@ export default function Layout({ children }: LayoutProps) {
                 onClick={() => handleNavigate(itemPage)}
                 className={`group relative inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
                   active
-                    ? 'bg-neutral-700/80 text-white'
-                    : 'text-neutral-400 hover:bg-neutral-800 hover:text-neutral-200'
+                    ? 'bg-neutral-800 text-neutral-100'
+                    : 'text-neutral-500 hover:bg-neutral-800/70 hover:text-neutral-200'
                 }`}
               >
-                <Icon width={13} height={13} className={active ? 'text-blue-300' : 'text-neutral-500 group-hover:text-neutral-300'} />
+                <Icon width={13} height={13} className={active ? 'text-blue-300' : 'text-neutral-600 group-hover:text-neutral-300'} />
                 {label}
               </button>
             )
@@ -141,16 +141,17 @@ export default function Layout({ children }: LayoutProps) {
           <button
             onClick={() => setPaletteOpen(true)}
             title="命令面板 (⌘K)"
-            className="inline-flex h-8 items-center gap-1.5 rounded-md border border-neutral-700 bg-neutral-800/60 px-3 text-[11px] text-neutral-400 transition-colors hover:border-neutral-600 hover:bg-neutral-800 hover:text-neutral-200"
+            aria-label="命令面板"
+            className="inline-flex h-7 items-center gap-1.5 rounded-md px-2 text-[11px] text-neutral-500 transition-colors hover:bg-neutral-800 hover:text-neutral-200"
           >
-            <span>跳转</span>
-            <kbd className="rounded border border-neutral-700 bg-neutral-900 px-1 py-0.5 font-mono text-[10px] text-neutral-400">⌘K</kbd>
+            <SearchIcon width={13} height={13} />
+            <kbd className="font-mono text-[10px] text-neutral-600">⌘K</kbd>
           </button>
           <button
             onClick={() => setShortcutsOpen(true)}
             title="快捷键帮助 (?)"
             aria-label="快捷键帮助"
-            className="inline-flex h-8 min-w-8 items-center justify-center rounded-md border border-neutral-700 bg-neutral-800/60 px-2.5 text-[11px] font-semibold text-neutral-400 transition-colors hover:border-neutral-600 hover:bg-neutral-800 hover:text-neutral-200"
+            className="inline-flex h-7 min-w-7 items-center justify-center rounded-md px-2 text-[11px] font-semibold text-neutral-600 transition-colors hover:bg-neutral-800 hover:text-neutral-200"
           >
             ?
           </button>

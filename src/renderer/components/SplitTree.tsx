@@ -621,7 +621,7 @@ export default function SplitTree({ entries, filter, onDoubleClickFile, emptySta
       {/* Fixed headers */}
       <div className="flex shrink-0">
         <PathHeader side="left" onSourcePathSubmit={onSourcePathSubmit} />
-        <div className="w-4 shrink-0 border-x border-neutral-600 bg-neutral-700" />
+        <div className="w-2 shrink-0 border-x border-neutral-800 bg-neutral-850" />
         <PathHeader side="right" onSourcePathSubmit={onSourcePathSubmit} />
       </div>
 

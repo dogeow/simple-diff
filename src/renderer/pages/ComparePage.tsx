@@ -203,7 +203,7 @@ export default function ComparePage() {
   return (
     <div className="flex h-full flex-col">
       {/* Header */}
-      <div className="flex items-center gap-3 border-b border-neutral-800 bg-neutral-850 px-3 py-2">
+      <div className="flex items-center gap-3 border-b border-neutral-800/80 bg-neutral-850 px-3 py-1.5">
         <CompareSessionTabs
           compareTabs={compareTabs}
           activeCompareTabId={activeCompareTabId}

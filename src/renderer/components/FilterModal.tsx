@@ -46,10 +46,11 @@ export default function FilterModal({ extensionFilter, onChange }: FilterModalPr
           setInput(formatPathFiltersForDisplay(extensionFilter).join('\n'))
           setOpen(!open)
         }}
-        className={`inline-flex h-7 items-center gap-1 rounded-md px-2.5 text-[11px] font-medium leading-none transition-colors ${
+        aria-pressed={active}
+        className={`inline-flex h-7 items-center gap-1 rounded-lg px-2.5 text-[11px] font-medium leading-none transition-colors ${
           active
-            ? 'bg-blue-600 text-white hover:bg-blue-500'
-            : 'border border-neutral-700 bg-neutral-800/70 text-neutral-300 hover:border-neutral-600 hover:bg-neutral-800'
+            ? 'bg-blue-500/10 text-blue-200 ring-1 ring-inset ring-blue-500/25 hover:bg-blue-500/15'
+            : 'text-neutral-500 hover:bg-neutral-800 hover:text-neutral-300'
         }`}
       >
         <FilterIcon width={11} height={11} />
