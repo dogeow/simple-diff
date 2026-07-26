@@ -259,6 +259,7 @@ async function runPartialCompareForRoots(relativeRoots: readonly string[]): Prom
 
   addRendererLog('compare', 'info', `开始局部重比对 roots=${effectiveRelativeRoots.join('、') || '.'}`)
   const response = await window.api.runPartialCompare({
+    compareId: compareState.compareSessionId ?? undefined,
     left: compareState.leftSource,
     right: compareState.rightSource,
     strategies: [...compareState.strategies],

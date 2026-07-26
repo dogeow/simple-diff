@@ -99,6 +99,8 @@ export interface CompareRequest {
 }
 
 export interface ComparePartialRequest {
+  /** 原始全量对比会话 id；提供时局部结果会并入该会话的受信任映射 */
+  readonly compareId?: string
   readonly left: SourceConfig
   readonly right: SourceConfig
   readonly strategies: readonly StrategyName[]

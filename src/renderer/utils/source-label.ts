@@ -16,7 +16,11 @@ export function isSameSourceConfig(left: SourceConfig, right: SourceConfig): boo
     return false
   }
 
-  return left.type !== 'sftp' || left.configId === right.configId
+  if (left.type === 'sftp' && right.type === 'sftp') {
+    return left.configId === right.configId
+  }
+
+  return true
 }
 
 export function resolveSftpLabel(configId: string, configs: readonly SSHConfig[]): string {

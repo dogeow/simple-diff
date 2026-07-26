@@ -192,6 +192,11 @@ const compareStore = create<CompareStore>((set, get) => ({
           entrySummary: summarizeCompareEntries(entries),
         }
       })
+    } catch (error) {
+      // 目录列取失败时向用户暴露错误，而不是伪装成空目录
+      if (requestCompareVersion === get().compareVersion) {
+        get().setError(error instanceof Error ? error.message : '读取目录失败')
+      }
     } finally {
       const current = get()
       if (requestCompareVersion !== current.compareVersion) return
@@ -385,10 +390,10 @@ const compareStore = create<CompareStore>((set, get) => ({
   },
 }))
 
-function withDerivedEntrySummary(
-  partial: CompareStoreStateUpdate,
+function withDerivedEntrySummary<T extends CompareStoreStateUpdate>(
+  partial: T,
   currentState: CompareStore,
-): CompareStoreStateUpdate {
+): T {
   if (!('entries' in partial) || partial.entrySummary != null) {
     return partial
   }
@@ -401,18 +406,30 @@ function withDerivedEntrySummary(
 
 const originalCompareStoreSetState = compareStore.setState.bind(compareStore)
 
-compareStore.setState = ((partial, replace) => {
-  if (typeof partial === 'function') {
-    return originalCompareStoreSetState(
-      (state) => withDerivedEntrySummary(partial(state), state),
-      replace,
+// 与 zustand setState 的两个重载一一对应，保证 replace=true 时必须传入完整状态
+type CompareStoreSetStateArgs =
+  | [partial: CompareStore | Partial<CompareStore> | ((state: CompareStore) => CompareStore | Partial<CompareStore>), replace?: false]
+  | [state: CompareStore | ((state: CompareStore) => CompareStore), replace: true]
+
+compareStore.setState = (...args: CompareStoreSetStateArgs) => {
+  if (args[1] === true) {
+    const [state] = args
+    originalCompareStoreSetState(
+      typeof state === 'function'
+        ? (current) => withDerivedEntrySummary(state(current), current)
+        : withDerivedEntrySummary(state, compareStore.getState()),
+      true,
     )
+    return
   }
 
-  return originalCompareStoreSetState(
-    withDerivedEntrySummary(partial, compareStore.getState()),
+  const [partial, replace] = args
+  originalCompareStoreSetState(
+    typeof partial === 'function'
+      ? (current) => withDerivedEntrySummary(partial(current), current)
+      : withDerivedEntrySummary(partial, compareStore.getState()),
     replace,
   )
-}) as typeof compareStore.setState
+}
 
 export const useCompareStore = compareStore

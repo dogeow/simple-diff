@@ -80,11 +80,18 @@ export async function loadDirectoryChildren(
   const fetchLeft = dirEntry?.state !== 'right_only' && leftSource && leftAbs
   const fetchRight = dirEntry?.state !== 'left_only' && rightSource && rightAbs
 
+  // 列取失败必须抛错，静默按空目录处理会让子项全部误判为单侧存在
   const leftP = fetchLeft
-    ? window.api.listFiles(leftSource, leftAbs).then((r) => r.success && r.data ? r.data : [])
+    ? window.api.listFiles(leftSource, leftAbs).then((r) => {
+        if (!r.success || !r.data) throw new Error(r.error ?? `读取目录失败: ${leftAbs}`)
+        return r.data
+      })
     : Promise.resolve([] as readonly FileEntry[])
   const rightP = fetchRight
-    ? window.api.listFiles(rightSource, rightAbs).then((r) => r.success && r.data ? r.data : [])
+    ? window.api.listFiles(rightSource, rightAbs).then((r) => {
+        if (!r.success || !r.data) throw new Error(r.error ?? `读取目录失败: ${rightAbs}`)
+        return r.data
+      })
     : Promise.resolve([] as readonly FileEntry[])
 
   const [leftList, rightList] = await Promise.all([leftP, rightP])

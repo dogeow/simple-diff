@@ -9,6 +9,7 @@
     "build:ui": "vite build --config vite.config.renderer.ts",
     "build": "tauri build",
     "test": "vitest run",
+    "type-check": "tsc -b",
     "tauri": "tauri"
   },
   "keywords": [
@@ -20,9 +21,6 @@
   "license": "MIT",
   "dependencies": {
     "@tauri-apps/api": "^2.10.1",
-    "@tauri-apps/plugin-dialog": "^2.7.0",
-    "@tauri-apps/plugin-opener": "^2.5.4",
-    "@tauri-apps/plugin-shell": "^2.3.5",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
     "zustand": "^5.0.12"

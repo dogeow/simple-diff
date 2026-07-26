@@ -241,5 +241,5 @@ export const useAppStore = create<AppStore>()(persist((set, get) => ({
 }), {
   name: 'simple-diff-app-store',
   storage: appStorage,
-  partialize: createPersistedAppState,
+  partialize: (state: AppStore) => createPersistedAppState(state),
 }))

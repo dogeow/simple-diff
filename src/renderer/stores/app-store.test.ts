@@ -56,6 +56,7 @@ function createCompareSnapshot(overrides: Partial<CompareSessionSnapshot> = {}):
     duration: 123,
     leftSource: { type: 'local', path: '/left' },
     rightSource: { type: 'local', path: '/right' },
+    dirtyPaths: [],
     loadingDirs: [],
     filter: 'all',
     expandedDirs: [],

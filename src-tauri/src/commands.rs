@@ -23,40 +23,48 @@ use crate::types::{
 };
 
 #[tauri::command]
-pub fn list_files(
+pub async fn list_files(
   app: AppHandle,
   source: SourceConfig,
   dir_path: String,
-) -> IpcResult<Vec<FileEntry>> {
-  match list_entries(&app, &source, &dir_path) {
+) -> Result<IpcResult<Vec<FileEntry>>, String> {
+  tauri::async_runtime::spawn_blocking(move || match list_entries(&app, &source, &dir_path) {
     Ok(entries) => IpcResult::ok(entries),
     Err(err) => IpcResult::err(err),
-  }
+  })
+  .await
+  .map_err(|err| format!("读取目录任务失败: {err}"))
 }
 
 #[tauri::command]
-pub fn read_text_file(
+pub async fn read_text_file(
   app: AppHandle,
   source: SourceConfig,
   file_path: String,
-) -> IpcResult<String> {
-  match read_text_source(&app, &source, &file_path) {
+) -> Result<IpcResult<String>, String> {
+  tauri::async_runtime::spawn_blocking(move || match read_text_source(&app, &source, &file_path) {
     Ok(content) => IpcResult::ok(content),
     Err(err) => IpcResult::err(err),
-  }
+  })
+  .await
+  .map_err(|err| format!("读取文件任务失败: {err}"))
 }
 
 #[tauri::command]
-pub fn write_text_file(
+pub async fn write_text_file(
   app: AppHandle,
   source: SourceConfig,
   file_path: String,
   content: String,
-) -> IpcResult<()> {
-  match write_text_source(&app, &source, &file_path, &content) {
-    Ok(()) => IpcResult::ok_empty(),
-    Err(err) => IpcResult::err(err),
-  }
+) -> Result<IpcResult<()>, String> {
+  tauri::async_runtime::spawn_blocking(
+    move || match write_text_source(&app, &source, &file_path, &content) {
+      Ok(()) => IpcResult::ok_empty(),
+      Err(err) => IpcResult::err(err),
+    },
+  )
+  .await
+  .map_err(|err| format!("写入文件任务失败: {err}"))
 }
 
 #[tauri::command]
@@ -136,8 +144,16 @@ pub async fn run_compare(
 #[tauri::command]
 pub async fn run_partial_compare(
   app: AppHandle,
+  state: State<'_, AppState>,
   request: ComparePartialRequest,
 ) -> Result<IpcResult<CompareResult>, String> {
+  // 仅当来源与原会话一致时才回写受信任映射，避免污染同步信任范围
+  let session = request
+    .compare_id
+    .as_deref()
+    .and_then(|compare_id| state.get_compare(compare_id))
+    .filter(|session| session.matches_sources(&request.left, &request.right));
+
   let result = tauri::async_runtime::spawn_blocking(move || {
     compare_directories(
       &app,
@@ -155,7 +171,13 @@ pub async fn run_partial_compare(
   .map_err(|err| format!("局部对比失败: {err}"))?;
 
   Ok(match result {
-    Ok(value) => IpcResult::ok(value),
+    Ok(value) => {
+      // 将局部结果并入原对比会话的受信任映射，保证 watch 触发的重比对后仍可同步
+      if let Some(session) = session {
+        session.register_entries(&value.entries);
+      }
+      IpcResult::ok(value)
+    }
     Err(err) => IpcResult::err(err),
   })
 }
@@ -233,29 +255,37 @@ pub fn show_in_folder(app: AppHandle, source: SourceConfig, relative_path: Strin
 }
 
 #[tauri::command]
-pub fn rename_path(
+pub async fn rename_path(
   app: AppHandle,
   source: SourceConfig,
   old_relative_path: String,
   new_name: String,
-) -> IpcResult<()> {
-  match rename_source(&app, &source, &old_relative_path, &new_name) {
-    Ok(()) => IpcResult::ok_empty(),
-    Err(err) => IpcResult::err(err),
-  }
+) -> Result<IpcResult<()>, String> {
+  tauri::async_runtime::spawn_blocking(
+    move || match rename_source(&app, &source, &old_relative_path, &new_name) {
+      Ok(()) => IpcResult::ok_empty(),
+      Err(err) => IpcResult::err(err),
+    },
+  )
+  .await
+  .map_err(|err| format!("重命名任务失败: {err}"))
 }
 
 #[tauri::command]
-pub fn delete_path(
+pub async fn delete_path(
   app: AppHandle,
   source: SourceConfig,
   relative_path: String,
   is_directory: bool,
-) -> IpcResult<()> {
-  match delete_source(&app, &source, &relative_path, is_directory) {
-    Ok(()) => IpcResult::ok_empty(),
-    Err(err) => IpcResult::err(err),
-  }
+) -> Result<IpcResult<()>, String> {
+  tauri::async_runtime::spawn_blocking(
+    move || match delete_source(&app, &source, &relative_path, is_directory) {
+      Ok(()) => IpcResult::ok_empty(),
+      Err(err) => IpcResult::err(err),
+    },
+  )
+  .await
+  .map_err(|err| format!("删除任务失败: {err}"))
 }
 
 #[tauri::command]
@@ -288,21 +318,23 @@ pub fn history_delete(app: AppHandle, id: String) -> IpcResult<()> {
 }
 
 #[tauri::command]
-pub fn sync_start(
+pub async fn sync_start(
   app: AppHandle,
   state: State<'_, AppState>,
   mut request: StartSyncRequest,
-) -> IpcResult<SyncTaskSnapshot> {
-  match state.assert_sync_entries(&request) {
-    Ok(entries) => {
-      request.entries = entries;
-      match sync_manager().start(app, request) {
-        Ok(task) => IpcResult::ok(task),
-        Err(err) => IpcResult::err(err),
-      }
-    }
+) -> Result<IpcResult<SyncTaskSnapshot>, String> {
+  // State 借用不满足 'static：先完成信任校验并取出净化后的条目，再进入阻塞任务
+  let entries = match state.assert_sync_entries(&request) {
+    Ok(entries) => entries,
+    Err(err) => return Ok(IpcResult::err(err)),
+  };
+  request.entries = entries;
+  tauri::async_runtime::spawn_blocking(move || match sync_manager().start(app, request) {
+    Ok(task) => IpcResult::ok(task),
     Err(err) => IpcResult::err(err),
-  }
+  })
+  .await
+  .map_err(|err| format!("启动同步任务失败: {err}"))
 }
 
 #[tauri::command]
@@ -357,36 +389,49 @@ pub fn ssh_delete_config(app: AppHandle, id: String) -> IpcResult<()> {
 }
 
 #[tauri::command]
-pub fn ssh_test(app: AppHandle, id: String) -> IpcResult<bool> {
-  match ssh_store::get_internal(&app, &id).and_then(|config| ssh::test_connection(&config)) {
-    Ok(ok) => IpcResult::ok(ok),
-    Err(err) => IpcResult::err(err),
-  }
+pub async fn ssh_test(app: AppHandle, id: String) -> Result<IpcResult<bool>, String> {
+  tauri::async_runtime::spawn_blocking(move || {
+    match ssh_store::get_internal(&app, &id).and_then(|config| ssh::test_connection(&config)) {
+      Ok(ok) => IpcResult::ok(ok),
+      Err(err) => IpcResult::err(err),
+    }
+  })
+  .await
+  .map_err(|err| format!("SSH 连接测试任务失败: {err}"))
 }
 
 #[tauri::command]
-pub fn ssh_browse(app: AppHandle, config_id: String, dir_path: String) -> IpcResult<Vec<FileEntry>> {
-  match (|| {
-    let config = ssh_store::get_internal(&app, &config_id)?;
-    let root = config
-      .default_path
-      .clone()
-      .unwrap_or_else(|| "/".to_string());
-    let session = connect_session(&config)?;
-    // dir_path may be absolute under remote root or relative
-    let relative = if dir_path.is_empty() || dir_path == root {
-      String::new()
-    } else if let Some(rest) = dir_path
-      .trim_end_matches('/')
-      .strip_prefix(root.trim_end_matches('/'))
-    {
-      rest.trim_start_matches('/').to_string()
-    } else {
-      dir_path.trim_start_matches('/').to_string()
-    };
-    ssh::list_remote(&session, &root, &relative)
-  })() {
-    Ok(entries) => IpcResult::ok(entries),
-    Err(err) => IpcResult::err(err),
-  }
+pub async fn ssh_browse(
+  app: AppHandle,
+  config_id: String,
+  dir_path: String,
+) -> Result<IpcResult<Vec<FileEntry>>, String> {
+  tauri::async_runtime::spawn_blocking(move || {
+    let listing = (|| {
+      let config = ssh_store::get_internal(&app, &config_id)?;
+      let root = config
+        .default_path
+        .clone()
+        .unwrap_or_else(|| "/".to_string());
+      let session = connect_session(&config)?;
+      // dir_path may be absolute under remote root or relative
+      let relative = if dir_path.is_empty() || dir_path == root {
+        String::new()
+      } else if let Some(rest) = dir_path
+        .trim_end_matches('/')
+        .strip_prefix(root.trim_end_matches('/'))
+      {
+        rest.trim_start_matches('/').to_string()
+      } else {
+        dir_path.trim_start_matches('/').to_string()
+      };
+      ssh::list_remote(&session, &root, &relative)
+    })();
+    match listing {
+      Ok(entries) => IpcResult::ok(entries),
+      Err(err) => IpcResult::err(err),
+    }
+  })
+  .await
+  .map_err(|err| format!("SSH 目录浏览任务失败: {err}"))
 }

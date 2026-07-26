@@ -36,13 +36,20 @@ function subscribe<T>(
   event: string,
   callback: (payload: T) => void,
 ): () => void {
+  let disposed = false
   let unlisten: UnlistenFn | null = null
   void listen<T>(event, (e) => {
     callback(e.payload)
   }).then((fn) => {
-    unlisten = fn
+    // 清理可能发生在 listen 完成之前（如 StrictMode 双挂载）：此时立即注销，避免监听器泄漏
+    if (disposed) {
+      fn()
+    } else {
+      unlisten = fn
+    }
   })
   return () => {
+    disposed = true
     unlisten?.()
   }
 }

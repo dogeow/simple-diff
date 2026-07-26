@@ -147,6 +147,8 @@ pub struct CompareRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ComparePartialRequest {
+  /// 原始全量对比会话 id；提供时局部结果会并入该会话的受信任映射
+  pub compare_id: Option<String>,
   pub left: SourceConfig,
   pub right: SourceConfig,
   pub relative_roots: Vec<String>,

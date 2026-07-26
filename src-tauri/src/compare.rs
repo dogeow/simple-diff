@@ -402,14 +402,18 @@ pub fn compare_directories(
             .list(&scan.rel)
             .map_err(|e| format!("读取左侧根目录失败: {e}"))?
         } else {
-          left_session.list(&scan.rel).unwrap_or_default()
+          left_session
+            .list(&scan.rel)
+            .map_err(|e| format!("读取左侧目录 {} 失败: {e}", scan.rel))?
         };
         let right_list = if scan.rel.is_empty() {
           right_session
             .list(&scan.rel)
             .map_err(|e| format!("读取右侧根目录失败: {e}"))?
         } else {
-          right_session.list(&scan.rel).unwrap_or_default()
+          right_session
+            .list(&scan.rel)
+            .map_err(|e| format!("读取右侧目录 {} 失败: {e}", scan.rel))?
         };
         let matched = match_level(&left_list, &right_list, &scan.rel, &path_filters, &reusable);
         level_entries.extend(matched);
@@ -562,4 +566,126 @@ pub fn compare_directories(
     left_source: Some(left.clone()),
     right_source: Some(right.clone()),
   })
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use crate::types::CompareFileFingerprint;
+
+  fn fe(name: &str, is_directory: bool, size: u64, mtime: u64) -> FileEntry {
+    FileEntry {
+      name: name.into(),
+      path: name.into(),
+      is_directory,
+      size,
+      mtime,
+    }
+  }
+
+  fn cache_entry(relative_path: &str, state: CompareState, size: u64, mtime: u64) -> CompareCacheEntry {
+    CompareCacheEntry {
+      relative_path: relative_path.into(),
+      state,
+      left: CompareFileFingerprint {
+        is_directory: false,
+        size,
+        mtime,
+      },
+      right: CompareFileFingerprint {
+        is_directory: false,
+        size,
+        mtime,
+      },
+      reasons: Vec::new(),
+    }
+  }
+
+  #[test]
+  fn match_level_marks_one_sided_entries() {
+    let left = vec![fe("only-left.txt", false, 1, 1), fe("both.txt", false, 1, 1)];
+    let right = vec![fe("only-right.txt", false, 1, 1), fe("both.txt", false, 2, 1)];
+    let entries = match_level(&left, &right, "", &[], &HashMap::new());
+
+    assert_eq!(entries.len(), 3);
+    assert_eq!(entries[0].relative_path, "both.txt");
+    assert_eq!(entries[0].state, CompareState::Pending);
+    assert_eq!(entries[1].relative_path, "only-left.txt");
+    assert_eq!(entries[1].state, CompareState::LeftOnly);
+    assert_eq!(entries[2].relative_path, "only-right.txt");
+    assert_eq!(entries[2].state, CompareState::RightOnly);
+  }
+
+  #[test]
+  fn match_level_sorts_directories_first_and_prefixes_parent() {
+    let left = vec![fe("b.txt", false, 1, 1), fe("zdir", true, 0, 0)];
+    let right = vec![fe("zdir", true, 0, 0)];
+    let entries = match_level(&left, &right, "root/sub", &[], &HashMap::new());
+
+    assert_eq!(entries.len(), 2);
+    // 目录排在文件前面，且相对路径带上父级前缀
+    assert_eq!(entries[0].relative_path, "root/sub/zdir");
+    assert!(entries[0].is_directory);
+    assert_eq!(entries[0].state, CompareState::Pending);
+    assert_eq!(entries[1].relative_path, "root/sub/b.txt");
+    assert_eq!(entries[1].state, CompareState::LeftOnly);
+  }
+
+  #[test]
+  fn match_level_reuses_cache_when_fingerprint_matches() {
+    let left = vec![fe("a.txt", false, 5, 100)];
+    let right = vec![fe("a.txt", false, 5, 100)];
+    let mut reusable = HashMap::new();
+    reusable.insert(
+      "a.txt".to_string(),
+      cache_entry("a.txt", CompareState::Equal, 5, 100),
+    );
+    let entries = match_level(&left, &right, "", &[], &reusable);
+
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].state, CompareState::Equal);
+  }
+
+  #[test]
+  fn match_level_ignores_cache_when_fingerprint_changed() {
+    let left = vec![fe("a.txt", false, 5, 100)];
+    let right = vec![fe("a.txt", false, 6, 100)];
+    let mut reusable = HashMap::new();
+    reusable.insert(
+      "a.txt".to_string(),
+      cache_entry("a.txt", CompareState::Equal, 5, 100),
+    );
+    let entries = match_level(&left, &right, "", &[], &reusable);
+
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].state, CompareState::Pending);
+  }
+
+  #[test]
+  fn match_level_applies_path_filters() {
+    let left = vec![fe("node_modules", true, 0, 0), fe("a.txt", false, 1, 1)];
+    let right = vec![fe("node_modules", true, 0, 0)];
+    let filters = vec!["node_modules".to_string()];
+    let entries = match_level(&left, &right, "", &filters, &HashMap::new());
+
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].relative_path, "a.txt");
+  }
+
+  #[test]
+  fn bump_stats_counts_each_state() {
+    let mut stats = CompareStats::default();
+    bump_stats(&mut stats, &CompareState::Equal);
+    bump_stats(&mut stats, &CompareState::Different);
+    bump_stats(&mut stats, &CompareState::LeftOnly);
+    bump_stats(&mut stats, &CompareState::RightOnly);
+    // Pending / Comparing 只计入 total
+    bump_stats(&mut stats, &CompareState::Pending);
+
+    assert_eq!(stats.total, 5);
+    assert_eq!(stats.equal, 1);
+    assert_eq!(stats.different, 1);
+    assert_eq!(stats.left_only, 1);
+    assert_eq!(stats.right_only, 1);
+  }
 }

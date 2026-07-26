@@ -3,7 +3,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import type { CompareEntry, FileEntry, SourceConfig, SyncTaskSnapshot } from '../../../shared/types'
+import type { CompareEntry, CompareResult, FileEntry, IpcResult, SourceConfig, SyncTaskSnapshot } from '../../../shared/types'
 import Layout from '../components/Layout'
 import ComparePage from './ComparePage'
 import { useAppStore, type CompareTab, type DiffTab } from '../stores/app-store'
@@ -136,6 +136,7 @@ function createSnapshot(overrides: Partial<CompareSessionSnapshot> = {}): Compar
     duration: 123,
     leftSource,
     rightSource,
+    dirtyPaths: [],
     loadingDirs: [],
     filter: 'all',
     expandedDirs: [],
@@ -641,7 +642,7 @@ describe('ComparePage renderer interactions', () => {
 
   it('continues a paused compare while preserving existing entries', async () => {
     const api = installApiMock({
-      runCompare: vi.fn(() => new Promise(() => undefined)),
+      runCompare: vi.fn(() => new Promise<IpcResult<CompareResult>>(() => undefined)),
     })
     resetStores([
       {
@@ -687,7 +688,7 @@ describe('ComparePage renderer interactions', () => {
 
   it('restarts compare from the toolbar and clears previous entries', async () => {
     const api = installApiMock({
-      runCompare: vi.fn(() => new Promise(() => undefined)),
+      runCompare: vi.fn(() => new Promise<IpcResult<CompareResult>>(() => undefined)),
     })
     resetStores([
       {
@@ -731,7 +732,7 @@ describe('ComparePage renderer interactions', () => {
 
   it('restarts compare without cloning the full compare snapshot first', async () => {
     const api = installApiMock({
-      runCompare: vi.fn(() => new Promise(() => undefined)),
+      runCompare: vi.fn(() => new Promise<IpcResult<CompareResult>>(() => undefined)),
     })
     resetStores([
       {

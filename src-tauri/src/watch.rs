@@ -33,8 +33,11 @@ impl WatchManager {
     left: SourceConfig,
     right: SourceConfig,
   ) -> Result<(), String> {
+    // 提前规范化根路径，事件回调里无需再 canonicalize（删除事件的路径无法 canonicalize）
     let left_root = PathBuf::from(left.as_local_path()?);
+    let left_root = left_root.canonicalize().unwrap_or(left_root);
     let right_root = PathBuf::from(right.as_local_path()?);
+    let right_root = right_root.canonicalize().unwrap_or(right_root);
 
     self.stop(Some(&session_id));
 
@@ -98,9 +101,9 @@ impl WatchManager {
 }
 
 fn relative_to_root(path: &Path, root: &Path) -> Option<String> {
-  let path = path.canonicalize().ok()?;
-  let root = root.canonicalize().ok()?;
-  let rel = path.strip_prefix(&root).ok()?;
+  // 已删除的文件无法 canonicalize，回退到原始事件路径做前缀匹配
+  let path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+  let rel = path.strip_prefix(root).ok()?;
   Some(normalize_relative(&rel.to_string_lossy()))
 }
 

@@ -111,6 +111,7 @@ struct InnerTask {
   snapshot: SyncTaskSnapshot,
   pending: VecDeque<SyncItem>,
   all_items: Vec<SyncItem>,
+  completed_keys: HashSet<String>,
 }
 
 impl InnerTask {
@@ -153,11 +154,13 @@ impl SyncManager {
         persisted.snapshot.current_path = None;
         persisted.snapshot.updated_at = now_ms();
       }
-      let pending = persisted.pending_items.into_iter().collect();
+      let pending: VecDeque<SyncItem> = persisted.pending_items.into_iter().collect();
+      let completed_keys = derive_completed_keys(&persisted.all_items, &pending);
       *self.inner.lock() = Some(InnerTask {
         snapshot: persisted.snapshot,
         pending,
         all_items: persisted.all_items,
+        completed_keys,
       });
       if let Some(task) = self.inner.lock().as_ref() {
         save_persisted(app, Some(&task.to_persisted()));
@@ -168,7 +171,11 @@ impl SyncManager {
   pub fn get_snapshot(&self) -> Option<SyncTaskSnapshot> {
     self.inner.lock().as_ref().map(|t| {
       let mut snap = t.snapshot.clone();
-      snap.items = Some(build_item_snapshots(&t.all_items, &t.snapshot));
+      snap.items = Some(build_item_snapshots(
+        &t.all_items,
+        &t.snapshot,
+        &t.completed_keys,
+      ));
       snap
     })
   }
@@ -222,9 +229,10 @@ impl SyncManager {
         snapshot: snapshot.clone(),
         pending,
         all_items,
+        completed_keys: HashSet::new(),
       });
-      self.commit_progress(&app, true);
     }
+    self.commit_progress(&app, true);
 
     if snapshot.status == SyncTaskStatus::Running {
       log_bridge::emit_log(
@@ -273,6 +281,10 @@ impl SyncManager {
       }
       task.snapshot.total_items = task.all_items.len() as u64;
       task.snapshot.updated_at = now_ms();
+      // 展开远端目录期间未持锁，任务可能已在此窗口内完成；有新增项则重新置为运行中
+      if appended > 0 && task.snapshot.status == SyncTaskStatus::Completed {
+        task.snapshot.status = SyncTaskStatus::Running;
+      }
       if appended > 0 {
         log_bridge::emit_log(
           &app,
@@ -317,7 +329,10 @@ impl SyncManager {
       };
       collected.push(item.clone());
       if item.kind == SyncItemKind::Directory {
-        let children = session.list(&item.relative_path).unwrap_or_default();
+        // 目录列取失败必须中止同步，静默按空目录处理会漏拷内容
+        let children = session
+          .list(&item.relative_path)
+          .map_err(|e| format!("读取目录 {} 失败: {e}", item.relative_path))?;
         let child_pairs: Vec<(String, bool)> = children
           .into_iter()
           .map(|c| (c.name, c.is_directory))
@@ -391,9 +406,22 @@ impl SyncManager {
       *running = true;
     }
     let manager = sync_manager();
-    tauri::async_runtime::spawn_blocking(move || {
-      manager.run_loop(app);
-      *manager.loop_running.lock() = false;
+    tauri::async_runtime::spawn_blocking(move || loop {
+      manager.run_loop(app.clone());
+      // 锁顺序与 ensure_loop 一致：先 loop_running 后 inner，避免丢失唤醒
+      let mut running = manager.loop_running.lock();
+      let has_work = manager
+        .inner
+        .lock()
+        .as_ref()
+        .map(|task| {
+          task.snapshot.status == SyncTaskStatus::Running && !task.pending.is_empty()
+        })
+        .unwrap_or(false);
+      if !has_work {
+        *running = false;
+        break;
+      }
     });
   }
 
@@ -438,7 +466,8 @@ impl SyncManager {
         if task.snapshot.status != SyncTaskStatus::Running {
           break;
         }
-        let Some(item) = task.pending.pop_front() else {
+        // 仅窥视队首，成功后才真正出队，失败时保留在 pending 供 resume 重试
+        let Some(item) = task.pending.front().cloned() else {
           task.snapshot.status = SyncTaskStatus::Completed;
           task.snapshot.current_path = None;
           task.snapshot.updated_at = now_ms();
@@ -482,6 +511,8 @@ impl SyncManager {
         let Some(task) = guard.as_mut() else {
           break;
         };
+        task.pending.pop_front();
+        task.completed_keys.insert(item_key(&item));
         task.snapshot.completed_items += 1;
         task.snapshot.current_path = None;
         task.snapshot.last_completed_path.replace(relative);
@@ -543,12 +574,24 @@ fn parent_of(relative: &str) -> Option<String> {
   Some(parts.join("/"))
 }
 
-fn build_item_snapshots(all: &[SyncItem], task: &SyncTaskSnapshot) -> Vec<SyncTaskItemSnapshot> {
+fn derive_completed_keys(all: &[SyncItem], pending: &VecDeque<SyncItem>) -> HashSet<String> {
+  let pending_keys: HashSet<String> = pending.iter().map(item_key).collect();
   all
     .iter()
-    .enumerate()
-    .map(|(index, item)| {
-      let status = if (index as u64) < task.completed_items {
+    .map(item_key)
+    .filter(|key| !pending_keys.contains(key))
+    .collect()
+}
+
+fn build_item_snapshots(
+  all: &[SyncItem],
+  task: &SyncTaskSnapshot,
+  completed_keys: &HashSet<String>,
+) -> Vec<SyncTaskItemSnapshot> {
+  all
+    .iter()
+    .map(|item| {
+      let status = if completed_keys.contains(&item_key(item)) {
         SyncTaskItemStatus::Completed
       } else if task.status == SyncTaskStatus::Running
         && task.current_path.as_deref() == Some(item.relative_path.as_str())
@@ -571,4 +614,77 @@ static SYNC_MANAGER: once_cell::sync::Lazy<Arc<SyncManager>> =
 
 pub fn sync_manager() -> Arc<SyncManager> {
   SYNC_MANAGER.clone()
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  fn file_item(path: &str) -> SyncItem {
+    SyncItem {
+      relative_path: path.into(),
+      kind: SyncItemKind::File,
+    }
+  }
+
+  fn dir_item(path: &str) -> SyncItem {
+    SyncItem {
+      relative_path: path.into(),
+      kind: SyncItemKind::Directory,
+    }
+  }
+
+  fn snapshot_with(status: SyncTaskStatus, current_path: Option<&str>) -> SyncTaskSnapshot {
+    SyncTaskSnapshot {
+      id: "task".into(),
+      left_source: SourceConfig::Local { path: "/l".into() },
+      right_source: SourceConfig::Local { path: "/r".into() },
+      direction: SyncDirection::LeftToRight,
+      status,
+      total_items: 0,
+      completed_items: 0,
+      current_path: current_path.map(|p| p.to_string()),
+      last_completed_path: None,
+      last_error: None,
+      created_at: 0,
+      updated_at: 0,
+      items: None,
+    }
+  }
+
+  #[test]
+  fn item_key_distinguishes_kind() {
+    assert_ne!(item_key(&dir_item("x")), item_key(&file_item("x")));
+  }
+
+  #[test]
+  fn build_item_snapshots_uses_completed_keys_not_index() {
+    let all = vec![file_item("a.txt"), file_item("b.txt"), file_item("c.txt")];
+    let mut task = snapshot_with(SyncTaskStatus::Running, Some("a.txt"));
+    task.completed_items = 1;
+    // 完成顺序与 all_items 顺序不一致：只有 b.txt 已完成
+    let completed: HashSet<String> = [item_key(&all[1])].into_iter().collect();
+    let items = build_item_snapshots(&all, &task, &completed);
+    assert_eq!(items[0].status, SyncTaskItemStatus::Running);
+    assert_eq!(items[1].status, SyncTaskItemStatus::Completed);
+    assert_eq!(items[2].status, SyncTaskItemStatus::Pending);
+  }
+
+  #[test]
+  fn build_item_snapshots_ignores_current_path_when_not_running() {
+    let all = vec![file_item("a.txt")];
+    let task = snapshot_with(SyncTaskStatus::Paused, Some("a.txt"));
+    let items = build_item_snapshots(&all, &task, &HashSet::new());
+    assert_eq!(items[0].status, SyncTaskItemStatus::Pending);
+  }
+
+  #[test]
+  fn derive_completed_keys_excludes_pending_items() {
+    let all = vec![dir_item("dir"), file_item("dir/a.txt"), file_item("dir/b.txt")];
+    let pending: VecDeque<SyncItem> = vec![file_item("dir/a.txt"), file_item("dir/b.txt")].into();
+    let keys = derive_completed_keys(&all, &pending);
+    assert_eq!(keys.len(), 1);
+    assert!(keys.contains(&item_key(&all[0])));
+    assert!(!keys.contains(&item_key(&all[1])));
+  }
 }

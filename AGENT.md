@@ -22,6 +22,9 @@ src-tauri/
   src/compare.rs        BFS 目录对比
   src/files.rs          本地文件读写
   src/watch.rs          notify 本地监听
+  src/sync.rs           同步任务队列（暂停 / 恢复 / 持久化）
+  src/ssh.rs            SSH/SFTP 会话与远端操作
+  src/history.rs        对比历史持久化
 ```
 
 ## 构建命令
@@ -38,7 +41,7 @@ cargo check --manifest-path src-tauri/Cargo.toml
 `window.api.runtime`：
 
 - `mode: 'tauri'`
-- `supportsSftp / supportsHistory / supportsSync: false`（MVP）
+- `supportsSftp / supportsHistory / supportsSync: true`
 - 本地选目录、写回、拖放路径（浏览对话框）可用
 
 ## 编码规范

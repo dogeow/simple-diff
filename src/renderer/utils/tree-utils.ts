@@ -195,8 +195,12 @@ function createVisibleTreeNodes(
   }
 }
 
+interface TreeBuildNode extends TreeNode {
+  readonly children: TreeNode[]
+}
+
 export function buildTree(entries: readonly CompareEntry[]): TreeNode {
-  const root: TreeNode = {
+  const root: TreeBuildNode = {
     name: '',
     relativePath: '',
     isDirectory: true,
@@ -205,7 +209,7 @@ export function buildTree(entries: readonly CompareEntry[]): TreeNode {
     depth: -1,
   }
 
-  const dirMap = new Map<string, TreeNode>()
+  const dirMap = new Map<string, TreeBuildNode>()
   dirMap.set('', root)
 
   const sorted = sortEntryInfos(entries)
@@ -214,7 +218,7 @@ export function buildTree(entries: readonly CompareEntry[]): TreeNode {
     const parts = segments
     const parentPath = parts.slice(0, -1).join('/')
 
-    const node: TreeNode = {
+    const node: TreeBuildNode = {
       name: entry.name,
       relativePath: entry.relativePath,
       isDirectory: entry.isDirectory,
@@ -348,21 +352,6 @@ export function filterEntriesBySide(
 function hasDotAncestor(relativePath: string): boolean {
   const parts = relativePath.split('/')
   return parts.slice(0, -1).some((part) => part.startsWith('.'))
-}
-
-function filterHiddenDotEntries(
-  entries: readonly CompareEntry[],
-  hideDotFilter: DotEntryFilter,
-): readonly CompareEntry[] {
-  return entries.filter((entry) => {
-    if (hasDotAncestor(entry.relativePath)) return false
-
-    if (!entry.name.startsWith('.')) return true
-    if (hideDotFilter === 'all') return false
-    if (hideDotFilter === 'files' && !entry.isDirectory) return false
-    if (hideDotFilter === 'dirs' && entry.isDirectory) return false
-    return true
-  })
 }
 
 function prefilterEntries(

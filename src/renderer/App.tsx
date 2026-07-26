@@ -111,6 +111,11 @@ export default function App() {
       syncProgressTaskRef.current = task
       setSyncTask(task)
 
+      // 同步任务被清空时后端会推送 null，此时只需清空本地状态
+      if (!task) {
+        return
+      }
+
       const compareState = useCompareStore.getState()
       if (!shouldShowSyncTaskInCompare(task, compareState.leftSource, compareState.rightSource)) {
         return

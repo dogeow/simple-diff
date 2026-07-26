@@ -37,10 +37,6 @@ function createPendingCompareEvents(): PendingCompareEvents {
   }
 }
 
-function isCurrentActiveCompare(compareId: string): boolean {
-  return useCompareStore.getState().activeCompareId === compareId
-}
-
 function shouldMirrorToCompareTabSnapshot(compareId: string): boolean {
   const compareState = useCompareStore.getState()
   if (compareState.activeCompareId !== compareId) {

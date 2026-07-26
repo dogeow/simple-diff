@@ -43,6 +43,10 @@ impl ActiveCompare {
     *self.updated_at.lock() = now_ms();
   }
 
+  pub fn matches_sources(&self, left: &SourceConfig, right: &SourceConfig) -> bool {
+    sources_same(&self.left_source, left) && sources_same(&self.right_source, right)
+  }
+
   pub fn register_entries(&self, entries: &[CompareEntry]) {
     let mut l2r = self.left_to_right.lock();
     let mut r2l = self.right_to_left.lock();
@@ -245,5 +249,83 @@ impl AppState {
       }
       map.remove(&id);
     }
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use crate::types::SyncDirection;
+
+  fn local(path: &str) -> SourceConfig {
+    SourceConfig::Local { path: path.into() }
+  }
+
+  fn file_entry(path: &str, state: CompareState) -> CompareEntry {
+    CompareEntry {
+      relative_path: path.into(),
+      name: path.split('/').next_back().unwrap_or(path).into(),
+      is_directory: false,
+      state,
+      left: None,
+      right: None,
+      reasons: Vec::new(),
+    }
+  }
+
+  fn sync_request(compare_id: &str, entries: Vec<CompareEntry>) -> StartSyncRequest {
+    StartSyncRequest {
+      compare_id: compare_id.into(),
+      left_source: local("/l"),
+      right_source: local("/r"),
+      direction: SyncDirection::LeftToRight,
+      entries,
+    }
+  }
+
+  fn begin_test_compare(state: &AppState, compare_id: &str) -> Arc<ActiveCompare> {
+    state.begin_compare(
+      compare_id.into(),
+      local("/l"),
+      local("/r"),
+      Arc::new(AtomicBool::new(false)),
+    )
+  }
+
+  #[test]
+  fn partial_register_trusts_newly_different_entries() {
+    let state = AppState::new();
+    let session = begin_test_compare(&state, "c1");
+    // 全量对比时 a.txt 相同，不进入受信任映射
+    session.register_entries(&[file_entry("a.txt", CompareState::Equal)]);
+    let request = sync_request("c1", vec![file_entry("a.txt", CompareState::Different)]);
+    assert!(state.assert_sync_entries(&request).is_err());
+
+    // watch 触发的局部重比对发现 a.txt 变为不同后应可同步
+    session.register_entries(&[file_entry("a.txt", CompareState::Different)]);
+    let sanitized = state.assert_sync_entries(&request).expect("应通过信任校验");
+    assert_eq!(sanitized.len(), 1);
+    assert_eq!(sanitized[0].relative_path, "a.txt");
+  }
+
+  #[test]
+  fn partial_register_revokes_now_equal_entries() {
+    let state = AppState::new();
+    let session = begin_test_compare(&state, "c1");
+    session.register_entries(&[file_entry("a.txt", CompareState::Different)]);
+    let request = sync_request("c1", vec![file_entry("a.txt", CompareState::Different)]);
+    assert!(state.assert_sync_entries(&request).is_ok());
+
+    // 局部重比对发现文件已恢复一致后应撤销信任
+    session.register_entries(&[file_entry("a.txt", CompareState::Equal)]);
+    assert!(state.assert_sync_entries(&request).is_err());
+  }
+
+  #[test]
+  fn matches_sources_requires_same_pair() {
+    let session = ActiveCompare::new(local("/l"), local("/r"), Arc::new(AtomicBool::new(false)));
+    assert!(session.matches_sources(&local("/l"), &local("/r")));
+    assert!(!session.matches_sources(&local("/other"), &local("/r")));
+    assert!(!session.matches_sources(&local("/l"), &local("/other")));
   }
 }

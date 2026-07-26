@@ -274,6 +274,7 @@ describe('compare-store', () => {
       duration: 123,
       leftSource,
       rightSource,
+      dirtyPaths: [],
       loadingDirs: [],
       filter: 'all',
       expandedDirs: ['bootstrap'],
@@ -372,8 +373,9 @@ describe('compare-store', () => {
   })
 
   it('ignores stale lazy-load results after a new compare starts', async () => {
-    let resolveLeft: ((value: IpcResult<readonly FileEntry[]>) => void) | null = null
-    let resolveRight: ((value: IpcResult<readonly FileEntry[]>) => void) | null = null
+    // 初始化为 no-op，避免 TS 控制流把闭包内赋值后的变量收窄成 null
+    let resolveLeft: (value: IpcResult<readonly FileEntry[]>) => void = () => undefined
+    let resolveRight: (value: IpcResult<readonly FileEntry[]>) => void = () => undefined
     type ListFiles = (
       source: SourceConfig,
       dirPath: string,
@@ -430,11 +432,11 @@ describe('compare-store', () => {
     expect(useCompareStore.getState().loadingDirs.has('src')).toBe(false)
     expect(useCompareStore.getState().entries).toHaveLength(0)
 
-    resolveLeft?.({
+    resolveLeft({
       success: true,
       data: [createFileEntry('stale-left.txt', { size: 10, mtime: 1000 })],
     })
-    resolveRight?.({
+    resolveRight({
       success: true,
       data: [createFileEntry('stale-left.txt', { size: 10, mtime: 1000 })],
     })
@@ -556,6 +558,49 @@ describe('compare-store', () => {
 
     const nestedDir = useCompareStore.getState().entries.find((entry) => entry.relativePath === 'src/nested')
     expect(nestedDir?.state).toBe('pending')
+  })
+
+  it('surfaces directory listing failures instead of fabricating empty directories', async () => {
+    const listFiles = vi.fn<(
+      source: SourceConfig,
+      dirPath: string,
+    ) => Promise<IpcResult<readonly FileEntry[]>>>()
+
+    listFiles.mockImplementation(async (source, dirPath) => {
+      if (source.type === 'local' && dirPath === '/left/src') {
+        return { success: false, error: '读取目录失败: 权限不足' }
+      }
+      return {
+        success: true,
+        data: [createFileEntry('kept.txt', { size: 10, mtime: 1000 })],
+      }
+    })
+
+    vi.stubGlobal('window', {
+      api: { listFiles },
+    })
+
+    useCompareStore.setState({
+      leftSource,
+      rightSource,
+      entries: [
+        createCompareEntry('src', {
+          isDirectory: true,
+          state: 'equal',
+          left: createFileEntry('src', { path: 'src', isDirectory: true }),
+          right: createFileEntry('src', { path: 'src', isDirectory: true }),
+        }),
+        createCompareEntry('src/kept.txt', { state: 'equal' }),
+      ],
+    })
+
+    await useCompareStore.getState().refreshDir('src')
+
+    const currentState = useCompareStore.getState()
+    expect(currentState.error).toBe('读取目录失败: 权限不足')
+    expect(currentState.loadingDirs.has('src')).toBe(false)
+    // 列取失败时不得把子项替换成“空目录”结果
+    expect(currentState.entries.map((entry) => entry.relativePath)).toEqual(['src', 'src/kept.txt'])
   })
 
   it('marks dirty paths and clears them after applying partial compare results', () => {

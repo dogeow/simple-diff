@@ -25,6 +25,7 @@ const LEVEL_DOT: Record<LogLevel, string> = {
 const SCOPE_STYLE: Record<LogScope, string> = {
   app: 'bg-neutral-800 text-neutral-300 ring-neutral-700',
   compare: 'bg-blue-500/15 text-blue-300 ring-blue-500/30',
+  'compare-watch': 'bg-cyan-500/15 text-cyan-300 ring-cyan-500/30',
   sync: 'bg-emerald-500/15 text-emerald-300 ring-emerald-500/30',
   ssh: 'bg-purple-500/15 text-purple-300 ring-purple-500/30',
 }

@@ -74,7 +74,7 @@ export default function CommandPalette({ open, onClose }: CommandPaletteProps) {
       if (page === 'home') {
         if (currentPage === 'compare') {
           leaveComparePage('home')
-        } else if (currentPage !== 'home' && currentPage !== 'compare') {
+        } else if (currentPage !== 'home') {
           if (!openCompareTab(undefined, { expandLogs: true })) {
             useAppStore.getState().setPage('home')
           }
@@ -90,7 +90,7 @@ export default function CommandPalette({ open, onClose }: CommandPaletteProps) {
       useAppStore.getState().setPage(page)
     }
 
-    const navItems: CommandItem[] = [
+    const navItemCandidates: readonly (CommandItem | null)[] = [
       {
         id: 'nav-home',
         title: PAGE_LABELS.home,
@@ -139,7 +139,8 @@ export default function CommandPalette({ open, onClose }: CommandPaletteProps) {
         keywords: 'settings 设置 配置',
         onSelect: () => navigate('settings'),
       },
-    ].filter((item): item is CommandItem => item !== null)
+    ]
+    const navItems = navItemCandidates.filter((item): item is CommandItem => item !== null)
 
     const newCompareItem: CommandItem = {
       id: 'action-new-compare',

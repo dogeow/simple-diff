@@ -3440,9 +3440,7 @@ dependencies = [
  "tauri-plugin-dialog",
  "tauri-plugin-log",
  "tauri-plugin-opener",
- "thiserror 2.0.19",
  "uuid",
- "walkdir",
 ]
 
 [[package]]

@@ -50,5 +50,5 @@ export const useSettingsStore = create<SettingsStore>()(persist((set) => ({
 }), {
   name: 'simple-diff-settings-store',
   storage: settingsStorage,
-  partialize: createPersistedSettingsState,
+  partialize: (state: SettingsStore) => createPersistedSettingsState(state),
 }))

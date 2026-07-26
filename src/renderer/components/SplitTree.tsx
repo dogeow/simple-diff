@@ -135,7 +135,6 @@ interface SideTableProps {
   readonly visibleNodes: VisibleTreeNodes
   readonly entries: readonly CompareEntry[]
   readonly side: Side
-  readonly sourcePath: string
   readonly isLocal: boolean
   readonly nodeInteractions: CompareNodeInteractions
   readonly startIndex: number
@@ -152,7 +151,6 @@ function SideTable({
   visibleNodes,
   entries,
   side,
-  sourcePath,
   isLocal,
   nodeInteractions,
   startIndex,
@@ -670,7 +668,6 @@ export default function SplitTree({ entries, filter, onDoubleClickFile, emptySta
             visibleNodes={visibleNodes}
             entries={entries}
             side="left"
-            sourcePath={leftSource?.path ?? ''}
             isLocal={leftSource?.type === 'local'}
             nodeInteractions={nodeInteractions}
             startIndex={startIndex}
@@ -689,7 +686,6 @@ export default function SplitTree({ entries, filter, onDoubleClickFile, emptySta
             visibleNodes={visibleNodes}
             entries={entries}
             side="right"
-            sourcePath={rightSource?.path ?? ''}
             isLocal={rightSource?.type === 'local'}
             nodeInteractions={nodeInteractions}
             startIndex={startIndex}
