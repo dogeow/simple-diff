@@ -27,6 +27,7 @@
   },
   "bundle": {
     "active": true,
+    "createUpdaterArtifacts": true,
     "targets": "all",
     "icon": [
       "icons/32x32.png",
@@ -36,5 +37,12 @@
       "icons/icon.ico"
     ]
   },
-  "plugins": {}
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEM0OEFCMTk1MUMzNUE5NTAKUldSUXFUVWNsYkdLeENqQ2pqeXR6a0Jid2tieWczL3Q4YTNkNGhxNWdIKzlSbGhvbTY1a2RycXgK",
+      "endpoints": [
+        "https://github.com/react-laravel/simple-diff/releases/latest/download/latest.json"
+      ]
+    }
+  }
 }

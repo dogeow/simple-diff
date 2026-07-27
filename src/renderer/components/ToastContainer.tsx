@@ -62,6 +62,15 @@ export default function ToastContainer() {
               {toast.description && (
                 <div className="mt-0.5 text-xs text-fg-muted">{toast.description}</div>
               )}
+              {toast.action && (
+                <button
+                  type="button"
+                  className="mt-1 text-xs font-medium text-accent-text hover:underline"
+                  onClick={toast.action.onClick}
+                >
+                  {toast.action.label}
+                </button>
+              )}
             </div>
             <button
               onClick={() => dismiss(toast.id)}

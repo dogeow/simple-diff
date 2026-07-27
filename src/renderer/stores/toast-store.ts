@@ -7,12 +7,23 @@ export interface ToastEntry {
   readonly tone: ToastTone
   readonly message: string
   readonly description?: string
+  readonly action?: { readonly label: string; readonly onClick: () => void }
   readonly createdAt: number
+}
+
+type ToastInput = {
+  id?: string
+  tone?: ToastTone
+  message: string
+  description?: string
+  action?: { label: string; onClick: () => void }
+  duration?: number
 }
 
 interface ToastStore {
   readonly toasts: readonly ToastEntry[]
-  push: (input: { tone?: ToastTone; message: string; description?: string; duration?: number }) => string
+  push: (input: ToastInput) => string
+  update: (id: string, input: Partial<Omit<ToastEntry, 'id' | 'createdAt'>>) => void
   dismiss: (id: string) => void
   clear: () => void
 }
@@ -29,16 +40,18 @@ function createToastId(): string {
 export const useToastStore = create<ToastStore>((set, get) => ({
   toasts: [],
 
-  push: ({ tone = 'info', message, description, duration = DEFAULT_DURATION_MS }) => {
-    const id = createToastId()
+  push: ({ id = createToastId(), tone = 'info', message, description, action, duration = DEFAULT_DURATION_MS }) => {
     const entry: ToastEntry = {
       id,
       tone,
       message,
       description,
+      action,
       createdAt: Date.now(),
     }
-    set((state) => ({ toasts: [...state.toasts, entry] }))
+    set((state) => ({
+      toasts: [...state.toasts.filter((toast) => toast.id !== id), entry],
+    }))
 
     if (duration > 0 && typeof window !== 'undefined') {
       window.setTimeout(() => {
@@ -49,6 +62,12 @@ export const useToastStore = create<ToastStore>((set, get) => ({
     }
 
     return id
+  },
+
+  update: (id, input) => {
+    set((state) => ({
+      toasts: state.toasts.map((toast) => toast.id === id ? { ...toast, ...input } : toast),
+    }))
   },
 
   dismiss: (id) => {

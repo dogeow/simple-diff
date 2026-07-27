@@ -13,6 +13,7 @@ import type { SyncTaskSnapshot } from '../../shared/types'
 import { addRendererLog } from './stores/log-store'
 import { persistActiveCompareTab } from './utils/compare-session-navigation'
 import { applyCompareDefaults } from './utils/compare-defaults'
+import { checkForUpdate } from './lib/updater'
 
 const MAX_LIVE_LOCAL_WATCH_ENTRIES = 50_000
 
@@ -35,6 +36,10 @@ export default function App() {
   const restoredCompareTabsRef = useRef(false)
   const syncProgressTaskRef = useRef<SyncTaskSnapshot | null>(null)
   const { runCompare } = useCompareActions()
+
+  useEffect(() => {
+    void checkForUpdate()
+  }, [])
   const activeCompareTab = useMemo(
     () => activeCompareTabId ? compareTabs.find((tab) => tab.id === activeCompareTabId) ?? null : null,
     [activeCompareTabId, compareTabs],
