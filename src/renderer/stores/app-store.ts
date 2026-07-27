@@ -3,7 +3,21 @@ import { createJSONStorage, persist } from 'zustand/middleware'
 import type { SourceConfig, TextDiffResult } from '../../../shared/types'
 import { sanitizePersistedCompareSessionSnapshot, type CompareSessionSnapshot } from './compare-store'
 
-export type Page = 'home' | 'compare' | 'text' | 'ssh' | 'history' | 'sync' | 'settings'
+/**
+ * 设计蓝图 §2.2：顶层目的地从 7 个收敛到两种模式。SSH管理 / 历史 / 同步任务 / 设置
+ * 都变成叠加层（`stores/ui-store.ts` 的 `overlay`），不再是页面。
+ *
+ * chunk 5 起 `'home'` 也不再是页面：“尚无结果”是对比工作区自己的 setup 态，
+ * 由 `hasCompareSessionContent()` 推导，没有新增持久化字段。
+ */
+export type Page = 'compare' | 'text'
+
+/** 顶栏模式切换与 `Page` 一一对应。 */
+export type AppMode = Page
+
+export function pageToMode(page: Page): AppMode {
+  return page
+}
 
 export interface DiffTab {
   readonly id: string
@@ -56,14 +70,40 @@ interface AppStore {
 }
 
 interface PersistedAppState {
+  readonly page: Page
   readonly compareTabs: readonly CompareTab[]
   readonly activeCompareTabId: string | null
 }
 
-function sanitizePersistedDiffTabs(diffTabs: readonly DiffTab[]): readonly DiffTab[] {
+const VALID_PAGES: readonly Page[] = ['compare', 'text']
+
+/**
+ * v1 从未持久化 `page`，且旧版联合类型还包含 home/ssh/history/sync/settings。
+ * 任何无法识别的值都落回 `'compare'`，避免返回用户停在一个已不存在的页面上。
+ */
+export function migratePersistedAppState(persisted: unknown): PersistedAppState {
+  const state = (persisted ?? {}) as Partial<PersistedAppState>
+  const page = VALID_PAGES.includes(state.page as Page) ? (state.page as Page) : 'compare'
+
+  return {
+    page,
+    compareTabs: state.compareTabs ?? [],
+    activeCompareTabId: state.activeCompareTabId ?? null,
+  }
+}
+
+/**
+ * F2：只有“当前对比标签的当前 diff 标签”保留正文，其余仍然清空、激活时再按需读盘
+ * （`utils/diff-tab-loader.ts`）。全部保留会把整份文件塞进 localStorage；全部清空
+ * 则让重启后打开的那个 diff 变成必须重新读盘的空壳。
+ */
+function sanitizePersistedDiffTabs(
+  diffTabs: readonly DiffTab[],
+  keepContentForId: string | null,
+): readonly DiffTab[] {
   return diffTabs
     .filter((tab) => !tab.loading)
-    .map((tab) => ({
+    .map((tab) => (tab.id === keepContentForId ? tab : {
       ...tab,
       leftContent: '',
       rightContent: '',
@@ -77,9 +117,13 @@ function createRestorableCompareTab(
   tab: CompareTab,
   liveDiffTabs?: readonly DiffTab[],
   liveActiveDiffTabId?: string | null,
+  keepActiveDiffContent = false,
 ): CompareTab {
-  const diffTabs = sanitizePersistedDiffTabs(liveDiffTabs ?? tab.diffTabs)
   const requestedActiveDiffTabId = liveActiveDiffTabId ?? tab.activeDiffTabId
+  const diffTabs = sanitizePersistedDiffTabs(
+    liveDiffTabs ?? tab.diffTabs,
+    keepActiveDiffContent ? requestedActiveDiffTabId : null,
+  )
   const activeDiffTabId = diffTabs.some((diffTab) => diffTab.id === requestedActiveDiffTabId)
     ? requestedActiveDiffTabId
     : (diffTabs.at(-1)?.id ?? null)
@@ -99,6 +143,7 @@ export function createPersistedAppState(state: Pick<AppStore, 'page' | 'compareT
       tab,
       isActiveCompareTab ? state.diffTabs : undefined,
       isActiveCompareTab ? state.activeDiffTabId : undefined,
+      isActiveCompareTab,
     )
 
     return {
@@ -108,6 +153,7 @@ export function createPersistedAppState(state: Pick<AppStore, 'page' | 'compareT
   })
 
   return {
+    page: state.page,
     compareTabs: persistedCompareTabs,
     activeCompareTabId: state.activeCompareTabId,
   }
@@ -127,8 +173,8 @@ const appStorage = createJSONStorage<PersistedAppState>(() => {
   return noopStorage
 })
 
-export const useAppStore = create<AppStore>()(persist((set, get) => ({
-  page: 'home',
+export const useAppStore = create<AppStore>()(persist<AppStore, [], [], PersistedAppState>((set, get) => ({
+  page: 'compare',
   diffTabs: [],
   activeDiffTabId: null,
   compareTabs: [],
@@ -241,5 +287,7 @@ export const useAppStore = create<AppStore>()(persist((set, get) => ({
 }), {
   name: 'simple-diff-app-store',
   storage: appStorage,
+  version: 2,
+  migrate: (persisted) => migratePersistedAppState(persisted),
   partialize: (state: AppStore) => createPersistedAppState(state),
 }))

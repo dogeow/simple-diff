@@ -1,43 +1,48 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
-import type { SSHConfig } from '../../../shared/types'
+import { CirclePlus, History } from 'lucide-react'
+import type { CompareHistoryEntry, SSHConfig } from '../../../shared/types'
 import type { CompareTab } from '../stores/app-store'
 import { useSSHStore } from '../stores/ssh-store'
-import { formatComparePairLabel } from '../utils/source-label'
-import { CloseIcon, PlusIcon } from './Icons'
-import FileContextMenu, { type ContextMenuAction } from './FileContextMenu'
+import { useUIStore } from '../stores/ui-store'
+import { useOpenHistoryPair } from '../hooks/useOpenHistoryPair'
+import { getRuntimeInfo } from '../runtime/runtime-info'
+import { formatComparePairLabel, formatCompareTabTitleFromSources } from '../utils/source-label'
+import { startNewCompareSession } from '../utils/compare-session-navigation'
+import { Button, SplitButton, TabStrip, type DocumentTab, type MenuItem } from './ui'
+import { cn } from '../lib/utils'
 
-const ACTIVE_TAB_BUTTON = 'bg-neutral-800 text-neutral-100 ring-1 ring-inset ring-neutral-700'
-const ACTIVE_TAB_CLOSE = 'bg-neutral-800 text-neutral-500 ring-1 ring-inset ring-neutral-700 hover:bg-neutral-750 hover:text-neutral-200'
+const MAX_RECENT_PAIRS = 8
 
 interface CompareSessionTabsProps {
   readonly compareTabs: readonly CompareTab[]
   readonly activeCompareTabId: string | null
-  readonly newCompareActive?: boolean
-  readonly onSelectNewCompare: () => void
   readonly onSelectCompareTab: (compareTabId: string) => void
-  readonly onCloseCompareTab?: (compareTabId: string) => void
-}
-
-interface MenuState {
-  readonly x: number
-  readonly y: number
-  readonly tabId: string
+  readonly onCloseCompareTab: (compareTabId: string) => void
 }
 
 function formatCompareTabTooltip(tab: CompareTab, configs: readonly SSHConfig[]): string {
   return formatComparePairLabel(tab.snapshot.leftSource, tab.snapshot.rightSource, configs) ?? tab.title
 }
 
+/**
+ * chunk 5 第 5 条：对比会话标签统一走 `TabStrip`，关闭按钮与右键菜单不再依赖调用方
+ * 传不传回调（§1.2.4 的“同一个组件在 Home 上悄悄少了两个功能”）。
+ *
+ * `+ 新建对比 ▾` 是 `SplitButton`，下拉即 F8 的最近对比列表——选中直接开一个
+ * **已经在跑**的新标签，不再只是预填表单。
+ */
 export default function CompareSessionTabs({
   compareTabs,
   activeCompareTabId,
-  newCompareActive = false,
-  onSelectNewCompare,
   onSelectCompareTab,
   onCloseCompareTab,
 }: CompareSessionTabsProps) {
-  const [menu, setMenu] = useState<MenuState | null>(null)
+  const runtime = getRuntimeInfo()
+  const [recentPairs, setRecentPairs] = useState<readonly CompareHistoryEntry[]>([])
+  const openOverlay = useUIStore((s) => s.openOverlay)
+  // F8 的唯一实现，历史叠加层的「重新对比」用的是同一个 hook。
+  const openHistoryPair = useOpenHistoryPair()
   const { configs, loadConfigs } = useSSHStore(useShallow((state) => ({
     configs: state.configs,
     loadConfigs: state.loadConfigs,
@@ -52,105 +57,96 @@ export default function CompareSessionTabs({
     }
   }, [compareTabs, configs.length, loadConfigs])
 
-  const buildActions = (tabId: string): readonly ContextMenuAction[] => {
-    if (!onCloseCompareTab) return []
-    const target = compareTabs.find((t) => t.id === tabId)
-    if (!target) return []
+  useEffect(() => {
+    if (!runtime.supportsHistory || typeof window.api.listHistory !== 'function') return
 
-    const others = compareTabs.filter((t) => t.id !== tabId)
-    const actions: ContextMenuAction[] = [
-      { label: '关闭', onClick: () => onCloseCompareTab(tabId) },
+    void (async () => {
+      const response = await window.api.listHistory()
+      if (!response.success || !response.data) return
+      setRecentPairs(response.data.slice(0, MAX_RECENT_PAIRS))
+    })()
+  }, [compareTabs.length, runtime.supportsHistory])
+
+  const buildTabMenu = useCallback((tabId: string): MenuItem[] => {
+    const others = compareTabs.filter((tab) => tab.id !== tabId)
+    const items: MenuItem[] = [
+      { id: 'close', label: '关闭', onSelect: () => onCloseCompareTab(tabId) },
     ]
+
     if (others.length > 0) {
-      actions.push({
+      items.push({
+        id: 'close-others',
         label: '关闭其他',
-        onClick: () => {
-          for (const other of others) {
-            onCloseCompareTab(other.id)
-          }
-        },
+        onSelect: () => others.forEach((tab) => onCloseCompareTab(tab.id)),
       })
-      actions.push({
+      items.push({
+        id: 'close-all',
         label: '关闭全部',
         danger: true,
-        onClick: () => {
-          for (const tab of compareTabs) {
-            onCloseCompareTab(tab.id)
-          }
-        },
+        onSelect: () => compareTabs.forEach((tab) => onCloseCompareTab(tab.id)),
       })
     }
-    return actions
-  }
+
+    return items
+  }, [compareTabs, onCloseCompareTab])
+
+  const newCompareMenu: MenuItem[] = [
+    ...(recentPairs.length > 0
+      ? [
+          { kind: 'label' as const, id: 'recent-label', label: '最近对比' },
+          ...recentPairs.map((entry): MenuItem => ({
+            id: `recent-${entry.id}`,
+            label: formatCompareTabTitleFromSources(entry.leftSource, entry.rightSource, configs),
+            onSelect: () => openHistoryPair(entry),
+          })),
+          { kind: 'separator' as const, id: 'recent-separator' },
+        ]
+      : []),
+    { id: 'all-history', label: '全部历史…', icon: History, onSelect: () => openOverlay('history') },
+  ]
+
+  const tabs: DocumentTab[] = compareTabs.map((tab) => ({
+    id: tab.id,
+    title: tab.title,
+    tooltip: formatCompareTabTooltip(tab, configs),
+    status: tab.snapshot.scanning || tab.snapshot.comparing ? 'running' : tab.snapshot.error ? 'error' : null,
+  }))
+
+  // setup 态没有活动标签；此时高亮“新建对比”本身，用户始终知道自己在哪。
+  const setupActive = activeCompareTabId === null
+  const newCompareClassName = cn(setupActive && 'bg-selected text-fg')
 
   return (
-    <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden">
-      <button
-        onClick={onSelectNewCompare}
-        className={`inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md px-3 text-xs font-medium transition-colors ${
-          newCompareActive
-            ? ACTIVE_TAB_BUTTON
-            : 'text-neutral-400 hover:bg-neutral-800 hover:text-neutral-200'
-        }`}
-      >
-        <PlusIcon width={12} height={12} />
-        新建对比
-      </button>
-
-      <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
-        {compareTabs.map((tab) => {
-          const isActive = !newCompareActive && activeCompareTabId === tab.id
-          const tooltip = formatCompareTabTooltip(tab, configs)
-
-          return (
-            <div key={tab.id} className="group flex h-8 shrink-0 items-stretch">
-              <button
-                onClick={() => onSelectCompareTab(tab.id)}
-                onContextMenu={(event) => {
-                  if (!onCloseCompareTab) return
-                  event.preventDefault()
-                  setMenu({ x: event.clientX, y: event.clientY, tabId: tab.id })
-                }}
-                title={tooltip}
-                className={`relative inline-flex h-8 max-w-[22rem] items-center truncate px-3 text-xs font-medium transition-colors sm:max-w-[28rem] ${
-                  isActive
-                    ? ACTIVE_TAB_BUTTON
-                    : 'text-neutral-500 hover:bg-neutral-800/70 hover:text-neutral-200'
-                } ${onCloseCompareTab ? 'rounded-l-md' : 'rounded-md'}`}
-              >
-                {tab.title}
-              </button>
-
-              {onCloseCompareTab && (
-                <button
-                  onClick={(event) => {
-                    event.stopPropagation()
-                    onCloseCompareTab(tab.id)
-                  }}
-                  className={`inline-flex h-8 w-8 items-center justify-center rounded-r-md text-xs transition-colors ${
-                    isActive
-                      ? ACTIVE_TAB_CLOSE
-                      : 'text-neutral-600 hover:bg-neutral-800/70 hover:text-neutral-200'
-                  }`}
-                  aria-label={`关闭 ${tooltip}`}
-                  title={`关闭 ${tooltip}`}
-                >
-                  <CloseIcon width={11} height={11} />
-                </button>
-              )}
-            </div>
-          )
-        })}
-      </div>
-
-      {menu && (
-        <FileContextMenu
-          x={menu.x}
-          y={menu.y}
-          actions={buildActions(menu.tabId)}
-          onClose={() => setMenu(null)}
-        />
+    <TabStrip
+      aria-label="对比标签"
+      tabs={tabs}
+      activeId={activeCompareTabId}
+      onSelect={onSelectCompareTab}
+      onClose={onCloseCompareTab}
+      onContextMenu={buildTabMenu}
+      leading={runtime.supportsHistory ? (
+        <SplitButton
+          size="sm"
+          variant="ghost"
+          icon={CirclePlus}
+          items={newCompareMenu}
+          menuLabel="最近对比"
+          className={newCompareClassName}
+          onClick={startNewCompareSession}
+        >
+          新建对比
+        </SplitButton>
+      ) : (
+        <Button
+          size="sm"
+          variant="ghost"
+          icon={CirclePlus}
+          className={newCompareClassName}
+          onClick={startNewCompareSession}
+        >
+          新建对比
+        </Button>
       )}
-    </div>
+    />
   )
 }

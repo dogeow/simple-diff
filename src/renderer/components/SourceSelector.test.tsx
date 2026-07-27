@@ -90,7 +90,8 @@ describe('SourceSelector sftp browsing', () => {
 
     await user.click(screen.getByRole('button', { name: '浏览...' }))
 
-    expect(await screen.findByRole('dialog', { name: '左侧远程目录浏览' })).toBeTruthy()
+    // chunk 8：手写模态框换成共享 `Dialog`，可访问名字来自它的标题。
+    expect(await screen.findByRole('dialog', { name: '浏览远程目录' })).toBeTruthy()
 
     await waitFor(() => {
       expect(window.api.browseSSH).toHaveBeenCalledWith('dogeow', '/')

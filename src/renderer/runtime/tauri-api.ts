@@ -47,6 +47,9 @@ function subscribe<T>(
     } else {
       unlisten = fn
     }
+  }).catch((error: unknown) => {
+    // 事件注册失败不应冒泡到 window.unhandledrejection
+    console.error(`[tauri-api] 订阅事件失败 event=${event}`, error)
   })
   return () => {
     disposed = true
@@ -71,15 +74,21 @@ function ensureNativeDropListener(): void {
   if ((window as unknown as { __simpleDiffDropBound?: boolean }).__simpleDiffDropBound) return
   ;(window as unknown as { __simpleDiffDropBound?: boolean }).__simpleDiffDropBound = true
 
-  void getCurrentWebview()
-    .onDragDropEvent((event) => {
-      if (event.payload.type === 'drop') {
-        rememberNativeDropPaths(event.payload.paths)
-      }
-    })
-    .catch(() => {
-      // Not running inside Tauri webview (e.g. vitest)
-    })
+  // getCurrentWebview() 会同步解引用 Tauri 全局并抛错，因此 try 必须包住整个调用，
+  // 只在末尾挂 .catch 拦不到它
+  try {
+    void getCurrentWebview()
+      .onDragDropEvent((event) => {
+        if (event.payload.type === 'drop') {
+          rememberNativeDropPaths(event.payload.paths)
+        }
+      })
+      .catch(() => {
+        // Not running inside Tauri webview (e.g. vitest)
+      })
+  } catch {
+    // Not running inside Tauri webview (e.g. vitest / 浏览器预览)
+  }
 }
 
 ensureNativeDropListener()

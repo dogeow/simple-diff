@@ -1,38 +1,39 @@
 import { useToastStore, type ToastTone } from '../stores/toast-store'
-import { CheckIcon, CloseIcon } from './Icons'
+import { CircleCheck, CircleX, Info, TriangleAlert, X, type LucideIcon } from 'lucide-react'
 
 const TONE_STYLES: Record<ToastTone, { bg: string; ring: string; icon: string; text: string }> = {
   info: {
-    bg: 'bg-neutral-850',
-    ring: 'ring-neutral-700',
-    icon: 'text-blue-300',
-    text: 'text-neutral-100',
+    bg: 'bg-raised',
+    ring: 'ring-border-strong',
+    icon: 'text-accent-text',
+    text: 'text-fg',
   },
   success: {
-    bg: 'bg-emerald-950/90',
-    ring: 'ring-emerald-500/40',
-    icon: 'text-emerald-300',
-    text: 'text-emerald-100',
+    bg: 'bg-raised',
+    ring: 'ring-success/30',
+    icon: 'text-success-text',
+    text: 'text-success-text',
   },
   warning: {
-    bg: 'bg-amber-950/90',
-    ring: 'ring-amber-500/40',
-    icon: 'text-amber-300',
-    text: 'text-amber-100',
+    bg: 'bg-raised',
+    ring: 'ring-warning/30',
+    icon: 'text-warning-text',
+    text: 'text-warning-text',
   },
   error: {
-    bg: 'bg-rose-950/90',
-    ring: 'ring-rose-500/40',
-    icon: 'text-rose-300',
-    text: 'text-rose-100',
+    bg: 'bg-raised',
+    ring: 'ring-danger/30',
+    icon: 'text-danger-text',
+    text: 'text-danger-text',
   },
 }
 
-const TONE_GLYPH: Record<ToastTone, string> = {
-  info: 'i',
-  success: '✓',
-  warning: '!',
-  error: '×',
+/** DESIGN-SYSTEM §6 — reserved status glyphs; colour never carries the meaning alone. */
+const TONE_GLYPH: Record<ToastTone, LucideIcon> = {
+  info: Info,
+  success: CircleCheck,
+  warning: TriangleAlert,
+  error: CircleX,
 }
 
 export default function ToastContainer() {
@@ -45,33 +46,29 @@ export default function ToastContainer() {
     <div
       role="status"
       aria-live="polite"
-      className="pointer-events-none fixed top-14 right-4 z-[150] flex w-80 flex-col gap-2"
+      className="pointer-events-none fixed top-14 right-4 z-toast flex w-80 flex-col gap-2"
     >
       {toasts.map((toast) => {
         const style = TONE_STYLES[toast.tone]
+        const Glyph = TONE_GLYPH[toast.tone]
         return (
           <div
             key={toast.id}
-            className={`pointer-events-auto flex items-start gap-3 rounded-lg ${style.bg} px-3 py-2.5 shadow-2xl ring-1 ${style.ring}`}
+            className={`pointer-events-auto flex items-start gap-3 rounded-lg ${style.bg} px-3 py-2.5 shadow-overlay ring-1 ${style.ring}`}
           >
-            <span
-              className={`mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-xs font-bold ring-1 ring-inset ${style.icon} ${style.ring}`}
-              aria-hidden="true"
-            >
-              {toast.tone === 'success' ? <CheckIcon width={11} height={11} /> : TONE_GLYPH[toast.tone]}
-            </span>
+            <Glyph aria-hidden size={14} strokeWidth={1.75} className={`mt-0.5 shrink-0 ${style.icon}`} />
             <div className="min-w-0 flex-1">
               <div className={`text-sm font-medium ${style.text}`}>{toast.message}</div>
               {toast.description && (
-                <div className="mt-0.5 text-xs text-neutral-400">{toast.description}</div>
+                <div className="mt-0.5 text-xs text-fg-muted">{toast.description}</div>
               )}
             </div>
             <button
               onClick={() => dismiss(toast.id)}
               aria-label="关闭通知"
-              className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded text-neutral-500 transition-colors hover:bg-neutral-700/50 hover:text-neutral-200"
+              className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded text-fg-muted transition-colors hover:bg-hover hover:text-fg"
             >
-              <CloseIcon width={11} height={11} />
+              <X aria-hidden size={12} strokeWidth={1.75} />
             </button>
           </div>
         )

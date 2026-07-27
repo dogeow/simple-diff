@@ -1,8 +1,17 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { createPersistedSettingsState, useSettingsStore } from './settings-store'
+import {
+  DEFAULT_COMPARE_DEFAULTS,
+  createPersistedSettingsState,
+  useSettingsStore,
+} from './settings-store'
 
 function resetSettingsStore(): void {
-  useSettingsStore.setState({ globalPathFilters: [], theme: 'system' })
+  useSettingsStore.setState({
+    globalPathFilters: [],
+    theme: 'system',
+    compareDefaults: DEFAULT_COMPARE_DEFAULTS,
+    colorblindDiff: false,
+  })
 }
 
 describe('settings-store', () => {
@@ -20,9 +29,13 @@ describe('settings-store', () => {
     expect(createPersistedSettingsState({
       globalPathFilters: [' dist ', 'DIST', 'path:/docs'],
       theme: 'dark',
+      compareDefaults: DEFAULT_COMPARE_DEFAULTS,
+      colorblindDiff: true,
     })).toEqual({
       globalPathFilters: ['dist', 'path:docs'],
       theme: 'dark',
+      compareDefaults: DEFAULT_COMPARE_DEFAULTS,
+      colorblindDiff: true,
     })
   })
 
@@ -30,5 +43,20 @@ describe('settings-store', () => {
     useSettingsStore.getState().setTheme('light')
 
     expect(useSettingsStore.getState().theme).toBe('light')
+  })
+
+  it('patches compare defaults without dropping the other keys', () => {
+    useSettingsStore.getState().setCompareDefaults({ viewMode: 'merged' })
+
+    expect(useSettingsStore.getState().compareDefaults).toEqual({
+      ...DEFAULT_COMPARE_DEFAULTS,
+      viewMode: 'merged',
+    })
+  })
+
+  it('tracks the colorblind diff preference', () => {
+    useSettingsStore.getState().setColorblindDiff(true)
+
+    expect(useSettingsStore.getState().colorblindDiff).toBe(true)
   })
 })

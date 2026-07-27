@@ -1,65 +1,40 @@
-import type { ComponentType, SVGProps } from 'react'
+import { Monitor, Moon, Sun, type LucideIcon } from 'lucide-react'
+import { RadioGroup } from './ui'
 import { useSettingsStore, type ThemePreference } from '../stores/settings-store'
-import { CheckIcon, MoonIcon, MonitorIcon, SunIcon } from './Icons'
 
-interface ThemeOption {
-  readonly value: ThemePreference
-  readonly label: string
-  readonly description: string
-  readonly Icon: ComponentType<SVGProps<SVGSVGElement>>
-}
-
-const THEME_OPTIONS: readonly ThemeOption[] = [
-  { value: 'system', label: '跟随系统', description: '自动响应系统外观变化', Icon: MonitorIcon },
-  { value: 'light', label: '浅色', description: '适合明亮环境', Icon: SunIcon },
-  { value: 'dark', label: '深色', description: '适合低光环境', Icon: MoonIcon },
+const THEME_OPTIONS: ReadonlyArray<{ value: ThemePreference; label: string; icon: LucideIcon }> = [
+  { value: 'system', label: '跟随系统', icon: Monitor },
+  { value: 'light', label: '浅色', icon: Sun },
+  { value: 'dark', label: '深色', icon: Moon },
 ]
 
+/**
+ * 设计蓝图 §4.6 的「外观」区块：三态偏好收成一行 `RadioGroup variant="segmented"`。
+ *
+ * 原来是三张 96px 高的卡片（每张带图标底板、标题、说明和一个勾），一个 set-and-forget
+ * 的偏好占掉设置页近三分之一。可访问性语义未变：仍是 `role="radiogroup"` + 三个
+ * `role="radio"`。`ThemeToggle.tsx` 删除后，这里和顶栏 `⋯ → 主题 ▸` 是同一个三态偏好
+ * 的两个入口，都能选回 `system`。
+ *
+ * 外框（分区标题）由调用方给——chunk 8 之后唯一的挂载点是 `SettingsDialog` 的
+ * 「外观」分页，再套一层写着「外观」的 `Panel` 只是重复。
+ */
 export default function ThemePreferenceSelector() {
   const theme = useSettingsStore((state) => state.theme)
   const setTheme = useSettingsStore((state) => state.setTheme)
 
   return (
-    <section className="rounded-lg border border-neutral-800 bg-neutral-900/40 p-5">
-      <div className="mb-3">
-        <h3 className="text-sm font-medium text-neutral-100">外观</h3>
-        <p className="mt-1 text-xs text-neutral-500">选择应用主题，修改会立即生效并自动保存。</p>
-      </div>
-
-      <div className="grid grid-cols-3 gap-2" role="radiogroup" aria-label="应用主题">
-        {THEME_OPTIONS.map(({ value, label, description, Icon }) => {
-          const selected = theme === value
-
-          return (
-            <button
-              key={value}
-              role="radio"
-              aria-checked={selected}
-              onClick={() => setTheme(value)}
-              className={`relative flex min-h-24 flex-col items-start gap-2 rounded-lg border p-3 text-left transition-colors ${
-                selected
-                  ? 'border-blue-500 bg-blue-500/10 text-neutral-100 ring-1 ring-blue-500/30'
-                  : 'border-neutral-700 bg-neutral-800/50 text-neutral-300 hover:border-neutral-600 hover:bg-neutral-800/80'
-              }`}
-            >
-              <span className={`flex h-8 w-8 items-center justify-center rounded-md ${
-                selected ? 'bg-blue-500/15 text-blue-300' : 'bg-neutral-700/70 text-neutral-400'
-              }`}>
-                <Icon width={15} height={15} />
-              </span>
-              <span>
-                <span className="block text-sm font-medium">{label}</span>
-                <span className="mt-0.5 block text-[11px] text-neutral-500">{description}</span>
-              </span>
-              {selected && (
-                <span className="absolute right-2.5 top-2.5 text-blue-300" aria-hidden="true">
-                  <CheckIcon width={13} height={13} />
-                </span>
-              )}
-            </button>
-          )
-        })}
-      </div>
-    </section>
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+      <span className="text-xs font-medium text-fg-muted">主题</span>
+      <RadioGroup
+        name="theme-preference"
+        aria-label="应用主题"
+        variant="segmented"
+        value={theme}
+        onValueChange={setTheme}
+        options={THEME_OPTIONS.map(({ value, label, icon }) => ({ value, label, icon }))}
+      />
+      <span className="text-xs text-fg-subtle">修改立即生效并自动保存</span>
+    </div>
   )
 }

@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { X } from 'lucide-react'
 import type { DiffLine } from '../../../shared/types'
 import type { InlineSegment } from '../utils/inline-diff'
+import { matchesShortcut, SHORTCUT_SPECS } from '../hooks/shortcuts'
+import { readFileAsText } from '../utils/read-text-file'
 import { getVisibleRowWindow } from './text-panel-window'
 import {
   getDisplayRowIndexFromTextOffset,
@@ -39,15 +42,6 @@ interface DisplayRow {
   readonly highlighted: boolean
   readonly type: DiffLine['type']
   readonly segments: readonly InlineSegment[] | undefined
-}
-
-async function readFileAsText(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : '')
-    reader.onerror = () => reject(reader.error ?? new Error('读取文件失败'))
-    reader.readAsText(file)
-  })
 }
 
 export default function TextInputPanel({
@@ -139,8 +133,8 @@ export default function TextInputPanel({
     () => displayRows.slice(visibleRowWindow.startIndex, visibleRowWindow.endIndex),
     [displayRows, visibleRowWindow.endIndex, visibleRowWindow.startIndex],
   )
-  const lineHighlightClass = highlightType === 'add' ? 'bg-green-900/30' : 'bg-red-900/30'
-  const emphasisClass = highlightType === 'add' ? 'bg-green-600/50' : 'bg-red-600/50'
+  const lineHighlightClass = highlightType === 'add' ? 'bg-diff-add-bg' : 'bg-diff-del-bg'
+  const emphasisClass = highlightType === 'add' ? 'bg-diff-add-bg-strong' : 'bg-diff-del-bg-strong'
   const manualAlignActive = manualAlignRequest != null
   const awaitingManualAlignTarget = manualAlignRequest != null && manualAlignRequest.side !== side
 
@@ -272,73 +266,69 @@ export default function TextInputPanel({
   }
 
   const handleTextAreaKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (
-      onManualAlignShortcut
-      && (event.metaKey || event.ctrlKey)
-      && event.shiftKey
-      && !event.altKey
-      && event.key.toLowerCase() === 'l'
-    ) {
+    // 和弦本身来自 `hooks/shortcuts.ts` 那张唯一的表，工具栏 `⋯` 里显示的
+    // `⇧ Mod L` 和这里真正匹配的键因此不可能分叉。
+    if (onManualAlignShortcut && matchesShortcut(event, SHORTCUT_SPECS.manualAlign)) {
       event.preventDefault()
       onManualAlignShortcut(resolveLineNumberFromSelection(event.currentTarget))
     }
   }
 
   const sideBadgeClass = side === 'left'
-    ? 'bg-sky-500/15 text-sky-300'
-    : 'bg-violet-500/15 text-violet-300'
+    ? 'bg-chart-3/15 text-chart-3'
+    : 'bg-chart-2/15 text-chart-2'
 
   return (
     <div
       className={`flex min-h-0 flex-1 flex-col overflow-hidden rounded-md border transition-colors ${
-        isDragOver ? 'border-blue-500 bg-blue-500/5 ring-2 ring-dashed ring-blue-500/40' : 'border-neutral-800'
+        isDragOver ? 'border-accent bg-accent-quiet ring-2 ring-dashed ring-accent/40' : 'border-border'
       }`}
       onDragEnter={handleDragEnter}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
-      <div className="flex shrink-0 items-center gap-2 border-b border-neutral-800 bg-neutral-850 px-2 py-1.5 text-xs">
-        <span className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase ${sideBadgeClass}`}>
+      <div className="flex shrink-0 items-center gap-2 border-b border-border bg-surface px-2 py-1.5 text-xs">
+        <span className={`shrink-0 rounded px-1.5 py-0.5 text-2xs font-semibold uppercase ${sideBadgeClass}`}>
           {side === 'left' ? 'L' : 'R'}
         </span>
-        <span className="font-medium text-neutral-200">{label}</span>
+        <span className="font-medium text-fg">{label}</span>
         {fileLabel && (
-          <span className="truncate font-mono text-neutral-500" title={fileLabel}>
+          <span className="truncate font-mono text-fg-muted" title={fileLabel}>
             {fileLabel}
           </span>
         )}
         {manualAlignRequest?.side === side && (
-          <span className="inline-flex items-center gap-1 rounded bg-amber-500/10 px-1.5 py-0.5 text-[11px] text-amber-300">
-            <span className="h-1.5 w-1.5 rounded-full bg-amber-400" />
+          <span className="inline-flex items-center gap-1 rounded bg-warning-quiet px-1.5 py-0.5 text-xs text-warning-text">
+            <span className="h-1.5 w-1.5 rounded-full bg-warning" />
             {manualAlignRequest.lineNumber == null
               ? '点击当前侧锚点行'
               : `锚点行 ${manualAlignRequest.lineNumber} · 可点击改锚点`}
           </span>
         )}
         {awaitingManualAlignTarget && (
-          <span className="inline-flex items-center gap-1 rounded bg-amber-500/10 px-1.5 py-0.5 text-[11px] text-amber-300">
-            <span className="h-1.5 w-1.5 rounded-full bg-amber-400" />
+          <span className="inline-flex items-center gap-1 rounded bg-warning-quiet px-1.5 py-0.5 text-xs text-warning-text">
+            <span className="h-1.5 w-1.5 rounded-full bg-warning" />
             点击此侧目标行
           </span>
         )}
-        <span className="ml-auto rounded bg-neutral-800/70 px-1.5 py-0.5 tabular-nums text-neutral-500">{value.length} 字符</span>
+        <span className="ml-auto rounded bg-surface-2 px-1.5 py-0.5 tabular-nums text-fg-muted">{value.length} 字符</span>
         {value && (
           <button
             onClick={onClear}
             aria-label="清空"
-            className="inline-flex h-5 w-5 items-center justify-center rounded text-neutral-400 transition-colors hover:bg-neutral-700 hover:text-neutral-100"
+            className="inline-flex h-5 w-5 items-center justify-center rounded text-fg-muted transition-colors hover:bg-hover hover:text-fg"
             title="清空"
           >
-            <span aria-hidden="true">×</span>
+            <X aria-hidden size={12} strokeWidth={1.75} />
           </button>
         )}
       </div>
-      <div className="relative flex-1 overflow-hidden bg-neutral-900">
+      <div className="relative flex-1 overflow-hidden bg-canvas">
         <div
           ref={gutterRef}
           aria-hidden="true"
-          className="pointer-events-none absolute inset-y-0 left-0 z-10 w-12 overflow-hidden border-r border-neutral-800 bg-neutral-950/95 font-mono text-xs leading-5 text-neutral-500"
+          className="pointer-events-none absolute inset-y-0 left-0 z-10 w-12 overflow-hidden border-r border-border bg-inset font-mono text-xs leading-5 text-fg-muted"
         >
           <div className="py-2">
             {visibleRowWindow.topSpacerHeight > 0 && <div style={{ height: `${visibleRowWindow.topSpacerHeight}px` }} />}
@@ -347,9 +337,9 @@ export default function TextInputPanel({
                 key={row.key}
                 className={`h-5 px-2 text-right ${
                   row.lineNumber != null && manualAlignRequest?.side === side && manualAlignRequest.lineNumber === row.lineNumber
-                    ? 'bg-amber-500/15 text-amber-300'
+                    ? 'bg-warning-quiet text-warning-text'
                     : row.lineNumber != null && alignedLineNumbers?.has(row.lineNumber)
-                      ? 'text-amber-200'
+                      ? 'text-warning-text'
                       : ''
                 }`}
               >
@@ -363,7 +353,7 @@ export default function TextInputPanel({
         <div
           ref={highlightRef}
           aria-hidden="true"
-          className="pointer-events-none absolute inset-0 overflow-hidden py-2 pl-14 pr-2 font-mono text-xs leading-5 text-neutral-100"
+          className="pointer-events-none absolute inset-0 overflow-hidden py-2 pl-14 pr-2 font-mono text-xs leading-5 text-fg"
         >
           <div className="min-w-full w-max">
             {visibleRowWindow.topSpacerHeight > 0 && <div style={{ height: `${visibleRowWindow.topSpacerHeight}px` }} />}
@@ -374,9 +364,9 @@ export default function TextInputPanel({
                   row.highlighted ? lineHighlightClass : ''
                 } ${
                   row.lineNumber != null && manualAlignRequest?.side === side && manualAlignRequest.lineNumber === row.lineNumber
-                    ? 'ring-1 ring-inset ring-amber-300/80 bg-amber-500/20'
+                    ? 'ring-1 ring-inset ring-warning/30 bg-warning-quiet'
                     : row.lineNumber != null && alignedLineNumbers?.has(row.lineNumber)
-                      ? 'ring-1 ring-inset ring-amber-400/30'
+                      ? 'ring-1 ring-inset ring-warning/30'
                       : ''
                 }`}
               >
@@ -400,7 +390,7 @@ export default function TextInputPanel({
                 onClick={() => onManualAlignLineClick(side, row.lineNumber)}
                 className={`flex h-5 ${
                   row.lineNumber != null
-                    ? 'cursor-crosshair hover:bg-amber-500/10'
+                    ? 'cursor-crosshair hover:bg-warning-quiet'
                     : 'cursor-not-allowed'
                 }`}
               >
@@ -421,7 +411,8 @@ export default function TextInputPanel({
           placeholder="拖入文件，或粘贴/输入文本..."
           spellCheck={false}
           wrap="off"
-          className={`relative z-20 h-full w-full resize-none bg-transparent py-2 pl-14 pr-2 font-mono text-xs leading-5 text-transparent caret-neutral-100 placeholder-neutral-600 outline-none ${
+          data-focus-inset
+          className={`relative z-20 h-full w-full resize-none bg-transparent py-2 pl-14 pr-2 font-mono text-xs leading-5 text-transparent caret-fg placeholder:text-fg-subtle ${
             awaitingManualAlignTarget ? 'cursor-crosshair' : ''
           }`}
         />

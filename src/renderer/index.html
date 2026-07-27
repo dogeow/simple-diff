@@ -6,7 +6,10 @@
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'" />
     <title>Simple Diff</title>
   </head>
-  <body class="bg-neutral-900 text-neutral-100">
+  <!-- body 上不要挂颜色类。背景与前景由 tokens.css 的 `@layer base` 里那条 body
+       规则按主题给出；这里原先挂着一对写死的深色调色板类，而 utilities 层压过
+       base 层，结果浅色主题下整页底色仍然是深灰（chunk 10 扫描项 2）。 -->
+  <body>
     <div id="root"></div>
     <script type="module" src="./main.tsx"></script>
   </body>

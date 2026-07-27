@@ -49,7 +49,7 @@ function resetCompareStore(): void {
 
 function resetAppStore(): void {
   useAppStore.setState({
-    page: 'home',
+    page: 'compare',
     diffTabs: [],
     activeDiffTabId: null,
     compareTabs: [],

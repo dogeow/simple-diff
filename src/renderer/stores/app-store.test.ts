@@ -27,7 +27,7 @@ function createDiffTab(overrides: Partial<DiffTab> = {}): DiffTab {
 
 function resetAppStore(): void {
   useAppStore.setState({
-    page: 'home',
+    page: 'compare',
     diffTabs: [],
     activeDiffTabId: null,
     compareTabs: [],
@@ -230,6 +230,61 @@ describe('app-store', () => {
     expect(persisted.compareTabs[0]?.snapshot.duration).toBe(0)
     expect(persisted.compareTabs[0]?.diffTabs.map((tab) => tab.id)).toEqual(['kept.txt'])
     expect(persisted.compareTabs[0]?.activeDiffTabId).toBe('kept.txt')
+  })
+
+  it('keeps only the active diff tab content on persist so it restores without re-reading disk', () => {
+    const persisted = createPersistedAppState({
+      page: 'compare',
+      activeCompareTabId: 'compare-tab-1',
+      compareTabs: [{
+        id: 'compare-tab-1',
+        title: 'left ↔ right',
+        snapshot: createCompareSnapshot(),
+        diffTabs: [],
+        activeDiffTabId: null,
+      }],
+      diffTabs: [
+        createDiffTab({
+          id: 'active.txt',
+          leftContent: 'alpha',
+          rightContent: 'beta',
+          originalLeftContent: 'alpha',
+          originalRightContent: 'beta',
+          diffResult: { leftLines: [], rightLines: [] },
+        }),
+        createDiffTab({ id: 'background.txt', leftContent: 'gamma', rightContent: 'delta' }),
+      ],
+      activeDiffTabId: 'active.txt',
+    })
+
+    const persistedDiffTabs = persisted.compareTabs[0]?.diffTabs ?? []
+    const active = persistedDiffTabs.find((tab) => tab.id === 'active.txt')
+    const background = persistedDiffTabs.find((tab) => tab.id === 'background.txt')
+
+    expect(active?.leftContent).toBe('alpha')
+    expect(active?.originalRightContent).toBe('beta')
+    expect(active?.diffResult).not.toBeNull()
+    // 非活动的 diff 标签仍然清空，激活时再按需读盘。
+    expect(background?.leftContent).toBe('')
+    expect(background?.rightContent).toBe('')
+  })
+
+  it('blanks every diff tab of an inactive compare tab', () => {
+    const persisted = createPersistedAppState({
+      page: 'compare',
+      activeCompareTabId: 'compare-tab-2',
+      compareTabs: [{
+        id: 'compare-tab-1',
+        title: 'inactive',
+        snapshot: createCompareSnapshot(),
+        diffTabs: [createDiffTab({ id: 'stale.txt', leftContent: 'alpha' })],
+        activeDiffTabId: 'stale.txt',
+      }],
+      diffTabs: [],
+      activeDiffTabId: null,
+    })
+
+    expect(persisted.compareTabs[0]?.diffTabs[0]?.leftContent).toBe('')
   })
 
   it('drops huge completed compare entries from persisted app state', () => {

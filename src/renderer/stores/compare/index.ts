@@ -6,6 +6,8 @@ export type {
   ViewMode,
 } from './types'
 
+export type { CompareSessionContentSource } from './snapshot'
+
 export {
   applyCompareErrorToSnapshot,
   applyEntryUpdatesToSnapshot,

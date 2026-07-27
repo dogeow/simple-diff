@@ -1,9 +1,10 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import type { SourceConfig, SyncTaskSnapshot } from '../../../shared/types'
-import { leaveComparePage, openCompareTab, openSyncTaskView } from './compare-session-navigation'
+import type { CompareEntry, SourceConfig, SyncTaskSnapshot } from '../../../shared/types'
+import { openCompareTab, openSyncTaskView, startNewCompareSession } from './compare-session-navigation'
 import { useAppStore, type DiffTab } from '../stores/app-store'
-import { useCompareStore, type CompareSessionSnapshot } from '../stores/compare-store'
+import { hasCompareSessionContent, useCompareStore, type CompareSessionSnapshot } from '../stores/compare-store'
 import { useLogStore } from '../stores/log-store'
+import { useUIStore } from '../stores/ui-store'
 
 function createCompareSnapshot(overrides: Partial<CompareSessionSnapshot> = {}): CompareSessionSnapshot {
   return {
@@ -33,6 +34,18 @@ function createCompareSnapshot(overrides: Partial<CompareSessionSnapshot> = {}):
     viewMode: 'split',
     activeCompareId: 'compare-1',
     ...overrides,
+  }
+}
+
+function createEntry(relativePath: string): CompareEntry {
+  return {
+    relativePath,
+    name: relativePath.split('/').at(-1) ?? relativePath,
+    isDirectory: false,
+    state: 'equal',
+    left: { name: 'app.ts', path: relativePath, isDirectory: false, size: 1, mtime: 1 },
+    right: { name: 'app.ts', path: relativePath, isDirectory: false, size: 1, mtime: 1 },
+    reasons: [],
   }
 }
 
@@ -100,14 +113,15 @@ function resetStores(): void {
   })
 
   useLogStore.setState({ logs: [], visible: false })
+  useUIStore.setState({ overlay: null })
 }
 
-describe('leaveComparePage', () => {
+describe('compare session navigation', () => {
   beforeEach(() => {
     resetStores()
   })
 
-  it('persists the active compare tab and returns to the directory compare home page', () => {
+  it('persists the active compare tab and falls back to the setup state', () => {
     const snapshot = createCompareSnapshot({ entries: [{
       relativePath: 'src/app.ts',
       name: 'app.ts',
@@ -139,21 +153,24 @@ describe('leaveComparePage', () => {
       loadingDirs: new Set(),
     })
 
-    leaveComparePage('home')
+    startNewCompareSession()
 
     const appState = useAppStore.getState()
     const compareState = useCompareStore.getState()
 
-    expect(appState.page).toBe('home')
+    // chunk 5：不再有 home 页面；新建对比只是把工作区退回 setup 态。
+    expect(appState.page).toBe('compare')
+    expect(appState.activeCompareTabId).toBeNull()
     expect(appState.diffTabs).toEqual([])
     expect(appState.compareTabs[0]?.snapshot.entries.map((entry) => entry.relativePath)).toEqual(['src/app.ts'])
     expect(compareState.leftPath).toBe('/left')
     expect(compareState.rightPath).toBe('/right')
     expect(compareState.leftSource).toBeNull()
     expect(compareState.rightSource).toBeNull()
+    expect(hasCompareSessionContent(compareState.createSnapshot())).toBe(false)
   })
 
-  it('can leave compare page to another top-level section', () => {
+  it('keeps a running compare in its own tab when starting a new one', () => {
     const snapshot = createCompareSnapshot({ scanning: true, comparing: true })
 
     useAppStore.setState({
@@ -175,43 +192,138 @@ describe('leaveComparePage', () => {
       loadingDirs: new Set(),
     })
 
-    leaveComparePage('text')
+    startNewCompareSession()
 
-    expect(useAppStore.getState().page).toBe('text')
+    expect(useAppStore.getState().page).toBe('compare')
     expect(useAppStore.getState().compareTabs[0]?.snapshot.scanning).toBe(true)
+    expect(useAppStore.getState().activeCompareTabId).toBeNull()
   })
 
-  it('restores the active compare tab and can expand logs', () => {
-    const snapshot = createCompareSnapshot({
-      entries: [{
-        relativePath: 'src/app.ts',
-        name: 'app.ts',
-        isDirectory: false,
-        state: 'equal',
-        left: { name: 'app.ts', path: 'src/app.ts', isDirectory: false, size: 1, mtime: 1 },
-        right: { name: 'app.ts', path: 'src/app.ts', isDirectory: false, size: 1, mtime: 1 },
-        reasons: [],
-      }],
+  it('drops the sync task sources so a new session really starts empty', () => {
+    const syncLeftSource: SourceConfig = { type: 'local', path: '/sync-left' }
+    const syncRightSource: SourceConfig = { type: 'local', path: '/sync-right' }
+
+    useCompareStore.setState({
+      syncTask: createSyncTask(syncLeftSource, syncRightSource),
+      leftSource: syncLeftSource,
+      rightSource: syncRightSource,
+      done: true,
     })
 
+    startNewCompareSession()
+
+    const compareState = useCompareStore.getState()
+    expect(compareState.leftSource).toBeNull()
+    expect(compareState.rightSource).toBeNull()
+    expect(hasCompareSessionContent(compareState.createSnapshot())).toBe(false)
+  })
+
+  it('shows the workspace without overwriting the live session from a lightweight snapshot', () => {
+    // 对比完成后写回标签的是 lightweight 快照（`entries: []`）。回到工作区时再
+    // restore 一次会把整棵结果树清空——F4 的“不要销毁工作上下文”就是指这个。
     useAppStore.setState({
       page: 'text',
       compareTabs: [{
         id: 'compare-tab-1',
         title: 'left ↔ right',
-        snapshot,
+        snapshot: createCompareSnapshot({ entries: [] }),
         diffTabs: [createDiffTab()],
         activeDiffTabId: 'src/file.txt',
       }],
       activeCompareTabId: 'compare-tab-1',
     })
 
-    const opened = openCompareTab(undefined, { expandLogs: true })
+    useCompareStore.setState({ entries: [createEntry('src/app.ts')] })
+
+    const opened = openCompareTab()
 
     expect(opened).toBe(true)
     expect(useAppStore.getState().page).toBe('compare')
     expect(useCompareStore.getState().entries.map((entry) => entry.relativePath)).toEqual(['src/app.ts'])
-    expect(useLogStore.getState().visible).toBe(true)
+    // F9：导航不再强开日志面板。
+    expect(useLogStore.getState().visible).toBe(false)
+  })
+
+  it('keeps the setup state instead of falling back to the last compare tab', () => {
+    useAppStore.setState({
+      page: 'text',
+      compareTabs: [{
+        id: 'compare-tab-1',
+        title: 'left ↔ right',
+        snapshot: createCompareSnapshot(),
+        diffTabs: [],
+        activeDiffTabId: null,
+      }],
+      activeCompareTabId: null,
+    })
+
+    useCompareStore.setState({ leftPath: '/drafting-left', rightPath: '/drafting-right' })
+
+    const opened = openCompareTab()
+
+    // 「目录对比」只有一个含义：显示工作区。setup 态不能被悄悄换成一个旧结果。
+    expect(opened).toBe(false)
+    expect(useAppStore.getState().page).toBe('compare')
+    expect(useAppStore.getState().activeCompareTabId).toBeNull()
+    expect(useCompareStore.getState().leftPath).toBe('/drafting-left')
+  })
+
+  it('persists the outgoing session before restoring another compare tab', () => {
+    useAppStore.setState({
+      page: 'compare',
+      compareTabs: [
+        {
+          id: 'compare-tab-1',
+          title: 'left ↔ right',
+          snapshot: createCompareSnapshot({ entries: [] }),
+          diffTabs: [],
+          activeDiffTabId: null,
+        },
+        {
+          id: 'compare-tab-2',
+          title: 'other ↔ other',
+          snapshot: createCompareSnapshot({ leftPath: '/other-left', rightPath: '/other-right' }),
+          diffTabs: [],
+          activeDiffTabId: null,
+        },
+      ],
+      activeCompareTabId: 'compare-tab-1',
+    })
+
+    useCompareStore.setState({
+      ...createCompareSnapshot(),
+      entries: [createEntry('src/app.ts')],
+      dirtyPaths: new Set<string>(),
+      expandedDirs: new Set(['src']),
+      loadingDirs: new Set(),
+    })
+
+    expect(openCompareTab('compare-tab-2')).toBe(true)
+
+    const appState = useAppStore.getState()
+    expect(appState.activeCompareTabId).toBe('compare-tab-2')
+    // 离开的标签拿到的是它自己的 live 内容，而不是被留在一个空快照上。
+    expect(appState.compareTabs[0]?.snapshot.entries.map((entry) => entry.relativePath)).toEqual(['src/app.ts'])
+    expect(useCompareStore.getState().leftPath).toBe('/other-left')
+  })
+
+  it('does nothing when reopening the compare tab that is already active', () => {
+    useAppStore.setState({
+      page: 'compare',
+      compareTabs: [{
+        id: 'compare-tab-1',
+        title: 'left ↔ right',
+        snapshot: createCompareSnapshot({ entries: [] }),
+        diffTabs: [],
+        activeDiffTabId: null,
+      }],
+      activeCompareTabId: 'compare-tab-1',
+    })
+
+    useCompareStore.setState({ entries: [createEntry('src/app.ts')] })
+
+    expect(openCompareTab('compare-tab-1')).toBe(true)
+    expect(useCompareStore.getState().entries.map((entry) => entry.relativePath)).toEqual(['src/app.ts'])
   })
 
   it('opens the compare tab matching the active sync task sources', () => {
@@ -219,7 +331,7 @@ describe('leaveComparePage', () => {
     const syncRightSource: SourceConfig = { type: 'sftp', configId: 'hermes', path: '/var/www/dogeow-api' }
 
     useAppStore.setState({
-      page: 'home',
+      page: 'compare',
       compareTabs: [
         {
           id: 'compare-tab-other',
@@ -259,14 +371,16 @@ describe('leaveComparePage', () => {
       syncTask: createSyncTask(syncLeftSource, syncRightSource),
     })
 
-    const opened = openSyncTaskView({ expandLogs: true })
+    const opened = openSyncTaskView()
 
     expect(opened).toBe(true)
-    expect(useAppStore.getState().page).toBe('sync')
+    // F7：同步任务不再是页面，而是壳层的叠加层；对比标签被聚焦。
+    expect(useAppStore.getState().page).toBe('compare')
+    expect(useUIStore.getState().overlay).toBe('sync')
     expect(useAppStore.getState().activeCompareTabId).toBe('compare-tab-sync')
     expect(useAppStore.getState().diffTabs.map((tab) => tab.id)).toEqual(['src/file.txt'])
     expect(useCompareStore.getState().leftSource).toEqual(syncLeftSource)
     expect(useCompareStore.getState().rightSource).toEqual(syncRightSource)
-    expect(useLogStore.getState().visible).toBe(true)
+    expect(useLogStore.getState().visible).toBe(false)
   })
 })

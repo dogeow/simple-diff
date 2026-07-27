@@ -16,6 +16,22 @@ export function resolveTheme(theme: ThemePreference, systemPrefersDark: boolean)
   return theme
 }
 
+/**
+ * DESIGN-SYSTEM §1.5：色盲友好差异色是「一个 store 标志、一个 data 属性、零组件
+ * 改动」。改写规则在 `styles/globals.css`。
+ */
+export function applyDiffPalette(
+  colorblind: boolean,
+  root: HTMLElement = document.documentElement,
+): void {
+  if (colorblind) {
+    root.dataset.colorblindDiff = 'true'
+    return
+  }
+
+  delete root.dataset.colorblindDiff
+}
+
 export function applyTheme(
   theme: ThemePreference,
   systemPrefersDark: boolean,

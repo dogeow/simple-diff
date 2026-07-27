@@ -1,13 +1,19 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { ArrowLeftRight, Eraser, FileInput, Rows3, X } from 'lucide-react'
+import { Button, Panel, SplitPane, Switch, Toolbar, type MenuItem } from '../components/ui'
 import { useShallow } from 'zustand/react/shallow'
 import { useTextDiffStore } from '../stores/text-diff-store'
+import { useUIStore, type StatusHint } from '../stores/ui-store'
 import TextInputPanel from '../components/TextInputPanel'
+import { SHORTCUT } from '../hooks/shortcuts'
 import { buildInlineSegments } from '../utils/inline-diff'
+import { readFileAsText } from '../utils/read-text-file'
 import {
   addManualAlignment,
   computeAlignedTextDiff,
   type ManualAlignmentPair,
   type ManualAlignRequest,
+  type TextDiffSide,
 } from '../utils/manual-align'
 
 export default function TextComparePage() {
@@ -45,10 +51,14 @@ export default function TextComparePage() {
     toggleCharLevel: state.toggleCharLevel,
   })))
 
+  const setStatusHint = useUIStore((state) => state.setStatusHint)
+
   const compareRequestIdRef = useRef(0)
   const leftTextAreaRef = useRef<HTMLTextAreaElement | null>(null)
   const rightTextAreaRef = useRef<HTMLTextAreaElement | null>(null)
   const syncingScrollRef = useRef(false)
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const loadTargetSideRef = useRef<TextDiffSide>('left')
   const [manualAlignments, setManualAlignments] = useState<readonly ManualAlignmentPair[]>([])
   const [manualAlignRequest, setManualAlignRequest] = useState<ManualAlignRequest | null>(null)
   const [manualAlignError, setManualAlignError] = useState<string | null>(null)
@@ -176,27 +186,49 @@ export default function TextComparePage() {
     [manualAlignments],
   )
 
-  const manualAlignHint = useMemo(() => {
+  /**
+   * §4.5：手动对齐的提示是「转瞬即逝的引导，不是常驻装饰」，所以它只在真的有话说的
+   * 时候才占状态栏——没进手动对齐、也没有已生效的对齐组时返回 `null`，任务槽让回给
+   * 后台作业（或「就绪」）。出错时 `warning` 色，与旧的行内胶囊同调。
+   */
+  const statusHint = useMemo((): StatusHint | null => {
+    if (manualAlignError) {
+      return { tone: 'warning', label: manualAlignError }
+    }
     if (manualAlignRequest) {
-      if (manualAlignRequest.lineNumber == null) {
-        return `已进入手动对齐：先点${manualAlignRequest.side === 'left' ? '左' : '右'}侧锚点行，再点另一侧目标行，Esc 取消`
+      const sideLabel = manualAlignRequest.side === 'left' ? '左' : '右'
+      return {
+        tone: 'warning',
+        label: manualAlignRequest.lineNumber == null
+          ? `已进入手动对齐：先点${sideLabel}侧锚点行，再点另一侧目标行，Esc 取消`
+          : `已选${sideLabel}侧第 ${manualAlignRequest.lineNumber} 行；可先点本侧修正锚点，再点另一侧完成，Esc 取消`,
       }
-      return `已选${manualAlignRequest.side === 'left' ? '左' : '右'}侧第 ${manualAlignRequest.lineNumber} 行；可先点本侧修正锚点，再点另一侧完成，Esc 取消`
     }
     if (manualAlignments.length > 0) {
-      return `已启用 ${manualAlignments.length} 组手动对齐，按 Cmd/Ctrl+Shift+L 可继续添加`
+      return {
+        tone: 'idle',
+        label: `已启用 ${manualAlignments.length} 组手动对齐，按 ${SHORTCUT.manualAlign} 可继续添加`,
+      }
     }
-    return '未启用手动对齐'
-  }, [manualAlignRequest, manualAlignments.length])
+    return null
+  }, [manualAlignError, manualAlignRequest, manualAlignments.length])
 
-  const startManualAlign = (side: ManualAlignRequest['side'], lineNumber: number | null) => {
+  // 提示的作者是这个页面，显示它的是壳层里的状态栏——中间没有父子关系，所以经 store
+  // 传递。切回目录对比模式时这个页面会被卸载，清理函数保证提示不会留在状态栏上。
+  useEffect(() => {
+    setStatusHint(statusHint)
+  }, [setStatusHint, statusHint])
+
+  useEffect(() => () => setStatusHint(null), [setStatusHint])
+
+  const startManualAlign = useCallback((side: ManualAlignRequest['side'], lineNumber: number | null) => {
     if (!result) {
       return
     }
 
     setManualAlignError(null)
     setManualAlignRequest({ side, lineNumber })
-  }
+  }, [result])
 
   const finishManualAlign = (side: ManualAlignRequest['side'], lineNumber: number | null) => {
     if (!manualAlignRequest) {
@@ -229,11 +261,72 @@ export default function TextComparePage() {
     setManualAlignError(null)
   }
 
-  const clearManualAlignments = () => {
+  const clearManualAlignments = useCallback(() => {
     setManualAlignments([])
     setManualAlignRequest(null)
     setManualAlignError(null)
-  }
+  }, [])
+
+  /**
+   * `⋯ → 从文件载入…`：把「拖入面板」这条一直存在的路径补上一个键盘可达的入口。
+   * 读文件用的是同一个 `readFileAsText`，文件名同样成为该侧的标签，失败文案也一致。
+   */
+  const requestFileLoad = useCallback((side: TextDiffSide) => {
+    loadTargetSideRef.current = side
+    fileInputRef.current?.click()
+  }, [])
+
+  const handleFileInputChange = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    // 同一个文件连选两次也要能触发 change，所以每次都把 input 清空。
+    event.target.value = ''
+    if (!file) return
+
+    const side = loadTargetSideRef.current
+    const apply = side === 'left' ? setLeftText : setRightText
+    try {
+      apply(await readFileAsText(file), file.name)
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : '读取文件失败'
+      apply(`[读取失败: ${msg}]`, file.name)
+    }
+  }, [setLeftText, setRightText])
+
+  const hasManualAlignState = manualAlignRequest != null || manualAlignments.length > 0
+
+  /**
+   * §2.2 / §4.5 的文本工具栏 `⋯`：手动对齐（`⇧ Mod L`）· 清除手动对齐 · 从文件载入…
+   * 高频的三个控件（交换 / 清空 / 字符对比）留在栏上，其余一律降到这里。
+   */
+  const overflowItems = useMemo<MenuItem[]>(() => [
+    {
+      id: 'manual-align',
+      label: '手动对齐',
+      icon: Rows3,
+      shortcut: SHORTCUT.manualAlign,
+      // 没有对比结果时行号还没有对应的 diff 行，锚点无处可落——和 `⇧ Mod L` 同款判断。
+      disabled: !result,
+      onSelect: () => startManualAlign('left', null),
+    },
+    {
+      id: 'clear-manual-align',
+      label: '清除手动对齐',
+      icon: X,
+      disabled: !hasManualAlignState,
+      onSelect: clearManualAlignments,
+    },
+    { kind: 'separator', id: 'text-overflow-sep' },
+    {
+      kind: 'submenu',
+      id: 'load-file',
+      label: '从文件载入…',
+      icon: FileInput,
+      items: [
+        { id: 'load-file-left', label: '左侧', onSelect: () => requestFileLoad('left') },
+        { id: 'load-file-right', label: '右侧', onSelect: () => requestFileLoad('right') },
+      ],
+    },
+  ], [clearManualAlignments, hasManualAlignState, requestFileLoad, result, startManualAlign])
 
   const syncPanelScroll = (source: 'left' | 'right', scrollTop: number, scrollLeft: number) => {
     if (syncingScrollRef.current) return
@@ -251,95 +344,99 @@ export default function TextComparePage() {
   }
 
   return (
-    <div className="flex h-full flex-col gap-2 p-3">
-      <div className="flex shrink-0 flex-wrap items-center gap-1.5">
-        <button
-          onClick={swap}
-          disabled={!hasText}
-          className="inline-flex items-center gap-1.5 rounded-md border border-neutral-700 bg-neutral-800/70 px-3 py-1.5 text-sm text-neutral-200 transition-colors hover:border-neutral-600 hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-neutral-700 disabled:hover:bg-neutral-800/70"
-        >
-          交换 ⇄
-        </button>
-        <button
-          onClick={clear}
-          disabled={!hasText}
-          className="inline-flex items-center gap-1.5 rounded-md border border-neutral-700 bg-neutral-800/70 px-3 py-1.5 text-sm text-neutral-200 transition-colors hover:border-neutral-600 hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-neutral-700 disabled:hover:bg-neutral-800/70"
-        >
-          清空
-        </button>
-        <button
-          onClick={toggleCharLevel}
-          disabled={!result}
-          className={`inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm transition-colors ${
-            charLevel
-              ? 'bg-blue-600 text-white hover:bg-blue-500'
-              : 'border border-neutral-700 bg-neutral-800/70 text-neutral-200 hover:border-neutral-600 hover:bg-neutral-800'
-          } disabled:cursor-not-allowed disabled:opacity-40`}
-        >
-          字符对比{charLevel ? '：开' : '：关'}
-        </button>
-        {(manualAlignRequest || manualAlignments.length > 0) && (
-          <button
-            onClick={clearManualAlignments}
-            className="inline-flex items-center gap-1.5 rounded-md border border-neutral-700 bg-neutral-800/70 px-3 py-1.5 text-sm text-neutral-200 transition-colors hover:border-neutral-600 hover:bg-neutral-800"
-          >
-            清除手动对齐
-          </button>
-        )}
-        {error && <span className="rounded-md bg-rose-500/10 px-2 py-1 text-sm text-rose-300">{error}</span>}
-        <div className="ml-auto flex flex-wrap items-center gap-2 text-xs">
-          <span className={`rounded-md px-2 py-1 ${manualAlignError ? 'bg-amber-500/10 text-amber-300' : 'text-neutral-500'}`}>
-            {manualAlignError ?? manualAlignHint}
-          </span>
-          <span className="rounded-md bg-neutral-800/60 px-2 py-1 text-neutral-400">
-            {diffSummary
-              ? diffSummary.hasDiff
-                ? `左侧 ${diffSummary.leftChanges} 行变化，右侧 ${diffSummary.rightChanges} 行变化`
-                : '两侧内容一致'
-              : '等待输入文本'}
-          </span>
-        </div>
-      </div>
+    <div className="flex h-full flex-col">
+      {/*
+        §4.5：手写的 flex 行换成共享 `Toolbar`。标题恒在（不像旧行那样只有控件），
+        副标题就是那句差异摘要，`⋯` 收走手动对齐那一组。
+      */}
+      <Toolbar
+        sticky={false}
+        title="文本对比"
+        subtitle={diffSummary
+          ? diffSummary.hasDiff
+            ? `左侧 ${diffSummary.leftChanges} 行变化 · 右侧 ${diffSummary.rightChanges} 行变化`
+            : '两侧内容一致'
+          : '等待输入文本'}
+        overflow={overflowItems}
+        actions={
+          <>
+            <Button size="sm" icon={ArrowLeftRight} disabled={!hasText} onClick={swap}>交换</Button>
+            <Button size="sm" icon={Eraser} disabled={!hasText} onClick={clear}>清空</Button>
+            {/* 立即生效的布尔开关，不属于任何带保存按钮的表单——按 §10 是 `Switch`。 */}
+            <Switch
+              size="sm"
+              label="字符对比"
+              checked={charLevel}
+              disabled={!result}
+              onCheckedChange={toggleCharLevel}
+            />
+          </>
+        }
+      />
 
-      <div className="flex min-h-0 flex-1 gap-2">
-        <TextInputPanel
-          side="left"
-          label="左侧"
-          value={leftText}
-          fileLabel={leftLabel}
-          diffLines={displayResult?.leftLines}
-          highlightedLines={leftChangedLines}
-          highlightType="remove"
-          charLevel={charLevel}
-          inlineSegments={inlineSegments?.left}
-          textAreaRef={leftTextAreaRef}
-          onScrollPositionChange={(top, left) => syncPanelScroll('left', top, left)}
-          manualAlignRequest={manualAlignRequest}
-          alignedLineNumbers={leftAlignedLines}
-          onManualAlignShortcut={(lineNumber) => startManualAlign('left', lineNumber)}
-          onManualAlignLineClick={finishManualAlign}
-          onChange={(text, file) => setLeftText(text, file ?? '')}
-          onClear={() => setLeftText('', '')}
-        />
-        <TextInputPanel
-          side="right"
-          label="右侧"
-          value={rightText}
-          fileLabel={rightLabel}
-          diffLines={displayResult?.rightLines}
-          highlightedLines={rightChangedLines}
-          highlightType="add"
-          charLevel={charLevel}
-          inlineSegments={inlineSegments?.right}
-          textAreaRef={rightTextAreaRef}
-          onScrollPositionChange={(top, left) => syncPanelScroll('right', top, left)}
-          manualAlignRequest={manualAlignRequest}
-          alignedLineNumbers={rightAlignedLines}
-          onManualAlignShortcut={(lineNumber) => startManualAlign('right', lineNumber)}
-          onManualAlignLineClick={finishManualAlign}
-          onChange={(text, file) => setRightText(text, file ?? '')}
-          onClear={() => setRightText('', '')}
-        />
+      <input
+        ref={fileInputRef}
+        type="file"
+        className="hidden"
+        onChange={(event) => void handleFileInputChange(event)}
+      />
+
+      {error ? (
+        <Panel tone="danger" role="alert" padded={false} className="mx-2 mt-2 shrink-0 rounded-md">
+          <p className="px-3 py-2 text-sm text-danger-text">{error}</p>
+        </Panel>
+      ) : null}
+
+      <div className="flex min-h-0 flex-1 flex-col p-3">
+        {/*
+          §4.5：两块文本面板可调宽。分隔条同时充当原来的 `gap-2`，
+          `TextComparePage.tsx` 里那套同步滚动（`syncPanelScroll`）原封不动。
+        */}
+        <SplitPane
+          className="min-h-0 flex-1"
+          storageKey="text-split"
+          min={220}
+          label="调整左右文本栏宽度"
+        >
+          <TextInputPanel
+            side="left"
+            label="左侧"
+            value={leftText}
+            fileLabel={leftLabel}
+            diffLines={displayResult?.leftLines}
+            highlightedLines={leftChangedLines}
+            highlightType="remove"
+            charLevel={charLevel}
+            inlineSegments={inlineSegments?.left}
+            textAreaRef={leftTextAreaRef}
+            onScrollPositionChange={(top, left) => syncPanelScroll('left', top, left)}
+            manualAlignRequest={manualAlignRequest}
+            alignedLineNumbers={leftAlignedLines}
+            onManualAlignShortcut={(lineNumber) => startManualAlign('left', lineNumber)}
+            onManualAlignLineClick={finishManualAlign}
+            onChange={(text, file) => setLeftText(text, file ?? '')}
+            onClear={() => setLeftText('', '')}
+          />
+          <TextInputPanel
+            side="right"
+            label="右侧"
+            value={rightText}
+            fileLabel={rightLabel}
+            diffLines={displayResult?.rightLines}
+            highlightedLines={rightChangedLines}
+            highlightType="add"
+            charLevel={charLevel}
+            inlineSegments={inlineSegments?.right}
+            textAreaRef={rightTextAreaRef}
+            onScrollPositionChange={(top, left) => syncPanelScroll('right', top, left)}
+            manualAlignRequest={manualAlignRequest}
+            alignedLineNumbers={rightAlignedLines}
+            onManualAlignShortcut={(lineNumber) => startManualAlign('right', lineNumber)}
+            onManualAlignLineClick={finishManualAlign}
+            onChange={(text, file) => setRightText(text, file ?? '')}
+            onClear={() => setRightText('', '')}
+          />
+        </SplitPane>
       </div>
     </div>
   )

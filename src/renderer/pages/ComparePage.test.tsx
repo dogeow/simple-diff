@@ -4,13 +4,26 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { CompareEntry, CompareResult, FileEntry, IpcResult, SourceConfig, SyncTaskSnapshot } from '../../../shared/types'
-import Layout from '../components/Layout'
+import AppShell from '../components/AppShell'
 import ComparePage from './ComparePage'
 import { useAppStore, type CompareTab, type DiffTab } from '../stores/app-store'
 import { useCompareStore, type CompareSessionSnapshot } from '../stores/compare-store'
 import { useLogStore } from '../stores/log-store'
+import { EMPTY_TREE_SELECTION, useUIStore } from '../stores/ui-store'
 import { useSettingsStore } from '../stores/settings-store'
 import { useSSHStore } from '../stores/ssh-store'
+
+/**
+ * chunk 7：目录树行从手写的 `<tr>` 换成共享 `TreeRow`（`role="treeitem"`），
+ * 于是这里不能再 `closest('tr')`。行动作也从裸 `<button>` 变成 `role="menuitem"`。
+ */
+function treeRow(name: string): HTMLElement {
+  const row = screen.getAllByText(name)
+    .map((element) => element.closest<HTMLElement>('[role="treeitem"]'))
+    .find((element): element is HTMLElement => element != null)
+  if (!row) throw new Error(`no tree row for "${name}"`)
+  return row
+}
 
 function createFileEntry(name: string, path: string): FileEntry {
   return {
@@ -188,6 +201,7 @@ function resetStores(compareTabs: readonly CompareTab[] = []): void {
   })
 
   useLogStore.setState({ logs: [], visible: false })
+  useUIStore.setState({ overlay: null, treeSelection: EMPTY_TREE_SELECTION })
   useSettingsStore.setState({ globalPathFilters: [] })
   useSSHStore.setState({ configs: [], loading: false, loadConfigs: async () => undefined })
 }
@@ -255,7 +269,7 @@ describe('ComparePage renderer interactions', () => {
     window.localStorage.clear()
   })
 
-  it('expands the log panel when clicking the current compare tab', async () => {
+  it('does not force the log panel open when clicking the current compare tab', async () => {
     resetStores([
       {
         id: 'compare-tab-1',
@@ -268,20 +282,21 @@ describe('ComparePage renderer interactions', () => {
 
     const user = userEvent.setup()
     render(
-      <Layout>
+      <AppShell>
         <ComparePage />
-      </Layout>,
+      </AppShell>,
     )
 
     expect(screen.queryByText('暂无日志')).toBeNull()
 
-    await user.click(screen.getByRole('button', { name: '当前对比' }))
+    await user.click(screen.getByRole('tab', { name: '当前对比' }))
 
-    expect(await screen.findByText('暂无日志')).toBeTruthy()
-    expect(useLogStore.getState().visible).toBe(true)
+    // F9：日志面板只由 ⌘J、状态栏的日志 chip 或应用菜单打开。
+    expect(screen.queryByText('暂无日志')).toBeNull()
+    expect(useLogStore.getState().visible).toBe(false)
   })
 
-  it('styles the active compare tab with a quieter neutral surface', () => {
+  it('marks the active compare tab with the shared TabStrip selection wash', () => {
     resetStores([
       {
         id: 'compare-tab-1',
@@ -294,10 +309,11 @@ describe('ComparePage renderer interactions', () => {
 
     render(<ComparePage />)
 
-    expect(screen.getByRole('button', { name: '当前对比' }).className).toContain('bg-neutral-800')
+    // TabStrip 把选中态放在包裹层上（DESIGN-SYSTEM §5 的 `--ds-selected` 冲刷）。
+    expect(screen.getByRole('tab', { name: '当前对比' }).parentElement?.className).toContain('bg-selected')
   })
 
-  it('styles the active directory diff tab like other blue buttons', () => {
+  it('marks 目录树 as the selected stop of the diff tab strip', () => {
     resetStores()
     useAppStore.setState({
       diffTabs: [createDiffTab()],
@@ -306,7 +322,11 @@ describe('ComparePage renderer interactions', () => {
 
     render(<ComparePage />)
 
-    expect(screen.getByRole('button', { name: '目录树' }).className).toContain('bg-blue-600')
+    // chunk 7：目录树不再是标签条旁边的一个蓝按钮，而是这条 `TabStrip` 的第 0 站，
+    // 所以它的选中态和文件标签完全同款（`--ds-selected` 冲刷，DESIGN-SYSTEM §5）。
+    const treeTab = screen.getByRole('tab', { name: '目录树' })
+    expect(treeTab.getAttribute('aria-selected')).toBe('true')
+    expect(treeTab.parentElement?.className).toContain('bg-selected')
   })
 
   it('shows 首次对比 after submitting a new source path with Enter', async () => {
@@ -326,7 +346,7 @@ describe('ComparePage renderer interactions', () => {
     expect(screen.getByRole('button', { name: '重启对比' })).toBeTruthy()
 
   const input = screen.getByDisplayValue('/var/old-left') as HTMLInputElement
-  expect(input.className).not.toContain('focus:border-blue-500')
+  expect(input.className).not.toContain('focus:border-accent')
     await user.clear(input)
     await user.type(input, '/var/new-left{enter}')
 
@@ -396,8 +416,8 @@ describe('ComparePage renderer interactions', () => {
 
     render(<ComparePage />)
 
-    fireEvent.contextMenu(screen.getByText('config').closest('tr')!)
-    fireEvent.click(await screen.findByRole('button', { name: '忽略目录：『config』' }))
+    fireEvent.contextMenu(treeRow('config'))
+    fireEvent.click(await screen.findByRole('menuitem', { name: '忽略目录：『config』' }))
 
     await waitFor(() => {
       expect(useCompareStore.getState().extensionFilter).toContain('path:config')
@@ -455,11 +475,11 @@ describe('ComparePage renderer interactions', () => {
 
     render(<ComparePage />)
 
-    fireEvent.contextMenu(screen.getByText('config').closest('tr')!)
-    expect(await screen.findByRole('button', { name: '忽略目录：『config』' })).toBeTruthy()
+    fireEvent.contextMenu(treeRow('config'))
+    expect(await screen.findByRole('menuitem', { name: '忽略目录：『config』' })).toBeTruthy()
 
-    fireEvent.contextMenu(screen.getByText('app.php').closest('tr')!)
-    expect(await screen.findByRole('button', { name: '忽略文件：『app.php』' })).toBeTruthy()
+    fireEvent.contextMenu(treeRow('app.php'))
+    expect(await screen.findByRole('menuitem', { name: '忽略文件：『app.php』' })).toBeTruthy()
   })
 
   it('allows copying the current selection before compare is finished', async () => {
@@ -472,16 +492,17 @@ describe('ComparePage renderer interactions', () => {
     })
 
     const user = userEvent.setup()
-    render(<ComparePage />)
+    // 选择槽位现在住在状态栏里（设计蓝图 §4.1），所以要连壳层一起渲染。
+    render(<AppShell><ComparePage /></AppShell>)
 
-    await user.click(screen.getByText('config').closest('tr')!)
+    await user.click(treeRow('config'))
 
     const selectionCopyButton = screen.getByRole('button', { name: '复制所选到右边' }) as HTMLButtonElement
     expect(selectionCopyButton.disabled).toBe(false)
 
-    fireEvent.contextMenu(screen.getByText('config').closest('tr')!)
+    fireEvent.contextMenu(treeRow('config'))
 
-    const contextCopyButton = await screen.findByRole('button', { name: '复制到右边' }) as HTMLButtonElement
+    const contextCopyButton = await screen.findByRole('menuitem', { name: '复制到右边' }) as HTMLButtonElement
     expect(contextCopyButton.disabled).toBe(false)
 
     await user.click(contextCopyButton)
@@ -501,14 +522,12 @@ describe('ComparePage renderer interactions', () => {
     })
 
     const user = userEvent.setup()
-    render(<ComparePage />)
+    render(<AppShell><ComparePage /></AppShell>)
 
-    const configRow = screen.getAllByText('config')
-      .map((element) => element.closest('tr'))
-      .find((row): row is HTMLTableRowElement => row != null)
+    const configRow = treeRow('config')
 
     expect(configRow).toBeTruthy()
-    await user.click(configRow!)
+    await user.click(configRow)
 
     const selectionCopyButton = screen.getByRole('button', { name: '复制所选到右边' }) as HTMLButtonElement
     expect(selectionCopyButton.disabled).toBe(false)
@@ -574,7 +593,7 @@ describe('ComparePage renderer interactions', () => {
 
     render(<ComparePage />)
 
-    const compareTab = screen.getByRole('button', { name: '本地:old-left ↔ 本地:old-right' })
+    const compareTab = screen.getByRole('tab', { name: '本地:old-left ↔ 本地:old-right' })
     const fullLabel = '/var/old-left ↔ /var/old-right'
 
     expect(compareTab.getAttribute('title')).toBe(fullLabel)

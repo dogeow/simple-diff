@@ -9,6 +9,11 @@ export interface CompareNodeInteractions {
   readonly isLoading: (node: TreeNode) => boolean
   readonly toggleNode: (node: TreeNode) => void
   readonly openNode: (node: TreeNode) => void
+  /**
+   * 双击 / `Enter` / `Space` 的统一含义（蓝图 §1.4：「展开目录 / 打开文件 Diff」）。
+   * 以前双击目录什么也不发生——两处树都直接接了 `openNode`，而它对目录是 no-op。
+   */
+  readonly activateNode: (node: TreeNode) => void
 }
 
 export function useCompareNodeInteractions(
@@ -55,5 +60,13 @@ export function useCompareNodeInteractions(
     [onDoubleClickFile],
   )
 
-  return { isExpanded, isLoading, toggleNode, openNode }
+  const activateNode = useCallback(
+    (node: TreeNode) => {
+      if (node.isDirectory) toggleNode(node)
+      else openNode(node)
+    },
+    [openNode, toggleNode],
+  )
+
+  return { isExpanded, isLoading, toggleNode, openNode, activateNode }
 }

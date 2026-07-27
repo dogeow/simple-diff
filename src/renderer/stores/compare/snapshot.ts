@@ -5,7 +5,16 @@ import type { CompareSessionSnapshot, CompareStore } from './types'
 
 export const MAX_COMPARE_TAB_SNAPSHOT_ENTRIES = 5000
 
-export function hasCompareSessionContent(snapshot: CompareSessionSnapshot): boolean {
+/**
+ * 结构上兼容快照和 live store，所以“对比标签有没有内容”与“工作区是 setup 还是
+ * result”是同一个判断，不会分叉（蓝图 chunk 5 第 2 条：没有新增持久化字段）。
+ */
+export type CompareSessionContentSource = Pick<
+  CompareSessionSnapshot,
+  'leftSource' | 'rightSource' | 'entries' | 'scanning' | 'comparing' | 'paused' | 'done' | 'error'
+>
+
+export function hasCompareSessionContent(snapshot: CompareSessionContentSource): boolean {
   return Boolean(
     snapshot.leftSource
     || snapshot.rightSource

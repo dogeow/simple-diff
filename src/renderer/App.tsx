@@ -1,11 +1,6 @@
-import Layout from './components/Layout'
-import HomePage from './pages/HomePage'
+import AppShell from './components/AppShell'
 import ComparePage from './pages/ComparePage'
 import TextComparePage from './pages/TextComparePage'
-import SSHManagerPage from './pages/SSHManagerPage'
-import HistoryPage from './pages/HistoryPage'
-import SyncPage from './pages/SyncPage'
-import SettingsPage from './pages/SettingsPage'
 import { useAppStore } from './stores/app-store'
 import { useEffect, useMemo, useRef } from 'react'
 import { useShallow } from 'zustand/react/shallow'
@@ -16,6 +11,8 @@ import { shouldShowSyncTaskInCompare } from './utils/sync-task-visibility'
 import { getSyncRecompareRootsFromItems } from './utils/sync-dirty'
 import type { SyncTaskSnapshot } from '../../shared/types'
 import { addRendererLog } from './stores/log-store'
+import { persistActiveCompareTab } from './utils/compare-session-navigation'
+import { applyCompareDefaults } from './utils/compare-defaults'
 
 const MAX_LIVE_LOCAL_WATCH_ENTRIES = 50_000
 
@@ -83,14 +80,22 @@ export default function App() {
     const targetCompareTab = appState.compareTabs.find((tab) => tab.id === appState.activeCompareTabId)
       ?? appState.compareTabs[appState.compareTabs.length - 1]
 
-    if (!targetCompareTab) return
+    // 全新工作区：没有任何可恢复的会话，此时（也只有此时）设置里的「对比默认值」生效。
+    if (!targetCompareTab) {
+      applyCompareDefaults()
+      return
+    }
 
     useCompareStore.getState().restoreSnapshot(
       sanitizePersistedCompareSessionSnapshot(targetCompareTab.snapshot),
     )
     replaceDiffTabs(targetCompareTab.diffTabs, targetCompareTab.activeDiffTabId)
     setActiveCompareTab(targetCompareTab.id)
-    setPage('compare')
+
+    // 模式现在会被持久化：上次停在“文本对比”就留在文本对比，不要把用户拽回来。
+    if (appState.page !== 'text') {
+      setPage('compare')
+    }
   }, [replaceDiffTabs, setActiveCompareTab, setPage])
 
   useEffect(() => {
@@ -209,20 +214,23 @@ export default function App() {
         compareState.setRightPath(paths[1])
         void runCompare()
       } else {
-        setPage('home')
+        // 只拿到一个路径：留在对比工作区的 setup 态，让用户补另一侧。
+        setPage('compare')
       }
     })
   }, [runCompare, setPage])
 
+  // F4：退出前把 live 会话写回它的标签，否则最后一次改动只活在 compare store 里。
+  useEffect(() => {
+    const handleBeforeUnload = () => persistActiveCompareTab()
+    window.addEventListener('beforeunload', handleBeforeUnload)
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload)
+  }, [])
+
   return (
-    <Layout>
-      {page === 'home' && <HomePage />}
+    <AppShell>
       {page === 'compare' && <ComparePage />}
       {page === 'text' && <TextComparePage />}
-      {page === 'ssh' && <SSHManagerPage />}
-      {page === 'history' && <HistoryPage />}
-      {page === 'sync' && <SyncPage />}
-      {page === 'settings' && <SettingsPage />}
-    </Layout>
+    </AppShell>
   )
 }

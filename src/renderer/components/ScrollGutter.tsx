@@ -46,10 +46,17 @@ export default function ScrollGutter({ scrollRef, markers }: ScrollGutterProps) 
     if (!el) return
 
     el.addEventListener('scroll', updateThumb, { passive: true })
+    updateThumb()
+
+    // `ResizeObserver` 在 jsdom 下不存在。其余滚动区（`SplitTree` / `CompareTree` /
+    // `FileDiffView`）早就这样兜底了，这里漏了一处，于是任何渲染到分栏树或文件 Diff
+    // 的测试都会直接抛。
+    if (typeof ResizeObserver === 'undefined') {
+      return () => el.removeEventListener('scroll', updateThumb)
+    }
+
     const observer = new ResizeObserver(updateThumb)
     observer.observe(el)
-
-    updateThumb()
 
     return () => {
       el.removeEventListener('scroll', updateThumb)
@@ -108,14 +115,17 @@ export default function ScrollGutter({ scrollRef, markers }: ScrollGutterProps) 
   return (
     <div
       ref={gutterRef}
-      className="group relative w-3 shrink-0 cursor-pointer border-x border-neutral-800 bg-neutral-850"
+      // 标记位：装订线的高度必须等于它所观察的那个滚动区，标记的百分比坐标才对得上。
+      // 分栏容器换成 `SplitPane` 之后，这条不变式靠测试钉住（见 `split-surfaces.test.tsx`）。
+      data-scroll-gutter=""
+      className="group relative w-3 shrink-0 cursor-pointer border-x border-border bg-surface"
       onClick={handleGutterClick}
     >
       {/* Diff markers */}
       {markers?.map((m, i) => (
         <div
           key={i}
-          className="absolute left-0 right-0 bg-amber-500/70 transition-colors group-hover:bg-amber-400/80"
+          className="absolute left-0 right-0 bg-diff-mod transition-colors group-hover:bg-warning"
           style={{
             top: `${m.start * 100}%`,
             height: `max(${m.height * 100}%, 2px)`,
@@ -126,7 +136,7 @@ export default function ScrollGutter({ scrollRef, markers }: ScrollGutterProps) 
       {/* Scroll thumb */}
       {visible && (
         <div
-          className="absolute left-0.5 right-0.5 z-10 rounded-full bg-neutral-500/50 transition-colors hover:bg-neutral-400/80"
+          className="absolute left-0.5 right-0.5 z-10 rounded-full bg-border-strong transition-colors hover:bg-fg-subtle"
           style={{
             top: `${thumbTop}px`,
             height: `${thumbHeight}px`,

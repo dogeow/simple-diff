@@ -1,6 +1,7 @@
-import { useId, useState } from 'react'
+import { useState } from 'react'
 import type { SSHConfig, SSHConfigInput, SSHAuthType } from '../../../shared/types'
-import { CheckIcon, FolderIcon } from './Icons'
+import { Check, Folder } from 'lucide-react'
+import { Button, Field, Input, Panel, RadioGroup } from './ui'
 
 interface SSHConfigFormProps {
   readonly initial?: SSHConfig
@@ -13,9 +14,16 @@ const AUTH_TYPES: { value: SSHAuthType; label: string }[] = [
   { value: 'privateKey', label: 'SSH Key' },
 ]
 
+/**
+ * chunk 10 扫描项 4 / 5：这份表单原来是六个手写 `<input>`（每个都自己关掉了
+ * outline 再补一圈 1px 的 ring，等于绕过统一焦点环）、一条手搓的分段按钮条和两个
+ * 手搓按钮。全部换成 `Field` / `Input` / `RadioGroup variant="segmented"` / `Button`，
+ * 焦点环、失效态和 `aria-describedby` 从此由基元统一负责。
+ *
+ * 注：注释里不要再写出那两个类名的字面量——Tailwind 的扫描器连注释一起读，
+ * 会把它们当成真在用的类，凭空生成一条能压过焦点环的 utility。
+ */
 export default function SSHConfigForm({ initial, onSave, onCancel }: SSHConfigFormProps) {
-  const portId = useId()
-  const privateKeyPathId = useId()
   const [label, setLabel] = useState(initial?.label ?? '')
   const [host, setHost] = useState(initial?.host ?? '')
   const [port, setPort] = useState(initial?.port ?? 22)
@@ -72,137 +80,80 @@ export default function SSHConfigForm({ initial, onSave, onCancel }: SSHConfigFo
   return (
     <form onSubmit={handleSubmit} className="flex flex-col gap-3">
       <div className="grid grid-cols-2 gap-3">
-        <Field label="标签" value={label} onChange={setLabel} placeholder="My Server" />
-        <Field label="主机" value={host} onChange={setHost} placeholder="192.168.1.100" />
-        <div className="flex flex-col gap-1">
-          <label htmlFor={portId} className="text-[11px] font-medium uppercase tracking-wider text-neutral-500">端口</label>
-          <input
-            id={portId}
-            type="number"
-            value={port}
-            onChange={(e) => setPort(Number(e.target.value))}
-            className="rounded-md border border-neutral-700 bg-neutral-900 px-2.5 py-1.5 text-sm text-neutral-100 outline-none transition-colors hover:border-neutral-600 focus:border-blue-500 focus:ring-1 focus:ring-blue-500/30"
-          />
-        </div>
-        <Field label="用户名" value={username} onChange={setUsername} placeholder="root" />
+        <Field label="标签">
+          <Input value={label} placeholder="My Server" onChange={(e) => setLabel(e.target.value)} />
+        </Field>
+        {/*
+          主机是唯一必填项——`handleSubmit` 里唯一会拦下提交的就是它。校验信息挂在
+          字段上（§7.5 field 级：`--ds-danger` 边框 + `aria-describedby`），
+          而不是像以前那样堆在表单底部一个和输入框无关的红条里。
+        */}
+        <Field label="主机" error={error === '请填写主机' ? error : undefined}>
+          <Input value={host} placeholder="192.168.1.100" onChange={(e) => setHost(e.target.value)} />
+        </Field>
+        <Field label="端口">
+          <Input type="number" value={port} onChange={(e) => setPort(Number(e.target.value))} />
+        </Field>
+        <Field label="用户名">
+          <Input value={username} placeholder="root" onChange={(e) => setUsername(e.target.value)} />
+        </Field>
       </div>
 
-      <div className="flex flex-col gap-1.5">
-        <span className="text-[11px] font-medium uppercase tracking-wider text-neutral-500">认证方式</span>
-        <div className="inline-flex w-fit overflow-hidden rounded-md border border-neutral-700 bg-neutral-800">
-          {AUTH_TYPES.map((auth) => (
-            <button
-              key={auth.value}
-              type="button"
-              onClick={() => setAuthType(auth.value)}
-              aria-pressed={authType === auth.value}
-              className={`px-3 py-1.5 text-xs font-medium transition-colors ${
-                authType === auth.value
-                  ? 'bg-blue-600 text-white'
-                  : 'text-neutral-300 hover:bg-neutral-700'
-              } ${auth.value === 'privateKey' ? 'border-l border-neutral-700' : ''}`}
-            >
-              {auth.label}
-            </button>
-          ))}
-        </div>
+      <div className="flex flex-col gap-1">
+        <span className="text-xs font-medium text-fg-muted">认证方式</span>
+        <RadioGroup
+          name="ssh-auth-type"
+          aria-label="认证方式"
+          variant="segmented"
+          value={authType}
+          onValueChange={setAuthType}
+          options={AUTH_TYPES}
+          className="w-fit"
+        />
       </div>
 
       {authType === 'password' && (
-        <Field label="密码" value={password} onChange={setPassword} type="password" />
+        <Field label="密码">
+          <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
+        </Field>
       )}
 
       {authType === 'privateKey' && (
         <>
-          <div className="flex flex-col gap-1">
-            <label htmlFor={privateKeyPathId} className="text-[11px] font-medium uppercase tracking-wider text-neutral-500">私钥路径</label>
+          <Field label="私钥路径">
             <div className="flex gap-2">
-              <input
-                id={privateKeyPathId}
-                type="text"
+              <Input
+                mono
                 value={privateKeyPath}
-                onChange={(e) => setPrivateKeyPath(e.target.value)}
                 placeholder="~/.ssh/id_rsa"
-                className="flex-1 rounded-md border border-neutral-700 bg-neutral-900 px-2.5 py-1.5 font-mono text-sm text-neutral-100 placeholder-neutral-500 outline-none transition-colors hover:border-neutral-600 focus:border-blue-500 focus:ring-1 focus:ring-blue-500/30"
+                wrapperClassName="min-w-0 flex-1"
+                onChange={(e) => setPrivateKeyPath(e.target.value)}
               />
-              <button
-                type="button"
-                onClick={handleBrowseKey}
-                className="inline-flex items-center gap-1.5 rounded-md border border-neutral-700 bg-neutral-800 px-3 py-1.5 text-sm text-neutral-200 transition-colors hover:border-neutral-600 hover:bg-neutral-750"
-              >
-                <FolderIcon width={13} height={13} />
-                浏览
-              </button>
+              <Button icon={Folder} onClick={() => void handleBrowseKey()}>浏览</Button>
             </div>
-          </div>
-          <Field label="密钥密码（可选）" value={passphrase} onChange={setPassphrase} type="password" />
+          </Field>
+          <Field label="密钥密码（可选）">
+            <Input type="password" value={passphrase} onChange={(e) => setPassphrase(e.target.value)} />
+          </Field>
         </>
       )}
 
-      <Field label="默认路径（可选）" value={defaultPath} onChange={setDefaultPath} placeholder="/home/user" />
+      <Field label="默认路径（可选）">
+        <Input value={defaultPath} placeholder="/home/user" onChange={(e) => setDefaultPath(e.target.value)} />
+      </Field>
 
-      {error && (
-        <div className="rounded-md border border-rose-900/60 bg-rose-950/40 px-3 py-2 text-sm text-rose-300">
+      {error && error !== '请填写主机' && (
+        <Panel variant="bordered" role="alert" className="border-danger/40 bg-danger-quiet p-2 text-sm text-danger-text">
           {error}
-        </div>
+        </Panel>
       )}
 
       <div className="flex gap-2 pt-1">
-        <button
-          type="submit"
-          disabled={saving}
-          className="inline-flex items-center gap-1.5 rounded-md bg-blue-600 px-4 py-1.5 text-sm font-medium text-white shadow-sm transition-colors hover:bg-blue-500 disabled:opacity-50"
-        >
-          {saving ? (
-            <>
-              <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent" />
-              保存中...
-            </>
-          ) : (
-            <>
-              <CheckIcon width={13} height={13} />
-              保存
-            </>
-          )}
-        </button>
-        <button
-          type="button"
-          onClick={onCancel}
-          className="rounded-md border border-neutral-700 bg-neutral-800/60 px-4 py-1.5 text-sm text-neutral-200 transition-colors hover:border-neutral-600 hover:bg-neutral-800"
-        >
-          取消
-        </button>
+        <Button type="submit" variant="primary" icon={Check} loading={saving} disabled={saving}>
+          {saving ? '保存中...' : '保存'}
+        </Button>
+        <Button onClick={onCancel}>取消</Button>
       </div>
     </form>
-  )
-}
-
-function Field({
-  label,
-  value,
-  onChange,
-  placeholder,
-  type = 'text',
-}: {
-  label: string
-  value: string
-  onChange: (v: string) => void
-  placeholder?: string
-  type?: string
-}) {
-  const inputId = useId()
-
-  return (
-    <div className="flex flex-col gap-1">
-      <label htmlFor={inputId} className="text-[11px] font-medium uppercase tracking-wider text-neutral-500">{label}</label>
-      <input
-        id={inputId}
-        type={type}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder={placeholder}
-        className="rounded-md border border-neutral-700 bg-neutral-900 px-2.5 py-1.5 text-sm text-neutral-100 placeholder-neutral-500 outline-none transition-colors hover:border-neutral-600 focus:border-blue-500 focus:ring-1 focus:ring-blue-500/30"
-      />
-    </div>
   )
 }
