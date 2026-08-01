@@ -82,3 +82,18 @@ export function getSyncRecompareRootsFromItems(items: readonly SyncTaskItemSnaps
     return path === null ? [] : [path]
   }))
 }
+
+/**
+ * Watch / dirty 路径重比时始终取「父目录」：文件或目录自身变更都需要父级重扫，
+ * 才能发现新增/删除邻居。再经 minimize 去掉被祖先覆盖的根。
+ */
+export function getDirtyRecompareRoots(dirtyPaths: ReadonlySet<string> | Iterable<string>): readonly string[] {
+  const parents: string[] = []
+  for (const dirtyPath of dirtyPaths) {
+    const parent = getParentPath(dirtyPath)
+    if (parent !== null) {
+      parents.push(parent)
+    }
+  }
+  return minimizeSyncRecompareRoots(parents)
+}

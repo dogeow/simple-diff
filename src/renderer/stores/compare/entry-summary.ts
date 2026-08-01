@@ -49,11 +49,47 @@ export function adjustCompareEntrySummary(
 }
 
 export function summarizeCompareEntries(entries: readonly CompareEntry[]): CompareEntrySummary {
-  let summary = createEmptyCompareEntrySummary()
+  // Single-pass mutable accumulator — avoid one object per entry on large trees.
+  let equal = 0
+  let different = 0
+  let leftOnly = 0
+  let rightOnly = 0
+  let pendingCount = 0
+  let allDirCount = 0
 
   for (const entry of entries) {
-    summary = adjustCompareEntrySummary(summary, entry, 1)
+    switch (entry.state) {
+      case 'equal':
+        equal += 1
+        break
+      case 'different':
+        different += 1
+        break
+      case 'left_only':
+        leftOnly += 1
+        break
+      case 'right_only':
+        rightOnly += 1
+        break
+      case 'pending':
+      case 'comparing':
+        pendingCount += 1
+        break
+    }
+    if (entry.isDirectory) {
+      allDirCount += 1
+    }
   }
 
-  return summary
+  return {
+    stats: {
+      total: entries.length,
+      equal,
+      different,
+      leftOnly,
+      rightOnly,
+    },
+    pendingCount,
+    allDirCount,
+  }
 }

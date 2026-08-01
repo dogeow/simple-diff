@@ -5,6 +5,7 @@ import type { CompareEntry, CompareFilter } from '../../../shared/types'
 import { useCompareStore } from '../stores/compare-store'
 import { useSettingsStore } from '../stores/settings-store'
 import { addRendererLog } from '../stores/log-store'
+import { formatRendererMemoryUsage } from '../utils/renderer-memory'
 import { buildVisibleNodeList, prepareCompareEntries, type TreeSide, type VisibleTreeNodes } from '../utils/tree-utils'
 
 interface UseVisibleCompareNodesOptions {
@@ -14,23 +15,6 @@ interface UseVisibleCompareNodesOptions {
 }
 
 const HEAVY_ENTRIES_THRESHOLD = 50_000
-
-function formatBytes(value: number): string {
-  if (!Number.isFinite(value)) return '-'
-  return `${(value / 1024 / 1024).toFixed(1)}MB`
-}
-
-function rendererHeapSummary(): string {
-  const memory = (performance as Performance & {
-    readonly memory?: {
-      readonly usedJSHeapSize: number
-      readonly totalJSHeapSize: number
-      readonly jsHeapSizeLimit: number
-    }
-  }).memory
-  if (!memory) return 'heap=n/a'
-  return `heap=${formatBytes(memory.usedJSHeapSize)}/${formatBytes(memory.totalJSHeapSize)} limit=${formatBytes(memory.jsHeapSizeLimit)}`
-}
 
 export function useVisibleCompareNodes({
   entries,
@@ -58,7 +42,7 @@ export function useVisibleCompareNodes({
       addRendererLog(
         'compare',
         'info',
-        `prepareCompareEntries:start side=${side ?? 'merged'} filter=${filter} entries=${deferredEntries.length} ${rendererHeapSummary()}`,
+        `prepareCompareEntries:start side=${side ?? 'merged'} filter=${filter} entries=${deferredEntries.length} ${formatRendererMemoryUsage()}`,
       )
       const startedAt = performance.now()
       const result = prepareCompareEntries(deferredEntries, { filter, pathFilter, hideDot, hideDotFilter, side })
@@ -66,7 +50,7 @@ export function useVisibleCompareNodes({
       addRendererLog(
         'compare',
         'info',
-        `prepareCompareEntries side=${side ?? 'merged'} filter=${filter} entries=${deferredEntries.length} -> ${result.length} ${elapsed}ms ${rendererHeapSummary()}`,
+        `prepareCompareEntries side=${side ?? 'merged'} filter=${filter} entries=${deferredEntries.length} -> ${result.length} ${elapsed}ms ${formatRendererMemoryUsage()}`,
       )
       return result
     },
@@ -81,7 +65,7 @@ export function useVisibleCompareNodes({
       addRendererLog(
         'compare',
         'info',
-        `buildVisibleNodeList:start side=${side ?? 'merged'} prepared=${preparedEntries.length} expanded=${expandedDirs.size} ${rendererHeapSummary()}`,
+        `buildVisibleNodeList:start side=${side ?? 'merged'} prepared=${preparedEntries.length} expanded=${expandedDirs.size} ${formatRendererMemoryUsage()}`,
       )
       const startedAt = performance.now()
       const result = buildVisibleNodeList(preparedEntries, expandedDirs)
@@ -89,7 +73,7 @@ export function useVisibleCompareNodes({
       addRendererLog(
         'compare',
         'info',
-        `buildVisibleNodeList side=${side ?? 'merged'} prepared=${preparedEntries.length} -> visible=${result.length} ${elapsed}ms ${rendererHeapSummary()}`,
+        `buildVisibleNodeList side=${side ?? 'merged'} prepared=${preparedEntries.length} -> visible=${result.length} ${elapsed}ms ${formatRendererMemoryUsage()}`,
       )
       return result
     },

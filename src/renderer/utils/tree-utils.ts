@@ -152,6 +152,19 @@ function createVisibleTreeNodes(
     return indexes ? sorted[indexes[index]] : sorted[index]
   }
 
+  // Lazy path set: selection pruning may call hasPath many times per frame.
+  let pathSet: Set<string> | null = null
+  const getPathSet = (): Set<string> => {
+    if (pathSet) return pathSet
+    const next = new Set<string>()
+    for (let index = 0; index < length; index += 1) {
+      const info = getInfo(index)
+      if (info) next.add(info.entry.relativePath)
+    }
+    pathSet = next
+    return next
+  }
+
   return {
     length,
     get: (index) => {
@@ -185,13 +198,7 @@ function createVisibleTreeNodes(
       }
       return result
     },
-    hasPath: (relativePath) => {
-      for (let index = 0; index < length; index += 1) {
-        const info = getInfo(index)
-        if (info?.entry.relativePath === relativePath) return true
-      }
-      return false
-    },
+    hasPath: (relativePath) => getPathSet().has(relativePath),
   }
 }
 
@@ -415,20 +422,6 @@ function prefilterEntries(
   return nextEntries ?? entries
 }
 
-export function matchesCompareFilter(targetFilter: CompareFilter, entry: CompareEntry): boolean {
-  if (targetFilter === 'all') return true
-  if (targetFilter === 'paired') {
-    return Boolean(entry.left && entry.right)
-  }
-  if (targetFilter === 'different') {
-    return entry.state === 'different' || entry.state === 'left_only' || entry.state === 'right_only'
-  }
-  if (targetFilter === 'unresolved') {
-    return entry.state === 'pending' || entry.state === 'comparing'
-  }
-  return entry.state === targetFilter
-}
-
 function matchesFilterWithState(
   targetFilter: CompareFilter,
   entry: CompareEntry,
@@ -445,6 +438,10 @@ function matchesFilterWithState(
     return effectiveState === 'pending' || effectiveState === 'comparing'
   }
   return effectiveState === targetFilter
+}
+
+export function matchesCompareFilter(targetFilter: CompareFilter, entry: CompareEntry): boolean {
+  return matchesFilterWithState(targetFilter, entry, entry.state)
 }
 
 function hasAncestorIn(relativePath: string, set: ReadonlySet<string>): boolean {
@@ -582,7 +579,25 @@ export function prepareCompareEntries(
   return value
 }
 
-const DIR_STATE_PRIORITY: CompareState[] = ['different', 'comparing', 'pending', 'equal']
+/**
+ * Aggregation rank for directory effective state (higher wins).
+ * left_only / right_only fold into `different` for common directories.
+ */
+const DIR_STATE_RANK: Record<CompareState, number> = {
+  equal: 0,
+  pending: 1,
+  comparing: 2,
+  different: 3,
+  left_only: 3,
+  right_only: 3,
+}
+
+function effectiveStateFromRank(rank: number): CompareState {
+  if (rank >= 3) return 'different'
+  if (rank === 2) return 'comparing'
+  if (rank === 1) return 'pending'
+  return 'equal'
+}
 
 const effectiveDirStateCache = new WeakMap<readonly CompareEntry[], ReadonlyMap<string, CompareState>>()
 
@@ -601,27 +616,31 @@ export function computeEffectiveDirStates(entries: readonly CompareEntry[]): Rea
 
 function computeEffectiveDirStatesUncached(entries: readonly CompareEntry[]): ReadonlyMap<string, CompareState> {
   const entryByPath = new Map<string, CompareEntry>()
-  const dirStates = new Map<string, Set<CompareState>>()
+  // Max rank per ancestor path — avoids allocating a Set per directory.
+  const dirRanks = new Map<string, number>()
 
   for (const entry of entries) {
     entryByPath.set(entry.relativePath, entry)
+    const rank = DIR_STATE_RANK[entry.state]
 
     let ancestorPath = entry.relativePath
     let slashIdx = ancestorPath.lastIndexOf('/')
     while (slashIdx > 0) {
       ancestorPath = ancestorPath.slice(0, slashIdx)
-      let stateSet = dirStates.get(ancestorPath)
-      if (!stateSet) {
-        stateSet = new Set()
-        dirStates.set(ancestorPath, stateSet)
+      const previous = dirRanks.get(ancestorPath) ?? -1
+      if (rank > previous) {
+        dirRanks.set(ancestorPath, rank)
+      } else if (previous >= 3) {
+        // Ancestor already at max rank; parents were raised by an earlier path that
+        // also walked through here, so the remaining chain is already saturated.
+        break
       }
-      stateSet.add(entry.state)
       slashIdx = ancestorPath.lastIndexOf('/')
     }
   }
 
   const result = new Map<string, CompareState>()
-  for (const [dirPath, states] of dirStates) {
+  for (const [dirPath, rank] of dirRanks) {
     const dirEntry = entryByPath.get(dirPath)
     if (!dirEntry?.isDirectory) continue
 
@@ -630,17 +649,7 @@ function computeEffectiveDirStatesUncached(entries: readonly CompareEntry[]): Re
       continue
     }
 
-    if (states.has('different') || states.has('left_only') || states.has('right_only')) {
-      result.set(dirPath, 'different')
-      continue
-    }
-
-    for (const p of DIR_STATE_PRIORITY) {
-      if (states.has(p)) {
-        result.set(dirPath, p)
-        break
-      }
-    }
+    result.set(dirPath, effectiveStateFromRank(rank))
   }
 
   return result
