@@ -13,6 +13,7 @@ import { useGlobalShortcuts } from '../hooks/useGlobalShortcuts'
 import { SHORTCUT } from '../hooks/shortcuts'
 import { openCompareTab, persistActiveCompareTab } from '../utils/compare-session-navigation'
 import { getRuntimeInfo } from '../runtime/runtime-info'
+import { isTauriRuntime } from '../runtime/ensure-app-api'
 import type { ThemePreference } from '../stores/settings-store'
 
 interface AppShellProps {
@@ -41,6 +42,8 @@ const THEME_ITEMS: ReadonlyArray<{ value: ThemePreference; label: string }> = [
  */
 export default function AppShell({ children }: AppShellProps) {
   const runtime = getRuntimeInfo()
+  // macOS window controls share the 36px mode bar instead of adding a title row.
+  const nativeTitlebar = isTauriRuntime() && typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform)
   const page = useAppStore((s) => s.page)
   const setPage = useAppStore((s) => s.setPage)
   const openOverlay = useUIStore((s) => s.openOverlay)
@@ -111,7 +114,11 @@ export default function AppShell({ children }: AppShellProps) {
 
   return (
     <div className="flex h-screen flex-col bg-canvas text-fg">
-      <header className="app-drag-region flex h-titlebar shrink-0 items-center gap-2 border-b border-border bg-surface px-2">
+      <header
+        data-tauri-drag-region
+        data-native-titlebar={nativeTitlebar || undefined}
+        className="app-drag-region flex h-titlebar shrink-0 items-center gap-2 border-b border-border bg-surface px-2 data-[native-titlebar=true]:pl-20"
+      >
         <Tabs
           aria-label="视图模式"
           variant="underline"
@@ -121,7 +128,8 @@ export default function AppShell({ children }: AppShellProps) {
           items={[...MODE_TABS]}
           className="self-stretch border-b-0"
         />
-        <div className="ml-auto flex items-center gap-1">
+        <div data-tauri-drag-region className="h-full min-w-4 flex-1" />
+        <div className="flex items-center gap-1">
           <Button
             size="sm"
             variant="ghost"
