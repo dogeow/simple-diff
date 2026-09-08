@@ -1,4 +1,5 @@
-import { useEffect, useMemo } from 'react'
+import { formatSize } from '../tree-row-utils'
+import { useEffect, useMemo, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { FolderSync, GitCompare, Pause, Play, Trash2 } from 'lucide-react'
 import type { SyncTaskItemSnapshot, SyncTaskStatus } from '../../../../shared/types'
@@ -43,6 +44,11 @@ const ITEM_LABEL: Record<SyncTaskItemSnapshot['status'], string> = {
 }
 
 function QueueGroup({ title, items }: { readonly title: string; readonly items: readonly SyncTaskItemSnapshot[] }) {
+  const [page, setPage] = useState(0)
+  const pageSize = 100
+  const lastPage = Math.max(0, Math.ceil(items.length / pageSize) - 1)
+  const currentPage = Math.min(page, lastPage)
+  const visibleItems = items.slice(currentPage * pageSize, (currentPage + 1) * pageSize)
   return (
     <Panel
       header={
@@ -57,7 +63,7 @@ function QueueGroup({ title, items }: { readonly title: string; readonly items: 
         <p className="px-3 py-2 text-xs text-fg-subtle">暂无{title}项目</p>
       ) : (
         <ul className="divide-y divide-border">
-          {items.map((item) => (
+          {visibleItems.map((item) => (
             <li
               key={`${item.kind}:${item.relativePath}`}
               className="flex items-center gap-2 px-3 py-1.5"
@@ -71,6 +77,11 @@ function QueueGroup({ title, items }: { readonly title: string; readonly items: 
           ))}
         </ul>
       )}
+      {items.length > pageSize ? <div className="flex items-center justify-end gap-2 border-t border-border px-3 py-2 text-xs text-fg-muted">
+        <span>{currentPage + 1} / {lastPage + 1} 页</span>
+        <Button size="sm" disabled={currentPage === 0} onClick={() => setPage(currentPage - 1)}>上一页</Button>
+        <Button size="sm" disabled={currentPage === lastPage} onClick={() => setPage(currentPage + 1)}>下一页</Button>
+      </div> : null}
     </Panel>
   )
 }
@@ -139,6 +150,12 @@ export default function SyncDrawer({ open, onOpenChange }: SyncDrawerProps) {
         />
       ) : (
         <div className="flex flex-col gap-3">
+          {syncTask.status === 'paused' && syncTask.currentPath ? <p role="status" className="text-xs text-fg-muted">正在完成当前文件，随后暂停；完成前无法清除队列。</p> : null}
+          {syncTask.currentPath && syncTask.currentTotalBytes ? <Panel>
+            <p className="truncate font-mono text-xs text-fg" title={syncTask.currentPath}>{syncTask.currentPath}</p>
+            <ProgressBar status="running" value={(syncTask.currentBytes ?? 0) / syncTask.currentTotalBytes}
+              detail={`${formatSize(syncTask.currentBytes ?? 0)} / ${formatSize(syncTask.currentTotalBytes)}`} />
+          </Panel> : null}
           <Panel>
             <div className="flex flex-col gap-2">
               <div className="flex flex-wrap items-center gap-2 text-xs">
@@ -188,7 +205,7 @@ export default function SyncDrawer({ open, onOpenChange }: SyncDrawerProps) {
                   size="sm"
                   variant="danger-ghost"
                   icon={Trash2}
-                  disabled={syncTask.status === 'running'}
+                  disabled={syncTask.status === 'running' || (syncTask.status === 'paused' && Boolean(syncTask.currentPath))}
                   onClick={() => void clear()}
                 >
                   清除

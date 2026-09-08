@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { createJSONStorage, persist } from 'zustand/middleware'
 import type { SourceConfig, TextDiffResult } from '../../../shared/types'
+import { showToast } from './toast-store'
 import { sanitizePersistedCompareSessionSnapshot, type CompareSessionSnapshot } from './compare-store'
 
 /**
@@ -37,6 +38,12 @@ export interface DiffTab {
   readonly diffResult: TextDiffResult | null
   readonly loadError: string | null
   readonly loading: boolean
+  readonly savingLeft?: boolean
+  readonly savingRight?: boolean
+  readonly contentsLoaded?: boolean
+  readonly computing?: boolean
+  readonly undoStack?: readonly { leftContent: string; rightContent: string }[]
+  readonly redoStack?: readonly { leftContent: string; rightContent: string }[]
 }
 
 export interface CompareTab {
@@ -57,6 +64,7 @@ interface AppStore {
   setPage: (page: Page) => void
   addDiffTab: (tab: DiffTab) => void
   updateDiffTab: (id: string, updates: Partial<DiffTab>) => void
+  updateDiffTabSession: (sessionId: string, updates: Partial<DiffTab>) => void
   closeDiffTab: (id: string) => void
   setActiveDiffTab: (id: string | null) => void
   replaceDiffTabs: (tabs: readonly DiffTab[], activeId: string | null) => void
@@ -92,23 +100,22 @@ export function migratePersistedAppState(persisted: unknown): PersistedAppState 
   }
 }
 
-/**
- * F2：只有“当前对比标签的当前 diff 标签”保留正文，其余仍然清空、激活时再按需读盘
- * （`utils/diff-tab-loader.ts`）。全部保留会把整份文件塞进 localStorage；全部清空
- * 则让重启后打开的那个 diff 变成必须重新读盘的空壳。
- */
+/** Persist all dirty drafts and the active file; diff results are recomputed on restore. */
 function sanitizePersistedDiffTabs(
   diffTabs: readonly DiffTab[],
   keepContentForId: string | null,
 ): readonly DiffTab[] {
   return diffTabs
     .filter((tab) => !tab.loading)
-    .map((tab) => (tab.id === keepContentForId ? tab : {
+    .map(({ undoStack: _undo, redoStack: _redo, savingLeft: _savingLeft, savingRight: _savingRight, ...tab }) => (tab.id === keepContentForId || tab.leftContent !== tab.originalLeftContent || tab.rightContent !== tab.originalRightContent
+      ? { ...tab, computing: false, contentsLoaded: !tab.loadError, diffResult: null } : {
       ...tab,
       leftContent: '',
       rightContent: '',
       originalLeftContent: '',
       originalRightContent: '',
+      contentsLoaded: false,
+      computing: false,
       diffResult: null,
     }))
 }
@@ -119,12 +126,12 @@ function createRestorableCompareTab(
   liveActiveDiffTabId?: string | null,
   keepActiveDiffContent = false,
 ): CompareTab {
-  const requestedActiveDiffTabId = liveActiveDiffTabId ?? tab.activeDiffTabId
+  const requestedActiveDiffTabId = liveDiffTabs === undefined ? tab.activeDiffTabId : liveActiveDiffTabId ?? null
   const diffTabs = sanitizePersistedDiffTabs(
     liveDiffTabs ?? tab.diffTabs,
     keepActiveDiffContent ? requestedActiveDiffTabId : null,
   )
-  const activeDiffTabId = diffTabs.some((diffTab) => diffTab.id === requestedActiveDiffTabId)
+  const activeDiffTabId = requestedActiveDiffTabId === null ? null : diffTabs.some((diffTab) => diffTab.id === requestedActiveDiffTabId)
     ? requestedActiveDiffTabId
     : (diffTabs.at(-1)?.id ?? null)
 
@@ -167,7 +174,14 @@ const noopStorage = {
 
 const appStorage = createJSONStorage<PersistedAppState>(() => {
   if (typeof window !== 'undefined' && window.localStorage) {
-    return window.localStorage
+    return {
+      getItem: (key: string) => window.localStorage.getItem(key),
+      removeItem: (key: string) => window.localStorage.removeItem(key),
+      setItem: (key: string, value: string) => {
+        try { window.localStorage.setItem(key, value) }
+        catch { showToast({ id: 'workspace-persist-error', tone: 'error', message: '工作区恢复数据保存失败', description: '请先保存文件修改，再关闭应用。' }) }
+      },
+    }
   }
 
   return noopStorage
@@ -200,6 +214,14 @@ export const useAppStore = create<AppStore>()(persist<AppStore, [], [], Persiste
     }))
   },
 
+  updateDiffTabSession: (sessionId, updates) => set((state) => ({
+    diffTabs: state.diffTabs.map((tab) => tab.sessionId === sessionId ? { ...tab, ...updates } : tab),
+    compareTabs: state.compareTabs.map((session) => ({
+      ...session,
+      diffTabs: session.diffTabs.map((tab) => tab.sessionId === sessionId ? { ...tab, ...updates } : tab),
+    })),
+  })),
+
   closeDiffTab: (id) => {
     set((state) => {
       const newTabs = state.diffTabs.filter((t) => t.id !== id)
@@ -224,7 +246,9 @@ export const useAppStore = create<AppStore>()(persist<AppStore, [], [], Persiste
 
   saveCompareTab: (tab) => {
     set((state) => {
-      const nextTab = createRestorableCompareTab(tab)
+      const diffTabs = tab.diffTabs.filter((file) => !file.loading)
+      const nextTab = { ...tab, diffTabs, activeDiffTabId: tab.activeDiffTabId === null ? null
+        : diffTabs.some((file) => file.id === tab.activeDiffTabId) ? tab.activeDiffTabId : diffTabs.at(-1)?.id ?? null }
       const existingIndex = state.compareTabs.findIndex((candidate) => candidate.id === tab.id)
 
       if (existingIndex < 0) {

@@ -284,12 +284,18 @@ pub struct SyncTaskSnapshot {
   pub total_items: u64,
   pub completed_items: u64,
   pub current_path: Option<String>,
+  #[serde(default, skip_serializing_if = "Option::is_none")]
+  pub current_bytes: Option<u64>,
+  #[serde(default, skip_serializing_if = "Option::is_none")]
+  pub current_total_bytes: Option<u64>,
   pub last_completed_path: Option<String>,
   pub last_error: Option<String>,
   pub created_at: u64,
   pub updated_at: u64,
   #[serde(skip_serializing_if = "Option::is_none")]
   pub items: Option<Vec<SyncTaskItemSnapshot>>,
+  #[serde(default)]
+  pub items_delta: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

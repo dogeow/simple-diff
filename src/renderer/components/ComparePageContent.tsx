@@ -68,7 +68,7 @@ function ActiveDiffContent() {
     return null
   }
 
-  return <FileDiffView tab={activeTab} />
+  return <FileDiffView key={activeTab.sessionId} tab={activeTab} />
 }
 
 export default function ComparePageContent(props: ComparePageContentProps) {

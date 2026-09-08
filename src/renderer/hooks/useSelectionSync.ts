@@ -1,3 +1,5 @@
+import { confirmSync } from '../utils/confirm-sync'
+import { reportSyncResult } from '../utils/sync-feedback'
 import { useCallback } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import type { SourceConfig, SyncDirection, SyncTaskSnapshot } from '../../../shared/types'
@@ -20,6 +22,8 @@ export function canQueueSyncDirection(
   if (!leftSource || !rightSource) {
     return false
   }
+
+  if (syncTask?.currentPath && syncTask.status === 'paused') return false
 
   if (!syncTask || syncTask.status !== 'running') {
     return true
@@ -54,8 +58,8 @@ export function useSelectionSync(): SelectionSync {
   )
 
   const canQueue = useCallback(
-    (direction: SyncDirection) => canQueueSyncDirection(syncTask, leftSource, rightSource, direction),
-    [leftSource, rightSource, syncTask],
+    (direction: SyncDirection) => Boolean(compareSessionId) && canQueueSyncDirection(syncTask, leftSource, rightSource, direction),
+    [compareSessionId, leftSource, rightSource, syncTask],
   )
 
   const countFor = useCallback(
@@ -72,16 +76,18 @@ export function useSelectionSync(): SelectionSync {
     if (syncEntries.length === 0) return
     if (!compareSessionId) return
 
-    const response = await window.api.startSync({
+    const request = {
       leftSource,
       rightSource,
       direction,
       compareId: compareSessionId,
       entries: syncEntries,
-    })
+    }
+    if (!await confirmSync(request)) return
+    const response = await reportSyncResult(() => window.api.startSync(request))
 
     if (response.success) {
-      useCompareStore.getState().markDirtyPaths(Array.from(paths))
+      if (useCompareStore.getState().compareSessionId === compareSessionId) useCompareStore.getState().markDirtyPaths(Array.from(paths))
       rememberSyncDirtyRoots(response.data?.id, getSyncRecompareRootsFromEntries(syncEntries))
       setSyncTask(response.data ?? null)
     }

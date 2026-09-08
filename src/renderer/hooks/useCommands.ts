@@ -52,7 +52,6 @@ import {
   openSessionFilterPopover,
   pauseCompareSync,
   requestCloseActiveDiffTab,
-  resetDiffTabsForRerun,
   resumeCompareSync,
   saveActiveDiffTabSide,
   showCompareTree,
@@ -240,7 +239,6 @@ export function useCommands({ enabled = true }: UseCommandsOptions = {}): Comman
         disabled: !inCompare || noStrategies,
         disabledReason: compareOnly ?? '至少选择一个比较依据',
         perform: () => {
-          resetDiffTabsForRerun()
           void restartCompare()
         },
       },
@@ -264,7 +262,6 @@ export function useCommands({ enabled = true }: UseCommandsOptions = {}): Comman
         disabled: !paused || noStrategies,
         disabledReason: paused ? '至少选择一个比较依据' : '对比没有处于暂停状态',
         perform: () => {
-          resetDiffTabsForRerun()
           void resumeCompare()
         },
       },
@@ -277,7 +274,6 @@ export function useCommands({ enabled = true }: UseCommandsOptions = {}): Comman
         disabled: dirtyCount === 0 || loading || noStrategies,
         disabledReason: dirtyCount === 0 ? '磁盘上没有检测到变更' : '对比正在运行',
         perform: () => {
-          resetDiffTabsForRerun()
           void recompareDirtyPaths()
         },
       },

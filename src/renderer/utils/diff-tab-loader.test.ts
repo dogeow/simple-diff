@@ -12,11 +12,14 @@ describe('diff-tab-loader', () => {
   })
 
   it('retries transient read failures once before surfacing an error', async () => {
-    const readText = vi
-      .fn()
-      .mockResolvedValueOnce({ success: false, error: 'channel closed' })
-      .mockResolvedValueOnce({ success: true, data: 'left content' })
-      .mockResolvedValueOnce({ success: true, data: 'right content' })
+    let leftAttempts = 0
+    const readText = vi.fn(async (source) => {
+      if (source.type === 'sftp') {
+        if (leftAttempts++ === 0) return { success: false, error: 'channel closed' }
+        return { success: true, data: 'left content' }
+      }
+      return { success: true, data: 'right content' }
+    })
     const textDiff = vi.fn(async (left: string, right: string) => ({
       success: true,
       data: {

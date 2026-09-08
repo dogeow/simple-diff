@@ -52,6 +52,7 @@ impl WatchManager {
         let mut paths = Vec::new();
         for event in events {
           let path = event.path;
+          if path.file_name().and_then(|name| name.to_str()).map(|name| name.starts_with(".simple-diff-") && name.ends_with(".tmp")).unwrap_or(false) { continue; }
           if let Some(rel) = relative_to_root(&path, &left_root_cb) {
             paths.push(rel);
           } else if let Some(rel) = relative_to_root(&path, &right_root_cb) {

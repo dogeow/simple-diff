@@ -1,3 +1,6 @@
+mod sftp_atomic;
+mod ssh_host_key;
+mod atomic_file;
 mod commands;
 mod compare;
 mod files;

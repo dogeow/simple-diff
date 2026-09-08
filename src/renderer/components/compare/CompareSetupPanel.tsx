@@ -1,3 +1,4 @@
+import { confirmUnsavedChanges, isDiffTabDirty } from '../../utils/unsaved-changes'
 import { useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { ArrowLeftRight, FolderOpen, History, Play } from 'lucide-react'
@@ -138,8 +139,12 @@ export default function CompareSetupPanel({ variant = 'page', onSubmitted }: Com
   const missingInput = describeMissingInput(leftPath, rightPath, strategies.length)
   const submitDisabled = loading || missingInput !== null
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (submitDisabled) return
+    if (variant === 'dialog' && useAppStore.getState().diffTabs.some(isDiffTabDirty)) {
+      if (!await confirmUnsavedChanges()) return
+      useAppStore.getState().clearDiffTabs()
+    }
     void runCompare(variant === 'dialog' ? { reuseActiveSession: true } : undefined)
     onSubmitted?.()
   }

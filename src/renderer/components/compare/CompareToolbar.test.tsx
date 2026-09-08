@@ -1,3 +1,4 @@
+import SyncConfirmDialog from '../overlays/SyncConfirmDialog'
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
@@ -117,7 +118,7 @@ function resetStores(): void {
     syncTask: null,
   })
 
-  useUIStore.setState({ overlay: null, treeSelection: EMPTY_TREE_SELECTION })
+  useUIStore.setState({ overlay: null, pendingSync: null, treeSelection: EMPTY_TREE_SELECTION })
   useSSHStore.setState({ configs: [], loading: false, loadConfigs: async () => undefined })
   useSettingsStore.setState({ globalPathFilters: [] })
 }
@@ -248,13 +249,16 @@ describe('CompareToolbar', () => {
   it('queues a sync from the split button and keeps both directions reachable', async () => {
     const api = installApiMock()
     const user = userEvent.setup()
-    render(<CompareToolbar />)
+    render(<><CompareToolbar /><SyncConfirmDialog /></>)
 
     await user.click(screen.getByRole('button', { name: '同步到右' }))
+    expect(api.startSync).not.toHaveBeenCalled()
+    await user.click(screen.getByRole('button', { name: '确认并同步' }))
     await waitFor(() => expect(api.startSync).toHaveBeenCalledTimes(1))
 
     await user.click(screen.getByRole('button', { name: '同步选项' }))
     await user.click(screen.getByRole('menuitem', { name: '同步到左' }))
+    await user.click(screen.getByRole('button', { name: '确认并同步' }))
     await waitFor(() => expect(api.startSync).toHaveBeenCalledTimes(2))
   })
 

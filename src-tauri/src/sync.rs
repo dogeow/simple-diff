@@ -1,4 +1,4 @@
-use std::collections::{HashSet, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -96,7 +96,9 @@ fn save_persisted(app: &AppHandle, task: Option<&PersistedSyncTask>) {
     }
     Some(task) => {
       if let Ok(raw) = serde_json::to_string_pretty(task) {
-        let _ = fs::write(&path, raw);
+        if let Err(error) = crate::atomic_file::replace_from_reader(&path, &mut raw.as_bytes()) {
+          log_bridge::emit_log(app, LogScope::Sync, LogLevel::Error, format!("保存同步恢复数据失败: {error}"));
+        }
         #[cfg(unix)]
         {
           use std::os::unix::fs::PermissionsExt;
@@ -112,6 +114,8 @@ struct InnerTask {
   pending: VecDeque<SyncItem>,
   all_items: Vec<SyncItem>,
   completed_keys: HashSet<String>,
+  in_flight: bool,
+  pending_updates: HashMap<String, SyncTaskItemSnapshot>,
 }
 
 impl InnerTask {
@@ -130,6 +134,7 @@ impl InnerTask {
 
 pub struct SyncManager {
   inner: Mutex<Option<InnerTask>>,
+  progress_lock: Mutex<()>,
   loop_running: Mutex<bool>,
   last_notify: Mutex<Instant>,
   last_persist: Mutex<Instant>,
@@ -140,6 +145,7 @@ impl SyncManager {
   pub fn new() -> Self {
     Self {
       inner: Mutex::new(None),
+      progress_lock: Mutex::new(()),
       loop_running: Mutex::new(false),
       last_notify: Mutex::new(Instant::now() - std::time::Duration::from_secs(1)),
       last_persist: Mutex::new(Instant::now() - std::time::Duration::from_secs(10)),
@@ -149,9 +155,11 @@ impl SyncManager {
 
   pub fn hydrate_from_disk(&self, app: &AppHandle) {
     if let Some(mut persisted) = load_persisted(app) {
-      if persisted.snapshot.status == SyncTaskStatus::Running {
+      if matches!(persisted.snapshot.status, SyncTaskStatus::Running | SyncTaskStatus::Paused) {
         persisted.snapshot.status = SyncTaskStatus::Paused;
         persisted.snapshot.current_path = None;
+        persisted.snapshot.current_bytes = None;
+        persisted.snapshot.current_total_bytes = None;
         persisted.snapshot.updated_at = now_ms();
       }
       let pending: VecDeque<SyncItem> = persisted.pending_items.into_iter().collect();
@@ -161,6 +169,8 @@ impl SyncManager {
         pending,
         all_items: persisted.all_items,
         completed_keys,
+        in_flight: false,
+        pending_updates: HashMap::new(),
       });
       if let Some(task) = self.inner.lock().as_ref() {
         save_persisted(app, Some(&task.to_persisted()));
@@ -181,21 +191,26 @@ impl SyncManager {
   }
 
   pub fn start(&self, app: AppHandle, request: StartSyncRequest) -> Result<SyncTaskSnapshot, String> {
-    {
+    let expected_task_id = {
       let guard = self.inner.lock();
       if let Some(task) = guard.as_ref() {
+        if task.in_flight && task.snapshot.status != SyncTaskStatus::Running {
+          return Err("正在完成当前文件，请稍后再创建同步任务".into());
+        }
         if task.snapshot.status == SyncTaskStatus::Running {
           if sources_same(&task.snapshot.left_source, &request.left_source)
             && sources_same(&task.snapshot.right_source, &request.right_source)
             && task.snapshot.direction == request.direction
           {
+            let task_id = task.snapshot.id.clone();
             drop(guard);
-            return self.append_running(app, request);
+            return self.append_running(app, request, &task_id);
           }
           return Err("已有同步任务正在运行".into());
         }
       }
-    }
+      guard.as_ref().map(|task| task.snapshot.id.clone())
+    };
 
     let seeded = seed_sync_queues(&request.entries, &request.direction);
     let (pending, all_items) = self.expand_items(&app, &request, seeded.pending_items)?;
@@ -216,20 +231,29 @@ impl SyncManager {
       total_items,
       completed_items: 0,
       current_path: None,
+      current_bytes: None,
+      current_total_bytes: None,
       last_completed_path: None,
       last_error: None,
       created_at: timestamp,
       updated_at: timestamp,
       items: None,
+      items_delta: false,
     };
 
     {
       let mut guard = self.inner.lock();
+      if guard.as_ref().map(|task| &task.snapshot.id) != expected_task_id.as_ref()
+        || guard.as_ref().map(|task| task.in_flight || task.snapshot.status == SyncTaskStatus::Running).unwrap_or(false) {
+        return Err("同步队列已改变，请重新确认同步范围".into());
+      }
       *guard = Some(InnerTask {
         snapshot: snapshot.clone(),
         pending,
         all_items,
         completed_keys: HashSet::new(),
+        in_flight: false,
+        pending_updates: HashMap::new(),
       });
     }
     self.commit_progress(&app, true);
@@ -256,6 +280,7 @@ impl SyncManager {
     &self,
     app: AppHandle,
     request: StartSyncRequest,
+    expected_task_id: &str,
   ) -> Result<SyncTaskSnapshot, String> {
     let seeded = seed_sync_queues(&request.entries, &request.direction);
     let (_, incoming) = self.expand_items(&app, &request, seeded.pending_items)?;
@@ -264,7 +289,10 @@ impl SyncManager {
       let Some(task) = guard.as_mut() else {
         return Err("没有可追加的同步任务".into());
       };
-      let existing: HashSet<String> = task
+      if task.snapshot.id != expected_task_id {
+        return Err("同步队列已改变，请重试".into());
+      }
+      let mut existing: HashSet<String> = task
         .pending
         .iter()
         .chain(task.all_items.iter())
@@ -272,7 +300,7 @@ impl SyncManager {
         .collect();
       let mut appended = 0usize;
       for item in incoming {
-        if existing.contains(&item_key(&item)) {
+        if !existing.insert(item_key(&item)) {
           continue;
         }
         task.pending.push_back(item.clone());
@@ -352,7 +380,7 @@ impl SyncManager {
       if let Some(task) = guard.as_mut() {
         if task.snapshot.status == SyncTaskStatus::Running {
           task.snapshot.status = SyncTaskStatus::Paused;
-          task.snapshot.current_path = None;
+          if !task.in_flight { task.snapshot.current_path = None; }
           task.snapshot.updated_at = now_ms();
         }
       }
@@ -362,36 +390,34 @@ impl SyncManager {
   }
 
   pub fn resume(&self, app: AppHandle) -> Result<Option<SyncTaskSnapshot>, String> {
-    {
-      let mut guard = self.inner.lock();
-      let Some(task) = guard.as_mut() else {
-        return Ok(None);
-      };
-      if task.snapshot.status == SyncTaskStatus::Completed {
-        return Ok(self.get_snapshot());
-      }
-      if task.snapshot.status == SyncTaskStatus::Running {
-        return Ok(self.get_snapshot());
-      }
-      task.snapshot.status = SyncTaskStatus::Running;
-      task.snapshot.last_error = None;
-      task.snapshot.updated_at = now_ms();
-    }
+    if !self.resume_state() { return Ok(self.get_snapshot()); }
     self.commit_progress(&app, true);
     self.ensure_loop(app);
     Ok(self.get_snapshot())
   }
 
-  pub fn clear(&self, app: &AppHandle) -> Result<(), String> {
-    {
-      let guard = self.inner.lock();
-      if let Some(task) = guard.as_ref() {
-        if task.snapshot.status == SyncTaskStatus::Running {
-          return Err("同步进行中，无法清除任务".into());
-        }
-      }
+  fn resume_state(&self) -> bool {
+    let mut guard = self.inner.lock();
+    let Some(task) = guard.as_mut() else { return false; };
+    if task.snapshot.status == SyncTaskStatus::Completed || task.snapshot.status == SyncTaskStatus::Running { return false; }
+    task.snapshot.status = SyncTaskStatus::Running;
+    task.snapshot.last_error = None;
+    task.snapshot.updated_at = now_ms();
+    true
+  }
+
+  fn clear_state(&self) -> Result<(), String> {
+    let mut guard = self.inner.lock();
+    if guard.as_ref().map(|task| task.snapshot.status == SyncTaskStatus::Running || task.in_flight).unwrap_or(false) {
+      return Err("当前文件尚未完成，无法清除任务".into());
     }
-    *self.inner.lock() = None;
+    *guard = None;
+    Ok(())
+  }
+
+  pub fn clear(&self, app: &AppHandle) -> Result<(), String> {
+    let _progress = self.progress_lock.lock();
+    self.clear_state()?;
     save_persisted(app, None);
     let _ = app.emit("sync:progress", Option::<SyncTaskSnapshot>::None);
     Ok(())
@@ -426,7 +452,7 @@ impl SyncManager {
   }
 
   fn run_loop(&self, app: AppHandle) {
-    let (direction, left, right) = {
+    let (task_id, direction, left, right) = {
       let guard = self.inner.lock();
       let Some(task) = guard.as_ref() else {
         return;
@@ -435,6 +461,7 @@ impl SyncManager {
         return;
       }
       (
+        task.snapshot.id.clone(),
         task.snapshot.direction.clone(),
         task.snapshot.left_source.clone(),
         task.snapshot.right_source.clone(),
@@ -445,14 +472,14 @@ impl SyncManager {
     let source = match SourceSession::open(&app, &source_cfg) {
       Ok(s) => s,
       Err(err) => {
-        self.fail(&app, err);
+        self.fail(&app, &task_id, err);
         return;
       }
     };
     let target = match SourceSession::open(&app, &target_cfg) {
       Ok(s) => s,
       Err(err) => {
-        self.fail(&app, err);
+        self.fail(&app, &task_id, err);
         return;
       }
     };
@@ -463,7 +490,7 @@ impl SyncManager {
         let Some(task) = guard.as_mut() else {
           break;
         };
-        if task.snapshot.status != SyncTaskStatus::Running {
+        if task.snapshot.id != task_id || task.snapshot.status != SyncTaskStatus::Running {
           break;
         }
         // 仅窥视队首，成功后才真正出队，失败时保留在 pending 供 resume 重试
@@ -476,6 +503,12 @@ impl SyncManager {
           log_bridge::emit_log(&app, LogScope::Sync, LogLevel::Info, "同步完成");
           break;
         };
+        task.pending_updates.insert(item_key(&item), SyncTaskItemSnapshot {
+          relative_path: item.relative_path.clone(), kind: item.kind.clone(), status: SyncTaskItemStatus::Running,
+        });
+        task.snapshot.current_bytes = None;
+        task.snapshot.current_total_bytes = None;
+        task.in_flight = true;
         task.snapshot.current_path = Some(item.relative_path.clone());
         task.snapshot.updated_at = now_ms();
         drop(guard);
@@ -486,7 +519,7 @@ impl SyncManager {
       let relative = match assert_safe_relative(&item.relative_path) {
         Ok(path) => path,
         Err(err) => {
-          self.fail(&app, err);
+          self.fail(&app, &task_id, err);
           break;
         }
       };
@@ -497,12 +530,25 @@ impl SyncManager {
           if let Some(parent) = parent_of(&relative) {
             let _ = target.ensure_dir(&parent);
           }
-          copy_between(&source, &target, &relative)
+          let mut last_update = Instant::now();
+          copy_between(&source, &target, &relative, &mut |bytes, total| {
+            if bytes != total && last_update.elapsed().as_millis() < PROGRESS_NOTIFY_MS { return; }
+            last_update = Instant::now();
+            {
+              let mut guard = self.inner.lock();
+              if let Some(task) = guard.as_mut().filter(|task| task.snapshot.id == task_id) {
+                task.snapshot.current_bytes = Some(bytes);
+                task.snapshot.current_total_bytes = Some(total);
+                task.snapshot.updated_at = now_ms();
+              }
+            }
+            self.publish_progress(&app);
+          })
         }
       };
 
       if let Err(err) = exec {
-        self.fail(&app, err);
+        self.fail(&app, &task_id, err);
         break;
       }
 
@@ -511,22 +557,32 @@ impl SyncManager {
         let Some(task) = guard.as_mut() else {
           break;
         };
+        if task.snapshot.id != task_id { break; }
+        task.in_flight = false;
+        task.snapshot.current_bytes = None;
+        task.snapshot.current_total_bytes = None;
         task.pending.pop_front();
+        task.pending_updates.insert(item_key(&item), SyncTaskItemSnapshot {
+          relative_path: item.relative_path.clone(), kind: item.kind.clone(), status: SyncTaskItemStatus::Completed,
+        });
         task.completed_keys.insert(item_key(&item));
         task.snapshot.completed_items += 1;
         task.snapshot.current_path = None;
         task.snapshot.last_completed_path.replace(relative);
         task.snapshot.updated_at = now_ms();
       }
-      self.publish_progress(&app);
+      let paused = self.inner.lock().as_ref().map(|task| task.snapshot.status == SyncTaskStatus::Paused).unwrap_or(false);
+      if paused { self.commit_progress(&app, true); } else { self.publish_progress(&app); }
     }
   }
 
-  fn fail(&self, app: &AppHandle, message: String) {
+  fn fail(&self, app: &AppHandle, task_id: &str, message: String) {
     log_bridge::emit_log(app, LogScope::Sync, LogLevel::Error, format!("同步失败: {message}"));
     {
       let mut guard = self.inner.lock();
       if let Some(task) = guard.as_mut() {
+        if task.snapshot.id != task_id { return; }
+        task.in_flight = false;
         task.snapshot.status = SyncTaskStatus::Failed;
         task.snapshot.current_path = None;
         task.snapshot.last_error = Some(message);
@@ -545,11 +601,23 @@ impl SyncManager {
   }
 
   fn commit_progress(&self, app: &AppHandle, force_persist: bool) {
+    let _progress = self.progress_lock.lock();
     *self.dirty.lock() = false;
     *self.last_notify.lock() = Instant::now();
 
-    let snapshot = self.get_snapshot();
-    let _ = app.emit("sync:progress", snapshot.clone());
+    let snapshot = {
+      let mut guard = self.inner.lock();
+      guard.as_mut().map(|task| {
+        let mut snapshot = task.snapshot.clone();
+        snapshot.items_delta = !force_persist;
+        snapshot.items = Some(if force_persist {
+          task.pending_updates.clear();
+          build_item_snapshots(&task.all_items, &task.snapshot, &task.completed_keys)
+        } else { task.pending_updates.drain().map(|(_, item)| item).collect() });
+        snapshot
+      })
+    };
+    let _ = app.emit("sync:progress", snapshot);
 
     let should_persist = force_persist
       || self.last_persist.lock().elapsed().as_millis() >= PERSIST_INTERVAL_MS;
@@ -593,7 +661,7 @@ fn build_item_snapshots(
     .map(|item| {
       let status = if completed_keys.contains(&item_key(item)) {
         SyncTaskItemStatus::Completed
-      } else if task.status == SyncTaskStatus::Running
+      } else if matches!(task.status, SyncTaskStatus::Running | SyncTaskStatus::Paused)
         && task.current_path.as_deref() == Some(item.relative_path.as_str())
       {
         SyncTaskItemStatus::Running
@@ -617,74 +685,5 @@ pub fn sync_manager() -> Arc<SyncManager> {
 }
 
 #[cfg(test)]
-mod tests {
-  use super::*;
-
-  fn file_item(path: &str) -> SyncItem {
-    SyncItem {
-      relative_path: path.into(),
-      kind: SyncItemKind::File,
-    }
-  }
-
-  fn dir_item(path: &str) -> SyncItem {
-    SyncItem {
-      relative_path: path.into(),
-      kind: SyncItemKind::Directory,
-    }
-  }
-
-  fn snapshot_with(status: SyncTaskStatus, current_path: Option<&str>) -> SyncTaskSnapshot {
-    SyncTaskSnapshot {
-      id: "task".into(),
-      left_source: SourceConfig::Local { path: "/l".into() },
-      right_source: SourceConfig::Local { path: "/r".into() },
-      direction: SyncDirection::LeftToRight,
-      status,
-      total_items: 0,
-      completed_items: 0,
-      current_path: current_path.map(|p| p.to_string()),
-      last_completed_path: None,
-      last_error: None,
-      created_at: 0,
-      updated_at: 0,
-      items: None,
-    }
-  }
-
-  #[test]
-  fn item_key_distinguishes_kind() {
-    assert_ne!(item_key(&dir_item("x")), item_key(&file_item("x")));
-  }
-
-  #[test]
-  fn build_item_snapshots_uses_completed_keys_not_index() {
-    let all = vec![file_item("a.txt"), file_item("b.txt"), file_item("c.txt")];
-    let mut task = snapshot_with(SyncTaskStatus::Running, Some("a.txt"));
-    task.completed_items = 1;
-    // 完成顺序与 all_items 顺序不一致：只有 b.txt 已完成
-    let completed: HashSet<String> = [item_key(&all[1])].into_iter().collect();
-    let items = build_item_snapshots(&all, &task, &completed);
-    assert_eq!(items[0].status, SyncTaskItemStatus::Running);
-    assert_eq!(items[1].status, SyncTaskItemStatus::Completed);
-    assert_eq!(items[2].status, SyncTaskItemStatus::Pending);
-  }
-
-  #[test]
-  fn build_item_snapshots_ignores_current_path_when_not_running() {
-    let all = vec![file_item("a.txt")];
-    let task = snapshot_with(SyncTaskStatus::Paused, Some("a.txt"));
-    let items = build_item_snapshots(&all, &task, &HashSet::new());
-    assert_eq!(items[0].status, SyncTaskItemStatus::Pending);
-  }
-
-  #[test]
-  fn derive_completed_keys_excludes_pending_items() {
-    let all = vec![dir_item("dir"), file_item("dir/a.txt"), file_item("dir/b.txt")];
-    let pending: VecDeque<SyncItem> = vec![file_item("dir/a.txt"), file_item("dir/b.txt")].into();
-    let keys = derive_completed_keys(&all, &pending);
-    assert_eq!(keys.len(), 1);
-    assert!(keys.contains(&item_key(&all[0])));
-    assert!(!keys.contains(&item_key(&all[1])));
-  }
-}
+#[path = "sync_tests.rs"]
+mod tests;

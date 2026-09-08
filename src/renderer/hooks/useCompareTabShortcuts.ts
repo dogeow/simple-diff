@@ -35,6 +35,7 @@ export function useCompareTabShortcuts({
 }: CompareTabShortcutHandlers): void {
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
+      if (useUIStore.getState().pendingSync || useUIStore.getState().pendingUnsavedChanges || useUIStore.getState().pendingDiffTabClose) return
       if (matchesShortcut(event, SHORTCUT_SPECS.closeCompareTab)) {
         event.preventDefault()
         onCloseActiveCompareTab()

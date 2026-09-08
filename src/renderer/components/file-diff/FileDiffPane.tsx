@@ -13,6 +13,7 @@ import type { DiffSide } from './useSynchronizedDiffScroll'
 export const DIFF_ROW_HEIGHT = 21
 
 interface FileDiffPaneProps {
+  readonly disabled?: boolean
   readonly side: DiffSide
   readonly path: string
   readonly scrollRef: RefObject<HTMLDivElement | null>
@@ -29,6 +30,7 @@ interface FileDiffPaneProps {
 
 export default function FileDiffPane({
   side,
+  disabled = false,
   path,
   scrollRef,
   lines,
@@ -53,6 +55,9 @@ export default function FileDiffPane({
             <DiffHunkBlock
               key={metric.hunk.startIndex}
               hunk={metric.hunk}
+              disabled={disabled}
+              renderStartIndex={metric.renderStartIndex}
+              renderEndIndex={metric.renderEndIndex}
               lines={lines}
               otherLines={otherLines}
               side={side}
@@ -129,16 +134,20 @@ const EMPHASIS_BG: Record<'add' | 'remove', string> = {
 }
 
 interface DiffHunkBlockProps {
+  readonly disabled: boolean
   readonly hunk: Hunk
   readonly lines: readonly DiffLine[]
   readonly otherLines: readonly DiffLine[]
   readonly side: DiffSide
   readonly segmentMap?: ReadonlyMap<number, readonly InlineSegment[]>
+  readonly renderStartIndex?: number
+  readonly renderEndIndex?: number
   readonly onApplyHunk: () => void
   readonly onApplyLine: (lineIndex: number) => void
 }
 
 function DiffHunkBlock({
+  disabled,
   hunk,
   lines,
   otherLines,
@@ -146,14 +155,17 @@ function DiffHunkBlock({
   segmentMap,
   onApplyHunk,
   onApplyLine,
+  renderStartIndex = hunk.startIndex,
+  renderEndIndex = hunk.endIndex,
 }: DiffHunkBlockProps) {
-  const hunkLines = lines.slice(hunk.startIndex, hunk.endIndex)
+  const hunkLines = lines.slice(renderStartIndex, renderEndIndex)
   const isMultiLineDiff = hunk.endIndex - hunk.startIndex > 1
 
   return (
     <div className="group relative">
       {hunk.type === 'diff' ? (
         <button
+          disabled={disabled}
           onClick={onApplyHunk}
           className="absolute z-20 inline-flex items-center gap-0.5 rounded-md bg-accent px-1.5 py-0.5 text-2xs font-medium text-accent-fg opacity-0 transition-opacity hover:bg-accent-hover group-focus-within:opacity-100 group-hover:opacity-100 focus-visible:opacity-100"
           style={side === 'left' ? { right: 4, top: 2 } : { left: 4, top: 2 }}
@@ -172,7 +184,7 @@ function DiffHunkBlock({
       ) : null}
 
       {hunkLines.map((line, offset) => {
-        const lineIndex = hunk.startIndex + offset
+        const lineIndex = renderStartIndex + offset
         const segments = segmentMap?.get(lineIndex)
         const emphasisClass =
           line.type === 'add' || line.type === 'remove' ? EMPHASIS_BG[line.type] : ''
@@ -195,6 +207,7 @@ function DiffHunkBlock({
               otherLine: otherLines[lineIndex],
             }) ? (
               <button
+                disabled={disabled}
                 onClick={() => onApplyLine(lineIndex)}
                 className="mx-1 my-0.5 inline-flex shrink-0 items-center justify-center rounded bg-accent px-1 text-2xs font-medium text-accent-fg opacity-0 transition-opacity hover:bg-accent-hover group-focus-within/line:opacity-100 group-hover/line:opacity-100 focus-visible:opacity-100"
                 aria-label={side === 'left' ? '仅应用当前行到右侧' : '仅应用当前行到左侧'}

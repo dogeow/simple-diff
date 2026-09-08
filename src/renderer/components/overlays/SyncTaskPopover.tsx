@@ -58,7 +58,7 @@ export default function SyncTaskPopover() {
         {syncTask.status === 'paused' || syncTask.status === 'failed' ? (
           <Button size="sm" icon={Play} onClick={() => void resume()}>继续</Button>
         ) : null}
-        <Button size="sm" icon={Trash2} disabled={syncTask.status === 'running'} onClick={() => void clear()}>
+        <Button size="sm" icon={Trash2} disabled={syncTask.status === 'running' || (syncTask.status === 'paused' && Boolean(syncTask.currentPath))} onClick={() => void clear()}>
           清除
         </Button>
         <Button size="sm" variant="ghost" onClick={() => openOverlay('sync')}>查看全部</Button>

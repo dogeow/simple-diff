@@ -3,14 +3,14 @@ use std::path::Path;
 use tauri::AppHandle;
 
 use crate::files::{
-  copy_local_file, delete_file, file_quick_hash, file_sha256, list_directory_relative, read_text,
+  delete_file, file_quick_hash, file_sha256, list_directory_relative, read_text,
   rename_file, resolve_local_abs, write_text,
 };
 use crate::path_guards::relative_under_source;
 use crate::path_utils::join_path;
 use crate::ssh::{
-  delete_remote, ensure_remote_dir_on, list_remote, read_remote_bytes, read_remote_text,
-  remote_quick_hash, remote_sha256, rename_remote, write_remote_bytes, write_remote_text,
+  delete_remote, ensure_remote_dir_on, list_remote, read_remote_text,
+  remote_quick_hash, remote_sha256, rename_remote, write_remote_text,
 };
 use crate::ssh_pool::{self, PooledConn};
 use crate::ssh_store;
@@ -96,7 +96,22 @@ pub fn write_text_source(
   source: &SourceConfig,
   file_path: &str,
   content: &str,
+  expected_content: Option<&str>,
+  expected_exists: Option<bool>,
 ) -> Result<(), String> {
+  if let Some(should_exist) = expected_exists {
+    let exists = match source {
+      SourceConfig::Local { .. } => resolve_local_abs(source, file_path)?.try_exists().map_err(|e| e.to_string())?,
+      SourceConfig::Sftp { config_id, path } => {
+        let config = ssh_store::get_internal(app, config_id)?;
+        let relative = relative_under_source(source, file_path)?;
+        ssh_pool::with_shared(&config, |session| crate::ssh::remote_exists(session, path, &relative))?
+      }
+    };
+    if exists != should_exist || (exists && expected_content != Some(read_text_source(app, source, file_path)?.as_str())) {
+      return Err("文件已被其他程序修改，已停止覆盖。请重新读取并合并修改后保存。".into());
+    }
+  }
   match source {
     SourceConfig::Local { .. } => write_text(source, file_path, content),
     SourceConfig::Sftp { config_id, path } => {
@@ -254,38 +269,6 @@ impl<'a> SourceSession<'a> {
     }
   }
 
-  pub fn read_bytes(&self, relative: &str) -> Result<Vec<u8>, String> {
-    match self.source {
-      SourceConfig::Local { .. } => {
-        let abs = resolve_local_abs(self.source, relative)?;
-        std::fs::read(&abs).map_err(|e| format!("读取失败: {e}"))
-      }
-      SourceConfig::Sftp { path, .. } => {
-        self.with_remote(|conn| read_remote_bytes(&conn.session, path, relative))
-      }
-    }
-  }
-
-  pub fn write_bytes(&self, relative: &str, content: &[u8]) -> Result<(), String> {
-    match self.source {
-      SourceConfig::Local { .. } => {
-        let abs = resolve_local_abs(self.source, relative)?;
-        if let Some(parent) = abs.parent() {
-          std::fs::create_dir_all(parent).map_err(|e| format!("创建目录失败: {e}"))?;
-        }
-        std::fs::write(&abs, content).map_err(|e| format!("写入失败: {e}"))
-      }
-      SourceConfig::Sftp { path, .. } => self.with_remote_mut(|conn| {
-        // Prefer cached known_dirs + SFTP for parent mkdir, then write.
-        let parent = parent_relative(relative);
-        if !parent.is_empty() {
-          ensure_remote_dir_on(conn, path, &parent)?;
-        }
-        write_remote_bytes(&conn.session, path, relative, content)
-      }),
-    }
-  }
-
   pub fn ensure_dir(&self, relative: &str) -> Result<(), String> {
     match self.source {
       SourceConfig::Local { path } => {
@@ -308,34 +291,30 @@ impl<'a> SourceSession<'a> {
   }
 }
 
-pub fn copy_between(
-  from: &SourceSession<'_>,
-  to: &SourceSession<'_>,
-  relative: &str,
-) -> Result<(), String> {
-  match (from.source, to.source) {
-    (SourceConfig::Local { path: from_root }, SourceConfig::Local { path: to_root }) => {
-      let src = std::path::PathBuf::from(join_path(from_root, relative));
-      let dst = std::path::PathBuf::from(join_path(to_root, relative));
-      copy_local_file(&src, &dst)
+pub fn copy_between(from: &SourceSession<'_>, to: &SourceSession<'_>, relative: &str, progress: &mut dyn FnMut(u64, u64)) -> Result<(), String> {
+  let (mut reader, permissions, modified, total): (Box<dyn std::io::Read>, Option<u32>, Option<std::time::SystemTime>, u64) = match from.source {
+    SourceConfig::Local { .. } => {
+      let file = std::fs::File::open(resolve_local_abs(from.source, relative)?).map_err(|e| format!("读取文件失败: {e}"))?;
+      let meta = file.metadata().map_err(|e| format!("读取文件信息失败: {e}"))?;
+      #[cfg(unix)] let permissions = { use std::os::unix::fs::PermissionsExt; Some(meta.permissions().mode()) };
+      #[cfg(not(unix))] let permissions = None;
+      (Box::new(file), permissions, meta.modified().ok(), meta.len())
     }
-    _ => {
-      let bytes = from.read_bytes(relative)?;
-      to.write_bytes(relative, &bytes)
+    SourceConfig::Sftp { path, .. } => {
+      let mut file = from.with_remote(|conn| crate::ssh::open_remote_reader(&conn.session, path, relative))?;
+      let meta = file.stat().map_err(|e| format!("读取远程文件信息失败: {e}"))?;
+      (Box::new(file), meta.perm, meta.mtime.map(|seconds| std::time::UNIX_EPOCH + std::time::Duration::from_secs(seconds)), meta.size.unwrap_or(0))
     }
+  };
+  let mut report = |bytes| progress(bytes, total);
+  match to.source {
+    SourceConfig::Local { .. } => {
+      let target = resolve_local_abs(to.source, relative)?;
+      #[cfg(unix)] let local_permissions = { use std::os::unix::fs::PermissionsExt; permissions.map(std::fs::Permissions::from_mode) };
+      #[cfg(not(unix))] let local_permissions = None;
+      crate::atomic_file::replace_from_reader_with_metadata(&target, reader.as_mut(), local_permissions, modified, &mut report).map(|_| ())
+    }
+    SourceConfig::Sftp { path, .. } => to.with_remote(|conn|
+      crate::ssh::write_remote_stream_with_metadata(&conn.session, path, relative, reader.as_mut(), permissions, modified, &mut report)),
   }
-}
-
-fn parent_relative(relative: &str) -> String {
-  use crate::path_utils::normalize_relative;
-  let normalized = normalize_relative(relative);
-  if normalized.is_empty() {
-    return String::new();
-  }
-  let mut parts: Vec<&str> = normalized.split('/').collect();
-  if parts.len() <= 1 {
-    return String::new();
-  }
-  parts.pop();
-  parts.join("/")
 }

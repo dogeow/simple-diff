@@ -1,3 +1,5 @@
+import { computeTextDiffAsync } from '../runtime/text-diff-client'
+import type { TextDiffResult } from '../../../shared/types'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowLeftRight, Eraser, FileInput, Rows3, X } from 'lucide-react'
 import { Button, Panel, SplitPane, Switch, Toolbar, type MenuItem } from '../components/ui'
@@ -10,7 +12,6 @@ import { buildInlineSegments } from '../utils/inline-diff'
 import { readFileAsText } from '../utils/read-text-file'
 import {
   addManualAlignment,
-  computeAlignedTextDiff,
   type ManualAlignmentPair,
   type ManualAlignRequest,
   type TextDiffSide,
@@ -77,9 +78,10 @@ export default function TextComparePage() {
     setComputing(true)
     setError(null)
 
+    const controller = new AbortController()
     const timer = window.setTimeout(async () => {
       try {
-        const res = await window.api.textDiff(leftText, rightText)
+        const res = await window.api.textDiff(leftText, rightText, controller.signal)
         if (compareRequestId !== compareRequestIdRef.current) return
 
         if (res.success && res.data) {
@@ -87,6 +89,10 @@ export default function TextComparePage() {
         } else {
           setResult(null)
           setError(res.error ?? '对比失败')
+        }
+      } catch (error) {
+        if (compareRequestId === compareRequestIdRef.current && !controller.signal.aborted) {
+          setError(error instanceof Error ? error.message : '对比失败')
         }
       } finally {
         if (compareRequestId === compareRequestIdRef.current) {
@@ -96,6 +102,8 @@ export default function TextComparePage() {
     }, 120)
 
     return () => {
+      compareRequestIdRef.current++
+      controller.abort()
       window.clearTimeout(timer)
     }
   }, [leftText, rightText, setComputing, setError, setResult])
@@ -122,14 +130,21 @@ export default function TextComparePage() {
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [manualAlignRequest])
 
-  const displayResult = useMemo(
-    () => {
-      if (!result) return null
-      if (manualAlignments.length === 0) return result
-      return computeAlignedTextDiff(leftText, rightText, manualAlignments)
-    },
-    [manualAlignments, result, leftText, rightText],
-  )
+  const [alignedResult, setAlignedResult] = useState<TextDiffResult | null>(null)
+  useEffect(() => {
+    setAlignedResult(null)
+    if (!result || manualAlignments.length === 0) return
+    const controller = new AbortController()
+    setComputing(true)
+    void computeTextDiffAsync(leftText, rightText, controller.signal, manualAlignments).then((response) => {
+      if (controller.signal.aborted) return
+      if (response.success && response.data) setAlignedResult(response.data)
+      else setManualAlignError(response.error ?? '手动对齐失败')
+      setComputing(false)
+    })
+    return () => controller.abort()
+  }, [result, leftText, rightText, manualAlignments, setComputing])
+  const displayResult = manualAlignments.length ? alignedResult ?? result : result
 
   const leftChangedLines = useMemo(() => {
     const lines = new Set<number>()

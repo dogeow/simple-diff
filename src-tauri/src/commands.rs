@@ -56,9 +56,11 @@ pub async fn write_text_file(
   source: SourceConfig,
   file_path: String,
   content: String,
+  expected_content: Option<String>,
+  expected_exists: Option<bool>,
 ) -> Result<IpcResult<()>, String> {
   tauri::async_runtime::spawn_blocking(
-    move || match write_text_source(&app, &source, &file_path, &content) {
+    move || match write_text_source(&app, &source, &file_path, &content, expected_content.as_deref(), expected_exists) {
       Ok(()) => IpcResult::ok_empty(),
       Err(err) => IpcResult::err(err),
     },

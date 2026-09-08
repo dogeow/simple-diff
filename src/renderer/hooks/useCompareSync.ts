@@ -37,9 +37,10 @@ export interface CompareSyncState {
 export function useCompareSync(): CompareSyncState {
   const supportsSync = getRuntimeInfo().supportsSync
 
-  const { entrySummary, done, scanning, comparing, leftSource, rightSource, syncTask } =
+  const { entrySummary, done, scanning, comparing, leftSource, rightSource, syncTask, compareSessionId } =
     useCompareStore(useShallow((state) => ({
       entrySummary: state.entrySummary,
+      compareSessionId: state.compareSessionId,
       done: state.done,
       scanning: state.scanning,
       comparing: state.comparing,
@@ -54,7 +55,7 @@ export function useCompareSync(): CompareSyncState {
   )
 
   const { stats, pendingCount } = entrySummary
-  const canStartSync = done && !scanning && !comparing && pendingCount === 0 && stats.total > 0
+  const canStartSync = Boolean(compareSessionId) && done && !scanning && !comparing && pendingCount === 0 && stats.total > 0
 
   // 队列是全局单例：判断能否入队要看真实的 `syncTask`，而不是本标签可见的那份。
   const canQueue = useCallback(

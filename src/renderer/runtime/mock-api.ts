@@ -1,5 +1,5 @@
 import type { AppAPI, AppRuntimeInfo } from '@shared/app-api'
-import { computeTextDiff } from '@shared/text-diff'
+import { computeTextDiffAsync } from './text-diff-client'
 import type { CompareHistoryEntry, SSHConfig, SSHConfigInput } from '@shared/types'
 import {
   delay,
@@ -80,7 +80,10 @@ export function createMockApi(): AppAPI {
     readText: (source, filePath) =>
       ok(readMockFile(resolveMockSide(source), toMockRelativePath(source, filePath))),
 
-    writeText: (source, filePath, content) => {
+    writeText: (source, filePath, content, expectation) => {
+      if (expectation?.exists && readMockFile(resolveMockSide(source), toMockRelativePath(source, filePath)) !== expectation.content) {
+        return Promise.resolve({ success: false, error: '文件已被其他程序修改，已停止覆盖。' })
+      }
       writeMockFile(resolveMockSide(source), toMockRelativePath(source, filePath), content)
       return ok<void>(undefined)
     },
@@ -129,10 +132,7 @@ export function createMockApi(): AppAPI {
     // 渲染进程日志由 log-store 自行入库，这里不再回灌，避免重复
     writeLog: () => {},
 
-    textDiff: async (leftText, rightText) => ({
-      success: true,
-      data: computeTextDiff(leftText, rightText),
-    }),
+    textDiff: computeTextDiffAsync,
 
     listSSHConfigs: () => ok<readonly SSHConfig[]>(sshConfigs),
 

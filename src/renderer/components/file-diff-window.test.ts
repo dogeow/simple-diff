@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildHunkMetrics, getVisibleHunkWindow } from './file-diff-window'
+import { buildHunkMetrics, getVisibleHunkWindow, getVisibleLineWindow } from './file-diff-window'
 import type { Hunk } from './file-diff-utils'
 
 const SAMPLE_HUNKS: readonly Hunk[] = [
@@ -29,9 +29,9 @@ describe('file-diff-window', () => {
       overscanHeight: 20,
     })).toEqual({
       startIndex: 1,
-      endIndex: 4,
+      endIndex: 3,
       topSpacerHeight: 100,
-      bottomSpacerHeight: 0,
+      bottomSpacerHeight: 60,
     })
   })
 
@@ -48,4 +48,16 @@ describe('file-diff-window', () => {
       bottomSpacerHeight: 0,
     })
   })
+})
+
+it('clips rows within huge blocks while retaining the full apply range', () => {
+  const hunks: Hunk[] = [{ type: 'equal', startIndex: 0, endIndex: 100000 }, { type: 'diff', startIndex: 100000, endIndex: 200000 }]
+  const metrics = buildHunkMetrics(hunks, 21)
+  for (const scrollTop of [0, 2100000, 4199400]) {
+    const window = getVisibleLineWindow({ metrics, scrollTop, viewportHeight: 600, overscanHeight: 336, rowHeight: 21 })
+    const count = window.metrics.reduce((sum, metric) => sum + metric.renderEndIndex - metric.renderStartIndex, 0)
+    expect(count).toBeLessThan(65)
+    expect(window.topSpacerHeight + count * 21 + window.bottomSpacerHeight).toBe(4200000)
+    for (const metric of window.metrics) expect(hunks).toContain(metric.hunk)
+  }
 })

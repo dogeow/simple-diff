@@ -131,7 +131,18 @@ pub fn list_directory_relative(
 
 pub fn read_text(source: &SourceConfig, file_path: &str) -> Result<String, String> {
   let abs = resolve_local_abs(source, file_path)?;
-  fs::read_to_string(&abs).map_err(|e| format!("读取文件失败: {e}"))
+  let file = fs::File::open(&abs).map_err(|e| format!("读取文件失败: {e}"))?;
+  read_text_limited(file)
+}
+
+pub const MAX_TEXT_BYTES: u64 = 32 * 1024 * 1024;
+
+pub fn read_text_limited(reader: impl std::io::Read) -> Result<String, String> {
+  use std::io::Read;
+  let mut bytes = Vec::new();
+  reader.take(MAX_TEXT_BYTES + 1).read_to_end(&mut bytes).map_err(|e| format!("读取文件失败: {e}"))?;
+  if bytes.len() as u64 > MAX_TEXT_BYTES { return Err("文本预览仅支持 32 MB 以内的文件；大文件仍可进行目录对比和同步。".into()); }
+  String::from_utf8(bytes).map_err(|e| format!("文件不是有效 UTF-8: {e}"))
 }
 
 pub fn write_text(source: &SourceConfig, file_path: &str, content: &str) -> Result<(), String> {
@@ -139,7 +150,7 @@ pub fn write_text(source: &SourceConfig, file_path: &str, content: &str) -> Resu
   if let Some(parent) = abs.parent() {
     fs::create_dir_all(parent).map_err(|e| format!("创建目录失败: {e}"))?;
   }
-  fs::write(&abs, content).map_err(|e| format!("写入文件失败: {e}"))
+  crate::atomic_file::replace_from_reader(&abs, &mut content.as_bytes()).map(|_| ())
 }
 
 pub fn rename_file(source: &SourceConfig, old_relative: &str, new_name: &str) -> Result<(), String> {
@@ -251,13 +262,5 @@ mod tests {
     assert!(!hash.contains(':'), "small file should be whole-file hash, got {hash}");
     let _ = fs::remove_dir_all(&dir);
   }
-}
-
-pub fn copy_local_file(from: &Path, to: &Path) -> Result<(), String> {
-  if let Some(parent) = to.parent() {
-    fs::create_dir_all(parent).map_err(|e| format!("创建目录失败: {e}"))?;
-  }
-  fs::copy(from, to).map_err(|e| format!("复制失败: {e}"))?;
-  Ok(())
 }
 

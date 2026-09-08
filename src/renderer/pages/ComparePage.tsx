@@ -1,3 +1,4 @@
+import { confirmUnsavedChanges, getSessionDiffTabs, isDiffTabDirty } from '../utils/unsaved-changes'
 import { useCallback } from 'react'
 import { resolveSourcePath } from '@shared/source-path'
 import { hasCompareSessionContent, useCompareStore } from '../stores/compare-store'
@@ -63,6 +64,7 @@ export default function ComparePage() {
   }, [])
 
   const handleSourcePathSubmit = useCallback(async (side: 'left' | 'right', nextPath: string) => {
+    if (useAppStore.getState().diffTabs.some(isDiffTabDirty) && !await confirmUnsavedChanges()) return
     const compareState = useCompareStore.getState()
 
     if (compareState.activeCompareId && (compareState.scanning || compareState.comparing)) {
@@ -76,10 +78,13 @@ export default function ComparePage() {
     }
 
     compareState.invalidateCompareResult()
+    useUIStore.getState().clearTreeSelection()
     clearDiffTabs()
   }, [clearDiffTabs])
 
   const handleCloseCompareSession = useCallback(async (compareTabId: string) => {
+    const tabs = getSessionDiffTabs(compareTabId)
+    if (tabs.some(isDiffTabDirty) && !await confirmUnsavedChanges(tabs)) return
     const appState = useAppStore.getState()
     const targetCompareTab = appState.compareTabs.find((tab) => tab.id === compareTabId)
     const isActive = appState.activeCompareTabId === compareTabId
@@ -93,6 +98,7 @@ export default function ComparePage() {
       return
     }
 
+    useUIStore.getState().clearTreeSelection()
     const remainingTabs = appState.compareTabs.filter((tab) => tab.id !== compareTabId)
     closeCompareTab(compareTabId)
 

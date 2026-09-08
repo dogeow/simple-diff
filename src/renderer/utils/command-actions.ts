@@ -1,3 +1,6 @@
+import { reportSyncResult } from './sync-feedback'
+import { confirmSync } from './confirm-sync'
+import { confirmUnsavedChanges, getAllDiffTabs, isDiffTabDirty } from './unsaved-changes'
 import type { SyncDirection, SyncTaskSnapshot } from '../../../shared/types'
 import { getRuntimeInfo } from '../runtime/runtime-info'
 import { shouldShowSyncTaskInCompare } from './sync-task-visibility'
@@ -28,16 +31,6 @@ import { formatComparePairLabel } from './source-label'
 
 // ---- compare job -----------------------------------------------------------
 
-/**
- * 重跑之前先收掉已打开的文件差异标签：它们指向的是上一次对比的结果，
- * 重跑后那份结果不复存在。
- */
-export function resetDiffTabsForRerun(): void {
-  const appStore = useAppStore.getState()
-  appStore.clearDiffTabs()
-  appStore.setActiveDiffTab(null)
-}
-
 /** 至少要有一个比较依据，否则「不同」无从判断（工具栏按钮同款判断）。 */
 export function hasCompareStrategies(): boolean {
   return useCompareStore.getState().strategies.length > 0
@@ -54,7 +47,8 @@ export function isCompareRunning(): boolean {
  * 交换左右数据源。结果随即作废，等用户自己按「首次对比」——从菜单里悄悄重跑一次
  * 可能很贵的作业，正是这次重设计要消灭的那类惊吓。
  */
-export function swapCompareSources(): void {
+export async function swapCompareSources(): Promise<void> {
+  if (useAppStore.getState().diffTabs.some(isDiffTabDirty) && !await confirmUnsavedChanges()) return
   const state = useCompareStore.getState()
   const previous = {
     type: state.leftSourceType,
@@ -70,6 +64,7 @@ export function swapCompareSources(): void {
   state.setRightSSHConfigId(previous.configId)
 
   state.invalidateCompareResult()
+  useUIStore.getState().clearTreeSelection()
   // 已打开的文件差异标签此刻指向的是交换前的两侧，必须一起收掉。
   useAppStore.getState().clearDiffTabs()
 }
@@ -80,7 +75,8 @@ export async function copyComparePathPair(): Promise<void> {
   const label = formatComparePairLabel(leftSource, rightSource, configs) ?? `${leftPath} ↔ ${rightPath}`
 
   try {
-    await navigator.clipboard?.writeText(label)
+    if (!navigator.clipboard) throw new Error('剪贴板不可用')
+    await navigator.clipboard.writeText(label)
     showToast({ tone: 'success', message: '已复制路径对' })
   } catch {
     showToast({ tone: 'error', message: '复制失败', description: '剪贴板不可用' })
@@ -95,7 +91,8 @@ export async function copyPathToClipboard(path: string): Promise<void> {
   if (!path) return
 
   try {
-    await navigator.clipboard?.writeText(path)
+    if (!navigator.clipboard) throw new Error('剪贴板不可用')
+    await navigator.clipboard.writeText(path)
     showToast({ tone: 'success', message: '已复制路径', description: path })
   } catch {
     showToast({ tone: 'error', message: '复制失败', description: '剪贴板不可用' })
@@ -127,8 +124,8 @@ export function toggleHideDotFiles(): void {
 // ---- sync ------------------------------------------------------------------
 
 export function canStartCompareSync(): boolean {
-  const { done, scanning, comparing, entrySummary } = useCompareStore.getState()
-  return done && !scanning && !comparing && entrySummary.pendingCount === 0 && entrySummary.stats.total > 0
+  const { done, scanning, comparing, entrySummary, compareSessionId } = useCompareStore.getState()
+  return Boolean(compareSessionId) && done && !scanning && !comparing && entrySummary.pendingCount === 0 && entrySummary.stats.total > 0
 }
 
 /** 队列是全局单例：能否入队要看真实的 `syncTask`，而不是本标签可见的那份。 */
@@ -144,18 +141,20 @@ export async function startCompareSync(direction: SyncDirection): Promise<void> 
   if (!leftSource || !rightSource || !compareSessionId) return
   if (!canStartCompareSync() || entries.length === 0) return
 
-  const response = await window.api.startSync({
+  const request = {
     compareId: compareSessionId,
     leftSource,
     rightSource,
     direction,
     entries,
-  })
+  }
+  if (!await confirmSync(request)) return
+  const response = await reportSyncResult(() => window.api.startSync(request))
 
   if (!response.success) return
 
   const roots = getSyncRecompareRootsFromEntries(entries)
-  useCompareStore.getState().markDirtyPaths(roots)
+  if (useCompareStore.getState().compareSessionId === compareSessionId) useCompareStore.getState().markDirtyPaths(roots)
   rememberSyncDirtyRoots(response.data?.id, roots)
   useCompareStore.getState().setSyncTask(response.data ?? null)
 }
@@ -168,17 +167,17 @@ export function getVisibleSyncTask(): SyncTaskSnapshot | null {
 }
 
 export async function pauseCompareSync(): Promise<void> {
-  const response = await window.api.pauseSync()
+  const response = await reportSyncResult(() => window.api.pauseSync())
   if (response.success) useCompareStore.getState().setSyncTask(response.data ?? null)
 }
 
 export async function resumeCompareSync(): Promise<void> {
-  const response = await window.api.resumeSync()
+  const response = await reportSyncResult(() => window.api.resumeSync())
   if (response.success) useCompareStore.getState().setSyncTask(response.data ?? null)
 }
 
 export async function clearCompareSync(): Promise<void> {
-  const response = await window.api.clearSync()
+  const response = await reportSyncResult(() => window.api.clearSync())
   if (response.success) useCompareStore.getState().setSyncTask(null)
 }
 
@@ -194,30 +193,44 @@ export function isDiffTabSideDirty(tab: DiffTab, side: 'left' | 'right'): boolea
  * 保存文件差异标签的一侧。`FileDiffView` 的保存按钮和 `⌘K` 的「保存左侧/右侧」
  * 走的是这一个实现。
  */
-export async function saveDiffTabSide(tab: DiffTab, side: 'left' | 'right'): Promise<void> {
+const pendingSaves = new Set<string>()
+
+export async function saveDiffTabSide(tab: DiffTab, side: 'left' | 'right'): Promise<boolean> {
   const source = side === 'left' ? tab.leftSource : tab.rightSource
   const fullPath = side === 'left' ? tab.leftFullPath : tab.rightFullPath
   const content = side === 'left' ? tab.leftContent : tab.rightContent
 
-  if (!source) return
+  if (!source) return false
 
-  const result = await window.api.writeText(source, fullPath, content)
-  // 写盘期间标签可能已经被关掉或重开（`sessionId` 会变），此时不能再写回内容。
-  if (!useAppStore.getState().hasDiffTabSession(tab.id, tab.sessionId)) return
+  const key = `${tab.sessionId}:${side}`
+  if (pendingSaves.has(key)) return false
+  pendingSaves.add(key)
+  useAppStore.getState().updateDiffTabSession(tab.sessionId, side === 'left' ? { savingLeft: true } : { savingRight: true })
+  try {
+    const result = await window.api.writeText(source, fullPath, content, { content: side === 'left' ? tab.originalLeftContent : tab.originalRightContent, exists: side === 'left' ? tab.hasLeftFile : tab.hasRightFile }).catch((error: unknown) => ({
+      success: false, error: error instanceof Error ? error.message : String(error),
+    }))
+    // 写盘期间标签可能已经被关掉或重开（`sessionId` 会变），此时不能再写回内容。
+    if (!getAllDiffTabs().some((current) => current.sessionId === tab.sessionId)) return false
 
-  if (result.success) {
-    useAppStore.getState().updateDiffTab(tab.id, side === 'left'
-      ? { originalLeftContent: content }
-      : { originalRightContent: content })
-    showToast({
-      tone: 'success',
-      message: side === 'left' ? '已保存左侧' : '已保存右侧',
-      description: tab.fileName,
-    })
-    return
+    if (result.success) {
+      useAppStore.getState().updateDiffTabSession(tab.sessionId, side === 'left'
+        ? { originalLeftContent: content, hasLeftFile: true }
+        : { originalRightContent: content, hasRightFile: true })
+      showToast({
+        tone: 'success',
+        message: side === 'left' ? '已保存左侧' : '已保存右侧',
+        description: tab.fileName,
+      })
+      return true
+    }
+
+    showToast({ tone: 'error', message: '保存失败', description: result.error ?? '未知错误' })
+    return false
+  } finally {
+    pendingSaves.delete(key)
+    useAppStore.getState().updateDiffTabSession(tab.sessionId, side === 'left' ? { savingLeft: false } : { savingRight: false })
   }
-
-  showToast({ tone: 'error', message: '保存失败', description: result.error ?? '未知错误' })
 }
 
 /**

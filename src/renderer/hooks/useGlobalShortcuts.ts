@@ -10,7 +10,6 @@ import {
   openSessionFilterPopover,
   pauseCompareSync,
   requestCloseActiveDiffTab,
-  resetDiffTabsForRerun,
   saveActiveDiffTabSide,
   showCompareTree,
   toggleLogPanel,
@@ -45,6 +44,7 @@ export function useGlobalShortcuts(): void {
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       const ui = useUIStore.getState()
+      if (ui.pendingSync || ui.pendingUnsavedChanges || ui.pendingDiffTabClose) return
 
       // ⌘K 只负责“打开”命令面板；关闭交给 Esc（DESIGN-SYSTEM §8.1）。
       if (matchesShortcut(event, SHORTCUT_SPECS.palette)) {
@@ -76,7 +76,7 @@ export function useGlobalShortcuts(): void {
 
       // 以下三个描述的是「当前对比视图的作业」。叠加层打开时它们属于那一层，
       // 文本模式下则根本没有作业可言。
-      if (ui.overlay !== null || useAppStore.getState().page !== 'compare') return
+      if (ui.pendingSync || ui.pendingUnsavedChanges || ui.pendingDiffTabClose || ui.overlay !== null || useAppStore.getState().page !== 'compare') return
 
       // ---- 文件 Diff 组（chunk 7）。动作实现和 `⌘K` 里的同名命令是同一批函数。
       if (matchesShortcut(event, SHORTCUT_SPECS.saveLeft)) {
@@ -118,14 +118,14 @@ export function useGlobalShortcuts(): void {
       if (matchesShortcut(event, SHORTCUT_SPECS.restartCompare)) {
         event.preventDefault()
         if (!hasCompareStrategies()) return
-        resetDiffTabsForRerun()
         void restartCompare()
         return
       }
 
       if (matchesShortcut(event, SHORTCUT_SPECS.focusFilter)) {
         event.preventDefault()
-        openSessionFilterPopover()
+        if (useAppStore.getState().activeDiffTabId) ui.setFileSearchOpen(true)
+        else openSessionFilterPopover()
         return
       }
 

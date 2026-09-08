@@ -31,7 +31,7 @@ export interface AppAPI {
 
   listFiles: (source: SourceConfig, dirPath: string) => Promise<IpcResult<readonly FileEntry[]>>
   readText: (source: SourceConfig, filePath: string) => Promise<IpcResult<string>>
-  writeText: (source: SourceConfig, filePath: string, content: string) => Promise<IpcResult<void>>
+  writeText: (source: SourceConfig, filePath: string, content: string, expectation?: { content: string; exists: boolean }) => Promise<IpcResult<void>>
 
   runCompare: (request: CompareRequest) => Promise<IpcResult<CompareResult>>
   runPartialCompare: (request: ComparePartialRequest) => Promise<IpcResult<CompareResult>>
@@ -52,7 +52,7 @@ export interface AppAPI {
   onLog: (callback: (entry: LogEntry) => void) => (() => void)
   writeLog: (entry: LogEntry) => void
 
-  textDiff: (leftText: string, rightText: string) => Promise<IpcResult<TextDiffResult>>
+  textDiff: (leftText: string, rightText: string, signal?: AbortSignal) => Promise<IpcResult<TextDiffResult>>
 
   listSSHConfigs: () => Promise<IpcResult<readonly SSHConfig[]>>
   saveSSHConfig: (config: SSHConfigInput) => Promise<IpcResult<SSHConfig>>
@@ -71,6 +71,7 @@ export interface AppAPI {
   selectFolder: () => Promise<IpcResult<string | null>>
   selectFile: () => Promise<IpcResult<string | null>>
   onOpenPaths: (callback: (paths: readonly string[]) => void) => (() => void)
+  onWindowCloseRequested?: (callback: () => Promise<boolean>) => (() => void)
 
   getPathForFile: (file: File) => string
 }

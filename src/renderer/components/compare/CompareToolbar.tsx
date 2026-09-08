@@ -40,6 +40,7 @@ export default function CompareToolbar() {
   const sshConfigs = useSSHStore((state) => state.configs)
   const leftSource = useCompareStore((state) => state.leftSource)
   const rightSource = useCompareStore((state) => state.rightSource)
+  const compareSessionId = useCompareStore((state) => state.compareSessionId)
   const activeTabTitle = useAppStore(
     (state) => state.compareTabs.find((tab) => tab.id === state.activeCompareTabId)?.title ?? null,
   )
@@ -101,7 +102,7 @@ export default function CompareToolbar() {
     return null
   }, [job.error, job.loading, visibleSyncTask])
 
-  const queueBusyHint = sync.canStartSync ? '同步队列被另一次对比占用' : undefined
+  const queueBusyHint = !compareSessionId ? '请先重新对比，刷新同步范围' : sync.canStartSync ? '同步队列被另一次对比占用' : '请等待对比完成'
 
   const syncMenuItems = useMemo<MenuItem[]>(() => [
     {
@@ -139,7 +140,7 @@ export default function CompareToolbar() {
       id: 'sync-clear',
       label: '清除同步',
       icon: Trash2,
-      disabled: !visibleSyncTask || visibleSyncTask.status === 'running',
+      disabled: !visibleSyncTask || visibleSyncTask.status === 'running' || (visibleSyncTask.status === 'paused' && Boolean(visibleSyncTask.currentPath)),
       onSelect: () => void sync.clear(),
     },
     { kind: 'separator', id: 'sync-sep-2' },
@@ -203,6 +204,7 @@ export default function CompareToolbar() {
                 variant="secondary"
                 icon={syncPrimary.icon}
                 disabled={syncPrimary.disabled}
+                title={syncPrimary.disabled ? queueBusyHint : undefined}
                 items={syncMenuItems}
                 menuLabel="同步选项"
                 onClick={syncPrimary.onClick}

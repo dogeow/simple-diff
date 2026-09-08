@@ -1,5 +1,5 @@
 use std::collections::HashSet;
-use std::io::{Read, Seek, SeekFrom, Write};
+use std::io::{Read, Seek, SeekFrom};
 use std::net::TcpStream;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -103,29 +103,12 @@ fn with_sftp_retry<T>(
   Err(last_err)
 }
 
-fn with_session_retry<T>(
-  session: &Session,
-  timeout_ms: u32,
-  mut op: impl FnMut() -> Result<T, String>,
-) -> Result<T, String> {
-  session.set_timeout(timeout_ms);
-  let mut last_err = String::from("SSH 操作失败");
-  for attempt in 0..MAX_ATTEMPTS {
-    match op() {
-      Ok(v) => return Ok(v),
-      Err(e) => {
-        last_err = e;
-        if attempt + 1 < MAX_ATTEMPTS && is_retryable(&last_err) {
-          continue;
-        }
-        return Err(last_err);
-      }
-    }
-  }
-  Err(last_err)
+pub fn connect_session(config: &SshConfigInternal) -> Result<Session, String> {
+  let known_hosts = dirs::home_dir().ok_or("无法读取用户 SSH 信任目录")?.join(".ssh/known_hosts");
+  connect_session_with_known_hosts(config, &known_hosts)
 }
 
-pub fn connect_session(config: &SshConfigInternal) -> Result<Session, String> {
+fn connect_session_with_known_hosts(config: &SshConfigInternal, known_hosts: &Path) -> Result<Session, String> {
   use std::net::ToSocketAddrs;
 
   let addr = format!("{}:{}", config.host, config.port);
@@ -148,6 +131,8 @@ pub fn connect_session(config: &SshConfigInternal) -> Result<Session, String> {
   session
     .handshake()
     .map_err(|e| format!("SSH 握手失败: {e}"))?;
+
+  crate::ssh_host_key::verify(&session, &config.host, config.port, known_hosts)?;
 
   match config.auth_type {
     SshAuthType::Password => {
@@ -199,10 +184,7 @@ fn authenticate_private_key(session: &Session, config: &SshConfigInternal) -> Re
 }
 
 pub fn test_connection(config: &SshConfigInternal) -> Result<bool, String> {
-  match connect_session(config) {
-    Ok(_) => Ok(true),
-    Err(_) => Ok(false),
-  }
+  connect_session(config).map(|_| true)
 }
 
 fn is_directory_mode(mode: u32) -> bool {
@@ -298,49 +280,61 @@ pub fn list_remote(session: &Session, root: &str, relative: &str) -> Result<Vec<
 }
 
 pub fn read_remote_text(session: &Session, root: &str, relative: &str) -> Result<String, String> {
-  let bytes = read_remote_bytes(session, root, relative)?;
-  String::from_utf8(bytes).map_err(|e| format!("文件不是有效 UTF-8: {e}"))
+  let file = open_remote_reader(session, root, relative)?;
+  crate::files::read_text_limited(file)
 }
 
-pub fn read_remote_bytes(session: &Session, root: &str, relative: &str) -> Result<Vec<u8>, String> {
-  with_sftp_retry(session, STREAM_TIMEOUT_MS, |sftp| {
-    let abs = remote_join(root, relative);
-    let mut file = sftp
-      .open(Path::new(&abs))
-      .map_err(|e| format!("打开远程文件失败 ({abs}): {e}"))?;
-    let mut buf = Vec::new();
-    file
-      .read_to_end(&mut buf)
-      .map_err(|e| format!("读取远程文件失败: {e}"))?;
-    Ok(buf)
-  })
+pub fn remote_exists(session: &Session, root: &str, relative: &str) -> Result<bool, String> {
+  let sftp = session.sftp().map_err(|e| e.to_string())?;
+  match sftp.stat(Path::new(&remote_join(root, relative))) {
+    Ok(_) => Ok(true),
+    Err(error) if error.code() == ssh2::ErrorCode::SFTP(2) => Ok(false),
+    Err(error) => Err(format!("读取远程文件信息失败: {error}")),
+  }
 }
 
-pub fn write_remote_bytes(
-  session: &Session,
-  root: &str,
-  relative: &str,
-  content: &[u8],
-) -> Result<(), String> {
-  with_session_retry(session, STREAM_TIMEOUT_MS, || {
-    ensure_remote_dir(session, root, &parent_relative(relative))?;
-    let sftp = session
-      .sftp()
-      .map_err(|e| format!("打开 SFTP 失败: {e}"))?;
-    let abs = remote_join(root, relative);
-    let mut file = sftp
-      .open_mode(
-        Path::new(&abs),
-        OpenFlags::WRITE | OpenFlags::CREATE | OpenFlags::TRUNCATE,
-        0o644,
-        OpenType::File,
-      )
-      .map_err(|e| format!("创建远程文件失败 ({abs}): {e}"))?;
-    file
-      .write_all(content)
-      .map_err(|e| format!("写入远程文件失败: {e}"))?;
-    Ok(())
-  })
+pub fn write_remote_bytes(session: &Session, root: &str, relative: &str, content: &[u8]) -> Result<(), String> {
+  write_remote_stream(session, root, relative, &mut &content[..])
+}
+
+pub fn open_remote_reader(session: &Session, root: &str, relative: &str) -> Result<ssh2::File, String> {
+  session.set_timeout(STREAM_TIMEOUT_MS);
+  let sftp = session.sftp().map_err(|e| format!("打开 SFTP 失败: {e}"))?;
+  sftp.open(Path::new(&remote_join(root, relative))).map_err(|e| format!("读取远程文件失败: {e}"))
+}
+
+pub fn write_remote_stream(session: &Session, root: &str, relative: &str, reader: &mut dyn Read) -> Result<(), String> {
+  write_remote_stream_with_metadata(session, root, relative, reader, None, None, &mut |_| {})
+}
+
+pub fn write_remote_stream_with_metadata(session: &Session, root: &str, relative: &str, reader: &mut dyn Read,
+  permissions: Option<u32>, modified: Option<std::time::SystemTime>, progress: &mut dyn FnMut(u64)) -> Result<(), String> {
+  ensure_remote_dir(session, root, &parent_relative(relative))?;
+  session.set_timeout(STREAM_TIMEOUT_MS);
+  let sftp = session.sftp().map_err(|e| format!("打开 SFTP 失败: {e}"))?;
+  let target = PathBuf::from(remote_join(root, relative));
+  let parent = target.parent().ok_or("无效远程路径")?;
+  let temp = parent.join(format!(".simple-diff-{}.tmp", uuid::Uuid::new_v4()));
+  let original = sftp.stat(&target).ok();
+  let result = (|| {
+    let mut file = sftp.open_mode(&temp, OpenFlags::WRITE | OpenFlags::CREATE | OpenFlags::EXCLUSIVE,
+      0o600, OpenType::File).map_err(|e| format!("创建远程临时文件失败: {e}"))?;
+    crate::atomic_file::copy_buffered_with_progress(reader, &mut file, progress).map_err(|e| format!("传输文件失败: {e}"))?;
+    let permissions = permissions.or_else(|| original.as_ref().and_then(|stat| stat.perm));
+    let mtime = modified.and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok()).map(|time| time.as_secs());
+    if permissions.is_some() || mtime.is_some() {
+      file.setstat(ssh2::FileStat { size: None, uid: None, gid: None, perm: permissions, atime: mtime, mtime })
+        .map_err(|e| format!("保留远程文件信息失败: {e}"))?;
+    }
+    file.close().map_err(|e| format!("关闭远程文件失败: {e}"))?;
+    if original.is_some() {
+      crate::sftp_atomic::rename(session, &temp, &target)
+    } else {
+      sftp.rename(&temp, &target, Some(ssh2::RenameFlags::empty())).map_err(|e| format!("远程重命名失败: {e}"))
+    }
+  })();
+  if result.is_err() { let _ = sftp.unlink(&temp); }
+  result
 }
 
 pub fn write_remote_text(
@@ -636,3 +630,7 @@ fn delete_remote_dir_recursive(sftp: &Sftp, abs: &str) -> Result<(), String> {
 pub fn absolute_remote(root: &str, relative: &str) -> String {
   remote_join(root, relative)
 }
+
+#[cfg(all(test, unix))]
+#[path = "ssh_host_key_tests.rs"]
+mod host_key_tests;

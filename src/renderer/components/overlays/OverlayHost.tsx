@@ -1,3 +1,4 @@
+import SyncConfirmDialog from './SyncConfirmDialog'
 import CommandPalette from '../CommandPalette'
 import ShortcutHelp from '../ShortcutHelp'
 import CompareSetupDialog from '../compare/CompareSetupDialog'
@@ -7,6 +8,7 @@ import HistoryDialog from './HistoryDialog'
 import SSHManagerDialog from './SSHManagerDialog'
 import SyncDrawer from './SyncDrawer'
 import DiffTabCloseConfirm from './DiffTabCloseConfirm'
+import UnsavedChangesDialog from './UnsavedChangesDialog'
 import { useUIStore, type OverlayKind } from '../../stores/ui-store'
 
 /**
@@ -49,6 +51,8 @@ export default function OverlayHost() {
         （比如从 `⌘K` 里关标签），`useDismiss` 的层级栈保证 Esc 只剥掉最上面一层。
       */}
       <DiffTabCloseConfirm />
+      <UnsavedChangesDialog />
+      <SyncConfirmDialog />
     </>
   )
 }

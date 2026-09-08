@@ -1,3 +1,4 @@
+import { mergeSyncTask } from '../../utils/merge-sync-task'
 import { create } from 'zustand'
 import {
   buildDirtyDisplayPaths,
@@ -341,7 +342,7 @@ const compareStore = create<CompareStore>((set, get) => ({
       viewMode,
     })
   },
-  setSyncTask: (syncTask) => set({ syncTask }),
+  setSyncTask: (syncTask) => set((state) => ({ syncTask: mergeSyncTask(state.syncTask, syncTask) })),
 
   createSnapshot: () => createCompareSessionSnapshot(get()),
 

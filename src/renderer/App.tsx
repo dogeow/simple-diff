@@ -1,3 +1,4 @@
+import { useWindowCloseGuard } from './hooks/useWindowCloseGuard'
 import AppShell from './components/AppShell'
 import ComparePage from './pages/ComparePage'
 import TextComparePage from './pages/TextComparePage'
@@ -11,13 +12,13 @@ import { shouldShowSyncTaskInCompare } from './utils/sync-task-visibility'
 import { getSyncRecompareRootsFromItems } from './utils/sync-dirty'
 import type { SyncTaskSnapshot } from '../../shared/types'
 import { addRendererLog } from './stores/log-store'
-import { persistActiveCompareTab } from './utils/compare-session-navigation'
 import { applyCompareDefaults } from './utils/compare-defaults'
 import { checkForUpdate } from './lib/updater'
 
 const MAX_LIVE_LOCAL_WATCH_ENTRIES = 50_000
 
 export default function App() {
+  useWindowCloseGuard()
   const page = useAppStore((s) => s.page)
   const compareTabs = useAppStore((s) => s.compareTabs)
   const activeCompareTabId = useAppStore((s) => s.activeCompareTabId)
@@ -225,12 +226,6 @@ export default function App() {
     })
   }, [runCompare, setPage])
 
-  // F4：退出前把 live 会话写回它的标签，否则最后一次改动只活在 compare store 里。
-  useEffect(() => {
-    const handleBeforeUnload = () => persistActiveCompareTab()
-    window.addEventListener('beforeunload', handleBeforeUnload)
-    return () => window.removeEventListener('beforeunload', handleBeforeUnload)
-  }, [])
 
   return (
     <AppShell>

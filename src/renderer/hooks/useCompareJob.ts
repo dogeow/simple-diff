@@ -2,7 +2,6 @@ import { useCallback } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import type { CompareStats } from '../../../shared/types'
 import { useCompareStore } from '../stores/compare-store'
-import { resetDiffTabsForRerun } from '../utils/command-actions'
 import { useCompareActions } from './useCompare'
 
 export interface CompareJobState {
@@ -50,16 +49,12 @@ export function useCompareJob(): CompareJobState {
       strategyCount: state.strategies.length,
     })))
 
-  // 结果标签在重跑时会被清空又填回，所以每次重跑前先收掉打开的文件差异标签
-  // （`resetDiffTabsForRerun`），否则它们会指向一份已经不存在的对比。
-  // 那个函数是模块级的，命令面板和全局快捷键调的是同一个（chunk 9）。
+  // The action layer guards unsaved files before invalidating the session.
   const restart = useCallback(async () => {
-    resetDiffTabsForRerun()
     await restartCompare()
   }, [restartCompare])
 
   const resume = useCallback(async () => {
-    resetDiffTabsForRerun()
     await resumeCompare()
   }, [resumeCompare])
 
@@ -68,7 +63,6 @@ export function useCompareJob(): CompareJobState {
   }, [pauseCompare])
 
   const recompareDirty = useCallback(async () => {
-    resetDiffTabsForRerun()
     await recompareDirtyPaths()
   }, [recompareDirtyPaths])
 

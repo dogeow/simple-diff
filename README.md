@@ -35,6 +35,29 @@ npm run build    # tauri build
 npm test
 ```
 
+## 文件与同步行为
+
+- 文件合并支持撤销、重做和当前文件查找。关闭会话、重新对比、更换来源或关闭窗口前，会检查未保存修改；取消和保存失败均保留草稿。
+- 同步前展示方向、范围及覆盖数量。暂停在当前文件完成后生效，期间不能清除或替换任务；队列提供分页和当前文件字节进度。
+- 本地和 SFTP 传输使用 64 KiB 缓冲区及同目录临时文件。成功后替换目标，传输失败保留原文件；复制保留修改时间和权限。SFTP 覆盖已有文件要求 `posix-rename@openssh.com` 扩展，不支持时返回错误。
+- 保存文件会检查读取时的内容是否已改变，发现外部修改时停止覆盖。该检查不等同于跨程序文件锁。
+- 每个新 SSH 连接都在认证前校验 `~/.ssh/known_hosts`。首次连接须先通过系统 SSH 核验服务器指纹并建立信任；未知主机和密钥不匹配均拒绝连接，连接测试会显示原因。
+- 文本预览限制为每个文件 32 MB；目录比较和流式同步不受此预览限制。Diff 在 Worker 中计算，超大差异使用有预算的行配对和字符高亮，视图按可见行渲染。
+- 恢复数据保存所有未保存的文件草稿，差异结果和撤销历史不会写入浏览器存储。存储不足时会提示先保存文件。
+
+## 验证
+
+```bash
+npm run type-check
+npm test
+npm run build:ui
+cargo test --manifest-path src-tauri/Cargo.toml --offline
+```
+
+Unix 下的 Rust 集成测试需要 `ssh-keygen`、`/usr/sbin/sshd` 和本机回环监听权限。测试只使用临时目录和临时密钥，覆盖正常连接、主机换钥、未信任主机、SFTP 覆盖与传输失败保护。
+
+性能样例与验证边界见 [改进记录](docs/review-notes.md)。SFTP 原子重命名遵循 [OpenSSH 协议说明第 4.3 节](https://github.com/openssh/openssh-portable/blob/master/PROTOCOL)。
+
 ## 项目结构
 
 ```text

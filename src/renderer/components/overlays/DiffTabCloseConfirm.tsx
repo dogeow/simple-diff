@@ -1,8 +1,8 @@
-import { useCallback, useMemo } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 import { useAppStore } from '../../stores/app-store'
 import { useUIStore } from '../../stores/ui-store'
-import { closeDiffTabs, isDiffTabSideDirty } from '../../utils/command-actions'
-import { ConfirmDialog } from '../ui'
+import { closeDiffTabs, isDiffTabSideDirty, saveDiffTabSide } from '../../utils/command-actions'
+import { Button, Dialog } from '../ui'
 
 /**
  * 「有未保存修改，确定关闭？」
@@ -15,6 +15,8 @@ export default function DiffTabCloseConfirm() {
   const pending = useUIStore((state) => state.pendingDiffTabClose)
   const setPending = useUIStore((state) => state.setPendingDiffTabClose)
   const diffTabs = useAppStore((state) => state.diffTabs)
+  const [saving, setSaving] = useState(false)
+  const cancelRef = useRef<HTMLButtonElement>(null)
 
   const unsavedNames = useMemo(() => {
     if (!pending) return []
@@ -30,19 +32,35 @@ export default function DiffTabCloseConfirm() {
     setPending(null)
   }, [pending, setPending])
 
+  const handleSave = async () => {
+    setSaving(true)
+    try {
+      for (const id of pending ?? []) {
+        for (const side of ['left', 'right'] as const) {
+          const current = useAppStore.getState().diffTabs.find((tab) => tab.id === id)
+          if (current && isDiffTabSideDirty(current, side) && !await saveDiffTabSide(current, side)) return
+        }
+      }
+      handleConfirm()
+    } finally { setSaving(false) }
+  }
+
   return (
-    <ConfirmDialog
+    <Dialog
       open={pending !== null && unsavedNames.length > 0}
       onOpenChange={(open) => {
         if (!open) setPending(null)
       }}
-      tone="danger"
+      initialFocus={cancelRef}
+      dismissible={!saving}
       title={unsavedNames.length > 1 ? `关闭 ${unsavedNames.length} 个有修改的文件` : '关闭有修改的文件'}
-      body="以下文件还有未保存的修改："
-      subject={unsavedNames.join('\n')}
-      consequence="关闭后这些修改会丢失，无法撤销。"
-      confirmLabel="不保存并关闭"
-      onConfirm={handleConfirm}
-    />
+      footer={<>
+        <Button ref={cancelRef} disabled={saving} onClick={() => setPending(null)}>取消</Button>
+        <Button variant="danger-ghost" disabled={saving} onClick={handleConfirm}>不保存并关闭</Button>
+        <Button variant="primary" loading={saving} onClick={() => void handleSave()}>保存并关闭</Button>
+      </>}>
+      <p className="text-sm text-fg-muted">以下文件还有未保存的修改：</p>
+      <p className="mt-2 whitespace-pre-wrap font-mono text-xs text-fg">{unsavedNames.join('\n')}</p>
+    </Dialog>
   )
 }

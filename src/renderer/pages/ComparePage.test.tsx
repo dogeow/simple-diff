@@ -201,7 +201,7 @@ function resetStores(compareTabs: readonly CompareTab[] = []): void {
   })
 
   useLogStore.setState({ logs: [], visible: false })
-  useUIStore.setState({ overlay: null, treeSelection: EMPTY_TREE_SELECTION })
+  useUIStore.setState({ overlay: null, pendingSync: null, treeSelection: EMPTY_TREE_SELECTION })
   useSettingsStore.setState({ globalPathFilters: [] })
   useSSHStore.setState({ configs: [], loading: false, loadConfigs: async () => undefined })
 }
@@ -506,7 +506,10 @@ describe('ComparePage renderer interactions', () => {
     expect(contextCopyButton.disabled).toBe(false)
 
     await user.click(contextCopyButton)
+    expect(api.startSync).not.toHaveBeenCalled()
+    await user.click(screen.getByRole('button', { name: '确认并同步' }))
     await user.click(selectionCopyButton)
+    await user.click(screen.getByRole('button', { name: '确认并同步' }))
 
     await waitFor(() => {
       expect(api.startSync).toHaveBeenCalledTimes(2)
@@ -533,6 +536,7 @@ describe('ComparePage renderer interactions', () => {
     expect(selectionCopyButton.disabled).toBe(false)
 
     await user.click(selectionCopyButton)
+    await user.click(screen.getByRole('button', { name: '确认并同步' }))
 
     await waitFor(() => {
       expect(api.startSync).toHaveBeenCalledTimes(1)

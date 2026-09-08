@@ -10,6 +10,7 @@
  * 比直接用文件对象要绕，而且在浏览器预览态（mock 运行时）根本无法工作。
  */
 export async function readFileAsText(file: File): Promise<string> {
+  if (file.size > 32 * 1024 * 1024) throw new Error('文本预览仅支持 32 MB 以内的文件；大文件仍可进行目录对比和同步。')
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
     reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : '')

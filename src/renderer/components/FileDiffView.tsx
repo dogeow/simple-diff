@@ -1,11 +1,14 @@
+import { useUIStore } from '../stores/ui-store'
+import FileDiffSearch from './file-diff/FileDiffSearch'
 import { RefreshCw } from 'lucide-react'
 import { useCallback, useEffect, useMemo } from 'react'
 import type { DiffTab } from '../stores/app-store'
 import { useAppStore } from '../stores/app-store'
-import { computeTextDiff } from '../../../shared/text-diff'
+import { changeFileDraft, recomputeFileDraft } from '../utils/file-draft'
+import { confirmUnsavedChanges, isDiffTabDirty } from '../utils/unsaved-changes'
 import { showToast } from '../stores/toast-store'
 import { applyDiffRange, groupIntoHunks } from './file-diff-utils'
-import { buildHunkMetrics, getVisibleHunkWindow } from './file-diff-window'
+import { buildHunkMetrics, getVisibleLineWindow } from './file-diff-window'
 import { loadDiffTabContents } from '../utils/diff-tab-loader'
 import { buildInlineSegments } from '../utils/inline-diff'
 import { saveDiffTabSide } from '../utils/command-actions'
@@ -22,6 +25,7 @@ interface FileDiffViewProps {
 const DIFF_OVERSCAN_ROWS = 16
 
 export default function FileDiffView({ tab }: FileDiffViewProps) {
+  const searchOpen = useUIStore((state) => state.fileSearchOpen)
   const updateDiffTab = useAppStore((state) => state.updateDiffTab)
   const hasDiffTabSession = useAppStore((state) => state.hasDiffTabSession)
   const {
@@ -38,18 +42,13 @@ export default function FileDiffView({ tab }: FileDiffViewProps) {
       : [],
     [tab.diffResult],
   )
-  const inlineSegments = useMemo(
-    () => tab.diffResult
-      ? buildInlineSegments(tab.diffResult.leftLines, tab.diffResult.rightLines)
-      : null,
-    [tab.diffResult],
-  )
   const hunkMetrics = useMemo(
     () => buildHunkMetrics(hunks, DIFF_ROW_HEIGHT),
     [hunks],
   )
   const visibleHunkWindow = useMemo(
-    () => getVisibleHunkWindow({
+    () => getVisibleLineWindow({
+      rowHeight: DIFF_ROW_HEIGHT,
       metrics: hunkMetrics,
       scrollTop,
       viewportHeight,
@@ -57,10 +56,12 @@ export default function FileDiffView({ tab }: FileDiffViewProps) {
     }),
     [hunkMetrics, scrollTop, viewportHeight],
   )
-  const visibleHunkMetrics = useMemo(
-    () => hunkMetrics.slice(visibleHunkWindow.startIndex, visibleHunkWindow.endIndex),
-    [hunkMetrics, visibleHunkWindow.endIndex, visibleHunkWindow.startIndex],
-  )
+  const visibleHunkMetrics = visibleHunkWindow.metrics
+  const inlineSegments = useMemo(() => tab.diffResult && visibleHunkMetrics.length
+    ? buildInlineSegments(tab.diffResult.leftLines, tab.diffResult.rightLines, {
+      startIndex: visibleHunkMetrics[0].renderStartIndex,
+      endIndex: visibleHunkMetrics[visibleHunkMetrics.length - 1].renderEndIndex,
+    }) : null, [tab.diffResult, visibleHunkMetrics])
   const totalDiffHeight = useMemo(
     () => hunkMetrics.length > 0
       ? hunkMetrics[hunkMetrics.length - 1].top + hunkMetrics[hunkMetrics.length - 1].height
@@ -138,7 +139,7 @@ export default function FileDiffView({ tab }: FileDiffViewProps) {
         .diffTabs
         .find((candidate) => candidate.id === tab.id && candidate.sessionId === tab.sessionId)
 
-      if (!latestTab?.diffResult) return
+      if (!latestTab?.diffResult || latestTab.computing) return
 
       const { leftLines, rightLines } = latestTab.diffResult
       const sourceLines = direction === 'left-to-right' ? leftLines : rightLines
@@ -159,14 +160,34 @@ export default function FileDiffView({ tab }: FileDiffViewProps) {
         ? nextTargetContent
         : latestTab.rightContent
 
-      updateDiffTab(tab.id, {
-        leftContent,
-        rightContent,
-        diffResult: computeTextDiff(leftContent, rightContent),
-      })
+      changeFileDraft(latestTab, { leftContent, rightContent })
     },
     [tab.id, tab.sessionId, updateDiffTab],
   )
+
+  const undo = useCallback(() => {
+    const current = useAppStore.getState().diffTabs.find((item) => item.sessionId === tab.sessionId)
+    const previous = current?.undoStack?.at(-1)
+    if (current && previous && !current.computing) changeFileDraft(current, previous, 'undo')
+  }, [tab.sessionId])
+  const redo = useCallback(() => {
+    const current = useAppStore.getState().diffTabs.find((item) => item.sessionId === tab.sessionId)
+    const next = current?.redoStack?.at(-1)
+    if (current && next && !current.computing) changeFileDraft(current, next, 'redo')
+  }, [tab.sessionId])
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const ui = useUIStore.getState()
+      if (isTypingTarget(event.target) || ui.overlay || ui.pendingUnsavedChanges || ui.pendingDiffTabClose) return
+      if ((event.metaKey || event.ctrlKey) && !event.altKey && event.key.toLowerCase() === 'z') {
+        event.preventDefault()
+        if (event.shiftKey) redo(); else undo()
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [undo, redo])
 
   const handleSave = useCallback(
     (side: 'left' | 'right') => saveDiffTabSide(tab, side),
@@ -174,6 +195,7 @@ export default function FileDiffView({ tab }: FileDiffViewProps) {
   )
 
   const handleReload = useCallback(async () => {
+    if (isDiffTabDirty(tab) && !await confirmUnsavedChanges([tab])) return
     updateDiffTab(tab.id, {
       loading: true,
       loadError: null,
@@ -209,6 +231,14 @@ export default function FileDiffView({ tab }: FileDiffViewProps) {
     }
   }, [hasDiffTabSession, tab, updateDiffTab])
 
+  useEffect(() => {
+    if (tab.loading) return
+    if (tab.computing || (!tab.diffResult && !tab.loadError && (tab.contentsLoaded || tab.leftContent || tab.rightContent || isDiffTabDirty(tab)))) void recomputeFileDraft(tab)
+    else if (!tab.diffResult && !tab.loadError) void handleReload()
+    // Restoration happens once for this document session. Edits schedule their own worker jobs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab.sessionId])
+
   if (tab.loading) {
     return (
       <div className="flex h-full items-center justify-center gap-2 text-sm text-fg-muted">
@@ -219,6 +249,7 @@ export default function FileDiffView({ tab }: FileDiffViewProps) {
   }
 
   if (!tab.diffResult) {
+    if (tab.computing) return <div className="flex h-full items-center justify-center gap-2 text-sm text-fg-muted"><Spinner size="sm" />计算差异中…</div>
     if (tab.loadError) {
       return (
         <div role="alert" className="flex h-full items-center justify-center px-6">
@@ -256,8 +287,23 @@ export default function FileDiffView({ tab }: FileDiffViewProps) {
         hasRightSource={tab.rightSource !== null}
         onNavigate={scrollToDiff}
         onSave={handleSave}
+        computing={tab.computing}
+        savingLeft={tab.savingLeft}
+        savingRight={tab.savingRight}
+        canUndo={Boolean(tab.undoStack?.length)}
+        canRedo={Boolean(tab.redoStack?.length)}
+        onUndo={undo}
+        onRedo={redo}
+        onReload={() => void handleReload()}
+        onSearch={() => useUIStore.getState().setFileSearchOpen(true)}
       />
 
+      {searchOpen ? <FileDiffSearch result={tab.diffResult}
+        onClose={() => useUIStore.getState().setFileSearchOpen(false)}
+        onNavigate={(row) => {
+          leftRef.current?.scrollTo({ top: row * DIFF_ROW_HEIGHT })
+          rightRef.current?.scrollTo({ top: row * DIFF_ROW_HEIGHT })
+        }} /> : null}
       <SplitPane
         className="min-h-0 flex-1"
         storageKey="file-diff-split"
@@ -276,6 +322,7 @@ export default function FileDiffView({ tab }: FileDiffViewProps) {
           segmentMap={inlineSegments?.left}
           markers={diffMarkers}
           onScroll={() => handleScroll('left')}
+          disabled={tab.computing}
           onApplyRange={(range) => handleApplyRange(range, 'left-to-right')}
         />
         <FileDiffPane
@@ -289,6 +336,7 @@ export default function FileDiffView({ tab }: FileDiffViewProps) {
           bottomSpacerHeight={visibleHunkWindow.bottomSpacerHeight}
           segmentMap={inlineSegments?.right}
           onScroll={() => handleScroll('right')}
+          disabled={tab.computing}
           onApplyRange={(range) => handleApplyRange(range, 'right-to-left')}
         />
       </SplitPane>

@@ -11,6 +11,7 @@ export interface InlineSegmentMaps {
 }
 
 const MAX_LINE_LENGTH = 4000
+const MAX_LCS_CELLS = 250_000
 
 function pushChar(segs: InlineSegment[], char: string, emphasis: boolean): void {
   const last = segs[segs.length - 1]
@@ -24,6 +25,7 @@ function pushChar(segs: InlineSegment[], char: string, emphasis: boolean): void 
 export function computeInlineDiff(
   left: string,
   right: string,
+  maxCells = MAX_LCS_CELLS,
 ): { readonly left: readonly InlineSegment[]; readonly right: readonly InlineSegment[] } {
   if (left.length > MAX_LINE_LENGTH || right.length > MAX_LINE_LENGTH) {
     return {
@@ -37,7 +39,20 @@ export function computeInlineDiff(
   const m = a.length
   const n = b.length
 
-  const dp: number[][] = Array.from({ length: m + 1 }, () => new Array<number>(n + 1).fill(0))
+  // Preserve shared edges even when a very long changed middle exceeds the budget.
+  if (m * n > maxCells) {
+    let prefix = 0
+    while (prefix < m && prefix < n && a[prefix] === b[prefix]) prefix++
+    let suffix = 0
+    while (suffix < m - prefix && suffix < n - prefix && a[m - suffix - 1] === b[n - suffix - 1]) suffix++
+    const segments = (chars: string[]): InlineSegment[] => [
+      { text: chars.slice(0, prefix).join(''), emphasis: false },
+      { text: chars.slice(prefix, chars.length - suffix).join(''), emphasis: true },
+      { text: chars.slice(chars.length - suffix).join(''), emphasis: false },
+    ].filter((segment) => segment.text.length > 0)
+    return { left: segments(a), right: segments(b) }
+  }
+  const dp = Array.from({ length: m + 1 }, () => new Uint16Array(n + 1))
   for (let i = 1; i <= m; i++) {
     for (let j = 1; j <= n; j++) {
       if (a[i - 1] === b[j - 1]) {
@@ -90,13 +105,16 @@ export function computeInlineDiff(
 export function buildInlineSegments(
   leftLines: readonly DiffLine[],
   rightLines: readonly DiffLine[],
+  range: { startIndex: number; endIndex: number } = { startIndex: 0, endIndex: leftLines.length },
 ): InlineSegmentMaps {
   const len = Math.min(leftLines.length, rightLines.length)
   const leftMap = new Map<number, readonly InlineSegment[]>()
   const rightMap = new Map<number, readonly InlineSegment[]>()
 
-  let i = 0
-  while (i < len) {
+  let remainingCells = 2_000_000
+  let i = Math.min(range.startIndex, len)
+  while (i > 0 && !(leftLines[i - 1].type === 'equal' && rightLines[i - 1].type === 'equal')) i--
+  while (i < len && i < range.endIndex) {
     const removes: number[] = []
     const adds: number[] = []
 
@@ -117,7 +135,11 @@ export function buildInlineSegments(
     for (let k = 0; k < pairCount; k++) {
       const lIdx = removes[k]
       const rIdx = adds[k]
-      const inline = computeInlineDiff(leftLines[lIdx].content, rightLines[rIdx].content)
+      if ((lIdx < range.startIndex || lIdx >= range.endIndex) && (rIdx < range.startIndex || rIdx >= range.endIndex)) continue
+      const cells = leftLines[lIdx].content.length * rightLines[rIdx].content.length
+      const budget = Math.min(MAX_LCS_CELLS, remainingCells)
+      const inline = computeInlineDiff(leftLines[lIdx].content, rightLines[rIdx].content, budget)
+      if (cells <= budget) remainingCells -= cells
       leftMap.set(lIdx, inline.left)
       rightMap.set(rIdx, inline.right)
     }

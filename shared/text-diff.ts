@@ -149,48 +149,32 @@ function findPatienceAnchors(
   return longestIncreasingSubsequence(candidates)
 }
 
-/**
- * DP-based LIS by `right` index over candidates pre-sorted by `left` index.
- *
- * O(n^2) — chosen over O(n log n) patience sort because we need a stable
- * tie-break: when multiple chains have equal max length, prefer the one whose
- * earliest element has the smallest `left` index. The patience-sort variant
- * aggressively replaces tails and can drop such earlier anchors.
- */
+/** Fenwick prefix maxima preserve the old earliest-predecessor tie break in O(n log n). */
 function longestIncreasingSubsequence(candidates: readonly Anchor[]): readonly Anchor[] {
   if (candidates.length === 0) return []
-
-  const lengths: number[] = new Array(candidates.length).fill(1)
-  const predecessors: number[] = new Array(candidates.length).fill(-1)
-
-  for (let i = 1; i < candidates.length; i++) {
-    for (let j = 0; j < i; j++) {
-      if (candidates[j].right < candidates[i].right && lengths[j] + 1 > lengths[i]) {
-        lengths[i] = lengths[j] + 1
-        predecessors[i] = j
-      }
-    }
+  const sorted = candidates.map((anchor) => anchor.right).sort((a, b) => a - b)
+  const ranks = new Map(sorted.map((right, index) => [right, index + 1]))
+  const tree = new Int32Array(candidates.length + 1).fill(-1)
+  const lengths = new Uint32Array(candidates.length)
+  const predecessors = new Int32Array(candidates.length).fill(-1)
+  const better = (a: number, b: number): number => {
+    if (a < 0) return b
+    if (b < 0) return a
+    return lengths[a] > lengths[b] || (lengths[a] === lengths[b] && a < b) ? a : b
   }
-
-  // Pick the chain with max length; on ties, `<` keeps the earliest-left tip
-  // (candidates are sorted by left, so earliest `i` wins).
-  let maxLen = 0
-  let maxIdx = -1
+  let best = -1
   for (let i = 0; i < candidates.length; i++) {
-    if (lengths[i] > maxLen) {
-      maxLen = lengths[i]
-      maxIdx = i
-    }
+    const rank = ranks.get(candidates[i].right)!
+    let previous = -1
+    for (let j = rank - 1; j > 0; j -= j & -j) previous = better(previous, tree[j])
+    predecessors[i] = previous
+    lengths[i] = previous < 0 ? 1 : lengths[previous] + 1
+    for (let j = rank; j < tree.length; j += j & -j) tree[j] = better(tree[j], i)
+    best = better(best, i)
   }
-
   const result: Anchor[] = []
-  let k = maxIdx
-  while (k >= 0) {
-    result.unshift(candidates[k])
-    k = predecessors[k]
-  }
-
-  return result
+  for (let i = best; i >= 0; i = predecessors[i]) result.push(candidates[i])
+  return result.reverse()
 }
 
 function charLcsLength(left: string, right: string): number {
@@ -217,10 +201,10 @@ function charLcsLength(left: string, right: string): number {
   return prev[n]
 }
 
-function lineSimilarity(left: string, right: string): number {
+function lineSimilarity(left: string, right: string, exact = true): number {
   if (left === right) return 1
   if (left.length === 0 || right.length === 0) return 0
-  if (left.length > MAX_SIMILARITY_CHARS || right.length > MAX_SIMILARITY_CHARS) {
+  if (!exact || left.length > MAX_SIMILARITY_CHARS || right.length > MAX_SIMILARITY_CHARS) {
     const min = Math.min(left.length, right.length)
     const max = Math.max(left.length, right.length)
     let shared = 0
@@ -292,12 +276,17 @@ function findSimilarityPairs(
 
   const pairs: Anchor[] = []
   let minRightPos = 0
+  let cellBudget = 4_000_000
 
   for (const leftIdx of leftIndices) {
     let bestScore = SIMILARITY_THRESHOLD
     let bestRightPos = -1
-    for (let p = minRightPos; p < rightIndices.length; p++) {
-      const score = lineSimilarity(leftSrc[leftIdx], rightSrc[rightIndices[p]])
+    const end = leftIndices.length * rightIndices.length > 10_000 ? Math.min(rightIndices.length, minRightPos + 64) : rightIndices.length
+    for (let p = minRightPos; p < end; p++) {
+      const cells = leftSrc[leftIdx].length * rightSrc[rightIndices[p]].length
+      const exact = cells <= cellBudget
+      if (exact) cellBudget -= cells
+      const score = lineSimilarity(leftSrc[leftIdx], rightSrc[rightIndices[p]], exact)
       if (score >= bestScore) {
         // Take the highest score; on ties keep the earliest right index.
         if (bestRightPos < 0 || score > bestScore) {

@@ -56,7 +56,7 @@ function PathHeader({
     setPathInput(sourcePath)
   }, [sourcePath])
 
-  const handlePathSubmit = useCallback(() => {
+  const handlePathSubmit = useCallback(async () => {
     const trimmed = pathInput.trim()
     if (!trimmed) {
       setPathInput(sourcePath)
@@ -64,7 +64,9 @@ function PathHeader({
     }
 
     if (trimmed !== sourcePath) {
-      void onSourcePathSubmit?.(side, trimmed)
+      await onSourcePathSubmit?.(side, trimmed)
+      const current = useCompareStore.getState()
+      setPathInput(side === 'left' ? current.leftPath : current.rightPath)
     }
   }, [onSourcePathSubmit, pathInput, sourcePath, side])
 
@@ -143,7 +145,7 @@ function SideTable({
   const renderedNodes = visibleNodes.slice(startIndex, endIndex)
 
   return (
-    <div aria-busy={scanning || undefined}>
+    <div className="compare-side-table" aria-busy={scanning || undefined}>
       <div className="sticky top-0 z-sticky flex h-row-tree items-center gap-1.5 border-b border-border bg-surface-2 pr-1 pl-2 text-2xs font-medium tracking-wider text-fg-muted uppercase">
         <span className="min-w-0 flex-1 truncate">名称</span>
         <span className={cn('flex items-center', META_GAP)}>

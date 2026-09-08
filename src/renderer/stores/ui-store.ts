@@ -1,6 +1,13 @@
+import type { StartSyncRequest } from '../../../shared/types'
 import { create } from 'zustand'
 import type { StatusTone } from '../components/ui'
 import type { CompareSelectionState } from '../utils/compare-selection'
+import type { DiffTab } from './app-store'
+
+export interface UnsavedChangesRequest {
+  readonly tabs: readonly DiffTab[]
+  readonly resolve: (proceed: boolean) => void
+}
 
 /**
  * 壳层叠加层。设计蓝图 §2.2：被降级的目的地都落在应用菜单 `⋯`、状态栏或命令面板里，
@@ -31,6 +38,7 @@ interface UIStore {
    * 所以这个状态不能藏在 `CompareToolbar` 的局部 state 里——工具栏在打开文件 Diff
    * 时根本不渲染。
    */
+  readonly fileSearchOpen: boolean
   readonly filterPopoverOpen: boolean
   /** 目录树选择态。两个树视图（分栏 / 合并）共用，状态栏据此渲染“已选 n 项”。 */
   readonly treeSelection: CompareSelectionState
@@ -42,6 +50,8 @@ interface UIStore {
    * 否则总有一条路会绕过它（旧代码走的是 `window.confirm`，§7.5 明令禁止）。
    */
   readonly pendingDiffTabClose: readonly string[] | null
+  readonly pendingSync: { request: StartSyncRequest; resolve: (proceed: boolean) => void } | null
+  readonly pendingUnsavedChanges: UnsavedChangesRequest | null
   /**
    * 当前视图想说的那一句话，渲染在状态栏的任务槽里（蓝图 §4.5：手动对齐提示
    * 「移到状态栏，作为任务槽的标签，出错时用 warning 色」，而不是工具栏里的行内胶囊）。
@@ -54,8 +64,11 @@ interface UIStore {
   openOverlay: (overlay: OverlayKind) => void
   closeOverlay: () => void
   toggleOverlay: (overlay: OverlayKind) => void
+  setFileSearchOpen: (open: boolean) => void
   setFilterPopoverOpen: (open: boolean) => void
   setPendingDiffTabClose: (ids: readonly string[] | null) => void
+  setPendingSync: (pending: UIStore['pendingSync']) => void
+  setPendingUnsavedChanges: (request: UnsavedChangesRequest | null) => void
   setStatusHint: (hint: StatusHint | null) => void
   setTreeSelection: (
     updater: CompareSelectionState | ((current: CompareSelectionState) => CompareSelectionState),
@@ -70,9 +83,12 @@ export const EMPTY_TREE_SELECTION: CompareSelectionState = {
 
 export const useUIStore = create<UIStore>()((set, get) => ({
   overlay: null,
+  fileSearchOpen: false,
   filterPopoverOpen: false,
   treeSelection: EMPTY_TREE_SELECTION,
   pendingDiffTabClose: null,
+  pendingSync: null,
+  pendingUnsavedChanges: null,
   statusHint: null,
 
   openOverlay: (overlay) => set({ overlay }),
@@ -81,9 +97,13 @@ export const useUIStore = create<UIStore>()((set, get) => ({
 
   toggleOverlay: (overlay) => set({ overlay: get().overlay === overlay ? null : overlay }),
 
+  setFileSearchOpen: (fileSearchOpen) => set({ fileSearchOpen }),
+
   setFilterPopoverOpen: (filterPopoverOpen) => set({ filterPopoverOpen }),
 
   setPendingDiffTabClose: (pendingDiffTabClose) => set({ pendingDiffTabClose }),
+  setPendingSync: (pendingSync) => set({ pendingSync }),
+  setPendingUnsavedChanges: (pendingUnsavedChanges) => set({ pendingUnsavedChanges }),
 
   setStatusHint: (statusHint) => set({ statusHint }),
 

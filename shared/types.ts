@@ -164,10 +164,13 @@ export interface SyncTaskSnapshot {
   readonly totalItems: number
   readonly completedItems: number
   readonly currentPath: string | null
+  readonly currentBytes?: number
+  readonly currentTotalBytes?: number
   readonly lastCompletedPath: string | null
   readonly lastError: string | null
   readonly createdAt: number
   readonly updatedAt: number
+  readonly itemsDelta?: boolean
   readonly items?: readonly SyncTaskItemSnapshot[]
 }
 

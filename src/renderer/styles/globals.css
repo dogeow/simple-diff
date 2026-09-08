@@ -21,3 +21,12 @@
   --ds-diff-del-bg: color-mix(in srgb, var(--ds-diff-del-cvd) 13%, transparent);
   --ds-diff-del-bg-strong: color-mix(in srgb, var(--ds-diff-del-cvd) 26%, transparent);
 }
+
+/* Each resizable pane owns its metadata breakpoint, including asymmetric splits. */
+.compare-side-table { container-type: inline-size; }
+@container (max-width: 520px) {
+  .compare-side-table .tree-time-column { display: none; }
+}
+@container (max-width: 330px) {
+  .compare-side-table .tree-size-column { display: none; }
+}

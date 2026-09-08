@@ -52,8 +52,10 @@ async function readTextWithRetry(
 export async function loadDiffTabContents(input: LoadDiffTabContentsInput): Promise<DiffTabLoadResult> {
   const loadErrors: string[] = []
 
-  const leftResult = await readTextWithRetry('左侧', input.leftSource, input.leftFullPath, input.readLeft)
-  const rightResult = await readTextWithRetry('右侧', input.rightSource, input.rightFullPath, input.readRight)
+  const [leftResult, rightResult] = await Promise.all([
+    readTextWithRetry('左侧', input.leftSource, input.leftFullPath, input.readLeft),
+    readTextWithRetry('右侧', input.rightSource, input.rightFullPath, input.readRight),
+  ])
 
   if (leftResult.error) {
     loadErrors.push(leftResult.error)

@@ -252,7 +252,7 @@ describe('app-store', () => {
           originalRightContent: 'beta',
           diffResult: { leftLines: [], rightLines: [] },
         }),
-        createDiffTab({ id: 'background.txt', leftContent: 'gamma', rightContent: 'delta' }),
+        createDiffTab({ id: 'background.txt', leftContent: 'gamma', rightContent: 'delta', originalLeftContent: 'gamma', originalRightContent: 'delta' }),
       ],
       activeDiffTabId: 'active.txt',
     })
@@ -263,13 +263,14 @@ describe('app-store', () => {
 
     expect(active?.leftContent).toBe('alpha')
     expect(active?.originalRightContent).toBe('beta')
-    expect(active?.diffResult).not.toBeNull()
+    expect(active?.diffResult).toBeNull()
+    expect(active?.contentsLoaded).toBe(true)
     // 非活动的 diff 标签仍然清空，激活时再按需读盘。
     expect(background?.leftContent).toBe('')
     expect(background?.rightContent).toBe('')
   })
 
-  it('blanks every diff tab of an inactive compare tab', () => {
+  it('blanks clean diff tabs of an inactive compare tab', () => {
     const persisted = createPersistedAppState({
       page: 'compare',
       activeCompareTabId: 'compare-tab-2',
@@ -277,7 +278,7 @@ describe('app-store', () => {
         id: 'compare-tab-1',
         title: 'inactive',
         snapshot: createCompareSnapshot(),
-        diffTabs: [createDiffTab({ id: 'stale.txt', leftContent: 'alpha' })],
+        diffTabs: [createDiffTab({ id: 'stale.txt', leftContent: 'alpha', originalLeftContent: 'alpha' })],
         activeDiffTabId: 'stale.txt',
       }],
       diffTabs: [],

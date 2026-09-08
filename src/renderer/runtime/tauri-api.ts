@@ -1,8 +1,9 @@
 import { invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { getCurrentWebview } from '@tauri-apps/api/webview'
+import { getCurrentWindow } from '@tauri-apps/api/window'
 import type { AppAPI } from '@shared/app-api'
-import { computeTextDiff } from '@shared/text-diff'
+import { computeTextDiffAsync } from './text-diff-client'
 import type {
   CompareEntry,
   CompareHistoryEntry,
@@ -18,7 +19,6 @@ import type {
   SSHConfigInput,
   StartSyncRequest,
   SyncTaskSnapshot,
-  TextDiffResult,
 } from '@shared/types'
 
 async function wrap<T>(fn: () => Promise<IpcResult<T>>): Promise<IpcResult<T>> {
@@ -110,8 +110,8 @@ export const tauriApi: AppAPI = {
   readText: (source, filePath) =>
     wrap(() => invoke<IpcResult<string>>('read_text_file', { source, filePath })),
 
-  writeText: (source, filePath, content) =>
-    wrap(() => invoke<IpcResult<void>>('write_text_file', { source, filePath, content })),
+  writeText: (source, filePath, content, expectation) =>
+    wrap(() => invoke<IpcResult<void>>('write_text_file', { source, filePath, content, expectedContent: expectation?.content, expectedExists: expectation?.exists })),
 
   runCompare: (request: CompareRequest) =>
     wrap(() => invoke<IpcResult<CompareResult>>('run_compare', { request })),
@@ -172,10 +172,17 @@ export const tauriApi: AppAPI = {
     void invoke('write_log', { entry })
   },
 
-  textDiff: async (leftText, rightText): Promise<IpcResult<TextDiffResult>> => ({
-    success: true,
-    data: computeTextDiff(leftText, rightText),
-  }),
+  textDiff: computeTextDiffAsync,
+
+  onWindowCloseRequested: (callback) => {
+    let disposed = false
+    let unlisten: UnlistenFn | undefined
+    void getCurrentWindow().onCloseRequested(async (event) => {
+      if (!await callback()) event.preventDefault()
+    }).then((cleanup) => { if (disposed) cleanup(); else unlisten = cleanup })
+      .catch((error: unknown) => console.error('窗口关闭保护注册失败', error))
+    return () => { disposed = true; unlisten?.() }
+  },
 
   listSSHConfigs: () =>
     wrap(() => invoke<IpcResult<readonly SSHConfig[]>>('ssh_list_configs')),

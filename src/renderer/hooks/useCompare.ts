@@ -1,3 +1,5 @@
+import { confirmUnsavedChanges, isDiffTabDirty } from '../utils/unsaved-changes'
+import { useUIStore } from '../stores/ui-store'
 import { useCallback } from 'react'
 import { mergePathFilters } from '@shared/path-filter'
 import {
@@ -19,6 +21,8 @@ import { flushBufferedCompareEvents } from '../utils/compare-events'
 import { formatCompareTabTitleFromSources } from '../utils/source-label'
 import { getDirtyRecompareRoots, minimizeSyncRecompareRoots } from '../utils/sync-dirty'
 import { formatRendererMemoryUsage } from '../utils/renderer-memory'
+
+let startSequence = 0
 
 function buildSourceConfig(type: 'local' | 'sftp', path: string, sshConfigId: string): SourceConfig {
   if (type === 'sftp') {
@@ -296,6 +300,11 @@ async function runPartialCompareForRoots(relativeRoots: readonly string[]): Prom
     relativeRoots: effectiveRelativeRoots,
   })
 
+  if (useAppStore.getState().activeCompareTabId !== activeCompareTabId
+    || useCompareStore.getState().compareSessionId !== compareState.compareSessionId) {
+    // Keep the original session dirty; its next rescan will use current inputs.
+    return false
+  }
   if (!response.success || !response.data) {
     const message = formatCompareErrorForUi(response.error ?? '局部重比对失败')
     addRendererLog('compare', 'error', `局部重比对失败 error=${message}`)
@@ -311,6 +320,11 @@ async function runPartialCompareForRoots(relativeRoots: readonly string[]): Prom
 
 export function useCompareActions() {
   const runCompare = useCallback(async (options?: RunCompareOptions) => {
+    const sequence = ++startSequence
+    if (options?.reuseActiveSession && useAppStore.getState().diffTabs.some(isDiffTabDirty)) {
+      const sessionId = useAppStore.getState().activeCompareTabId
+      if (!await confirmUnsavedChanges() || sessionId !== useAppStore.getState().activeCompareTabId) return
+    }
     const compareState = useCompareStore.getState()
     const {
       leftPath: currentLeftPath,
@@ -366,6 +380,8 @@ export function useCompareActions() {
       await window.api.cancelCompare(compareIdToCancel)
     }
 
+    if (sequence !== startSequence || useAppStore.getState().activeCompareTabId !== activeCompareTabId) return
+    useUIStore.getState().clearTreeSelection()
     appStore.replaceDiffTabs([], null)
     appStore.setActiveCompareTab(compareTabId)
 

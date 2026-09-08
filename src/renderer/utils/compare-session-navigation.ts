@@ -144,6 +144,7 @@ export function openCompareTab(compareTabId?: string): boolean {
   // 调用点，命令面板、标签栏、同步抽屉才不会各自漏掉一次。
   persistActiveCompareTab()
 
+  useUIStore.getState().clearTreeSelection()
   useCompareStore.getState().restoreSnapshot(targetCompareTab.snapshot)
   appState.replaceDiffTabs(targetCompareTab.diffTabs, targetCompareTab.activeDiffTabId)
   appState.setActiveCompareTab(targetCompareTab.id)
@@ -196,6 +197,7 @@ export function startNewCompareSession(): void {
   const currentSnapshot = compareState.createLightweightSnapshot()
   persistActiveCompareTab()
 
+  useUIStore.getState().clearTreeSelection()
   appState.replaceDiffTabs([], null)
   compareState.resetCompare()
   useCompareStore.setState({

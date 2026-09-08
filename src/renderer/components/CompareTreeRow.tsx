@@ -41,8 +41,8 @@ export interface CompareTreeRowProps {
 }
 
 /** 数值列的固定宽度，行与表头共用，保证虚拟滚动时列不会跳。 */
-export const SIZE_COLUMN = 'w-16'
-export const TIME_COLUMN = 'w-28'
+export const SIZE_COLUMN = 'w-16 tree-size-column'
+export const TIME_COLUMN = 'w-28 tree-time-column'
 export const STATUS_COLUMN = 'w-14'
 /** 列间距，行与表头共用。 */
 export const META_GAP = 'gap-2'
@@ -118,7 +118,7 @@ function CompareTreeRowImpl({
       className="w-full min-w-0 rounded-xs border border-border-strong bg-canvas px-1 font-mono text-xs text-fg focus:border-accent"
     />
   ) : (
-    <span className="truncate font-mono text-xs">{node.name}</span>
+    <span title={node.relativePath} className="truncate font-mono text-xs">{node.name}</span>
   )
 
   return (
@@ -143,28 +143,24 @@ function CompareTreeRowImpl({
       className={cn(
         'border-b border-border',
         showSpinner && '[&_svg]:animate-spin-slow',
-        !selected && rowBg(entry.state),
+        !selected && !entry.isDirectory && rowBg(entry.state),
       )}
       leading={<DiffGutter kind={diffKindForState(entry.state)} />}
       meta={
         // `TreeRow` 把 `meta` 放进一个行内 `<span>`；这里必须自己开一个 flex 容器，
         // 否则 `MetaCell` 上的固定宽度对行内元素无效，虚拟滚动时列会左右跳。
         <span className={cn('flex items-center', META_GAP)}>
-          {side !== 'right' && (
-            <>
-              <MetaCell className={SIZE_COLUMN}>{left.size}</MetaCell>
-              <MetaCell className={TIME_COLUMN}>{left.time}</MetaCell>
-            </>
-          )}
-          <span className={cn('flex shrink-0 justify-center', STATUS_COLUMN)}>
-            <StatusBadge state={entry.state} dirty={dirty} />
-          </span>
-          {side !== 'left' && (
-            <>
-              <MetaCell className={SIZE_COLUMN}>{right.size}</MetaCell>
-              <MetaCell className={TIME_COLUMN}>{right.time}</MetaCell>
-            </>
-          )}
+          {side === 'merged' ? <>
+            <MetaCell className={SIZE_COLUMN}>{left.size}</MetaCell>
+            <MetaCell className={TIME_COLUMN}>{left.time}</MetaCell>
+            <span className={cn('flex shrink-0 justify-center', STATUS_COLUMN)}><StatusBadge state={entry.state} dirty={dirty} /></span>
+            <MetaCell className={SIZE_COLUMN}>{right.size}</MetaCell>
+            <MetaCell className={TIME_COLUMN}>{right.time}</MetaCell>
+          </> : <>
+            <MetaCell className={SIZE_COLUMN}>{side === 'left' ? left.size : right.size}</MetaCell>
+            <MetaCell className={TIME_COLUMN}>{side === 'left' ? left.time : right.time}</MetaCell>
+            <span className={cn('flex shrink-0 justify-center', STATUS_COLUMN)}><StatusBadge state={entry.state} dirty={dirty} /></span>
+          </>}
         </span>
       }
     />

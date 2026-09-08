@@ -182,7 +182,7 @@ describe('useGlobalShortcuts — 对比作业这一组', () => {
     expect(useUIStore.getState().filterPopoverOpen).toBe(true)
   })
 
-  it('文件 Diff 态下 ⌘F 先回目录树，弹层才有宿主可挂', () => {
+  it('文件 Diff 态下 ⌘F 查找当前文件而保留目录标签状态', () => {
     // 过滤弹层住在 `CompareToolbar` 里，而它在有活动 diff 标签时根本不渲染：
     // 只翻 `filterPopoverOpen` 的话，这一按在用户眼里就是没反应。
     useAppStore.setState({
@@ -211,8 +211,9 @@ describe('useGlobalShortcuts — 对比作业这一组', () => {
 
     fireEvent.keyDown(window, { key: 'f', metaKey: true })
 
-    expect(useAppStore.getState().activeDiffTabId).toBeNull()
-    expect(useUIStore.getState().filterPopoverOpen).toBe(true)
+    expect(useAppStore.getState().activeDiffTabId).toBe('a.txt')
+    expect(useUIStore.getState().fileSearchOpen).toBe(true)
+    expect(useUIStore.getState().filterPopoverOpen).toBe(false)
   })
 
   it('叠加层占据屏幕时不抢 ⌘R / ⌘F / ⌘.', async () => {
@@ -311,10 +312,10 @@ describe('useGlobalShortcuts — 文件 Diff 这一组', () => {
     render(<Host />)
 
     fireEvent.keyDown(window, { key: 's', metaKey: true })
-    await waitFor(() => expect(writeText).toHaveBeenCalledWith(LEFT_SOURCE, '/var/left/src/a.ts', 'changed'))
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(LEFT_SOURCE, '/var/left/src/a.ts', 'changed', { content: 'a', exists: true }))
 
     fireEvent.keyDown(window, { key: 'S', metaKey: true, shiftKey: true })
-    await waitFor(() => expect(writeText).toHaveBeenCalledWith(RIGHT_SOURCE, '/var/right/src/a.ts', 'changed-r'))
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(RIGHT_SOURCE, '/var/right/src/a.ts', 'changed-r', { content: 'b', exists: true }))
   })
 
   it('⌘W 直接关掉干净的标签', () => {
