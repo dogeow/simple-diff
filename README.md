@@ -47,6 +47,8 @@ npm test
 
 ## 验证
 
+macOS 的 SSH 所需 OpenSSL 使用 vendored 静态构建，应用无需依赖 Homebrew 的动态库。签名打包后应检查可执行文件的 `otool -L` 输出，并实际启动 `.app` 验证加载。
+
 ```bash
 npm run type-check
 npm test
